@@ -208,10 +208,9 @@ struct PickCard: View {
                 }
             }
 
-            // Four lines keeps the whole card (and its buttons) on screen; Details has the rest.
             Text(rec.media.plainDescription)
                 .font(.subheadline)
-                .lineLimit(4)
+                .lineLimit(6)
                 .foregroundStyle(.secondary)
 
             aiExplanation
