@@ -249,7 +249,21 @@ if os.environ.get("ANILIST_USER", "") == "twins":
         lists { entries { mediaId status score(format: POINT_100) } }
       }
     }"""
-    status, raw, dt = run(FIND, {"mediaId": 108465, "page": 1})
+    variants = {
+        "nosort": FIND.replace(", sort: [UPDATED_TIME_DESC]", ""),
+        "id_desc": FIND.replace("UPDATED_TIME_DESC", "ID_DESC"),
+        "score_desc": FIND.replace("UPDATED_TIME_DESC", "SCORE_DESC"),
+        "nostatus": FIND.replace("status: COMPLETED, sort: [UPDATED_TIME_DESC]", "sort: [ID_DESC]"),
+    }
+    best = None
+    for vname, q in variants.items():
+        status, raw, dt = run(q, {"mediaId": 108465, "page": 1})
+        d = safe_json(raw, "twins " + vname)
+        items = (((d.get("data") or {}).get("Page") or {}).get("mediaList")) or []
+        note("twins variant " + vname, f"HTTP {status} in {dt:.1f}s rows={len(items)} scored={sum(1 for i in items if (i.get('score') or 0) > 0)} errors={str(d.get('errors'))[:200]} sample={items[:4]}")
+        if items and best is None: best = (q, raw)
+        time.sleep(3)
+    status, raw, dt = (200, best[1], 0) if best else (0, b"{}", 0)
     d = safe_json(raw, "twins find")
     items = (((d.get("data") or {}).get("Page") or {}).get("mediaList")) or []
     scored = [i for i in items if (i.get("score") or 0) > 0]
