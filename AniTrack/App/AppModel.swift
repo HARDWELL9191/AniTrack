@@ -118,6 +118,12 @@ final class AppModel {
         viewer = nil
         entries = []
         feeds = [:]
+        notForMeSync?.cancel()
+        notForMeSync = nil
+        notForMeEntries = [:]
+        pendingNotForMe = []
+        notForMeListReady = false
+        notForMeLoadedFor = nil
         DiskCache.clearAll()
     }
 
@@ -162,14 +168,21 @@ final class AppModel {
                                             as: CollectionData.self)
             var seen = Set<Int>()
             var result: [ListEntry] = []
+            var notForMe: [Int: Int] = [:]   // mediaId → entry id
+            for group in data.collection?.lists ?? [] where group.isCustomList == true && group.name == Self.notForMeList {
+                for entry in group.entries ?? [] { notForMe[entry.mediaId] = entry.id }
+            }
             for group in data.collection?.lists ?? [] where group.isCustomList != true {
                 for entry in group.entries ?? [] where !seen.contains(entry.id) {
                     seen.insert(entry.id)
                     result.append(entry)
                 }
             }
+            // A "Not for me" entry should never appear in your lists or shape your taste.
+            if !notForMe.isEmpty { result.removeAll { notForMe[$0.mediaId] == $0.id } }
             entries = result
             DiskCache.saveInBackground(result, name: cacheName("list"))
+            if case .loggedIn = mode { mergeNotForMe(remote: notForMe) }
         } catch {
             if entries.isEmpty && !Self.isCancellation(error) { errorMessage = error.localizedDescription }
         }
@@ -231,7 +244,21 @@ final class AppModel {
         var vars: [String: Any] = ["mediaId": media.id, "status": status.rawValue]
         if let progress { vars["progress"] = max(0, progress) }
         if let scoreRaw { vars["scoreRaw"] = min(100, max(0, scoreRaw)) }
+        ensureNotForMeLoaded()
+        let wasNotForMe = notForMeEntries[media.id] != nil
+        if wasNotForMe {
+            // Same AniList entry: turn it back into a normal, visible one.
+            vars["private"] = false
+            vars["hiddenFromStatusLists"] = false
+            vars["customLists"] = [String]()
+        }
         let saved = try await client.run(Queries.saveEntry, variables: vars, as: SaveEntryData.self).entry
+        if wasNotForMe || settings.dismissedPicks.contains(media.id) {
+            notForMeEntries[media.id] = nil
+            pendingNotForMe.remove(media.id)
+            settings.dismissedPicks.remove(media.id)
+            saveNotForMeState()
+        }
 
         if let index = entries.firstIndex(where: { $0.mediaId == media.id }) {
             // Edit a copy and assign once: one taste/match recalculation instead of four.
@@ -527,6 +554,12 @@ final class AppModel {
 
     func dismissPick(_ mediaId: Int) {
         settings.dismissedPicks.insert(mediaId)
+        ensureNotForMeLoaded()
+        if case .loggedIn = mode, notForMeEntries[mediaId] == nil {
+            pendingNotForMe.insert(mediaId)
+            saveNotForMeState()
+            syncNotForMe()
+        }
         for key in feeds.keys {
             feeds[key]?.remove(mediaId)
         }
@@ -540,8 +573,155 @@ final class AppModel {
     }
 
     func resetDismissedPicks() {
+        ensureNotForMeLoaded()
+        let toDelete = Array(notForMeEntries)
         settings.dismissedPicks = []
+        pendingNotForMe = []
+        saveNotForMeState()
         invalidatePicks()
+        guard case .loggedIn = mode, !toDelete.isEmpty else {
+            notForMeEntries = [:]
+            saveNotForMeState()
+            return
+        }
+        isResettingNotForMe = true
+        Task {
+            defer { isResettingNotForMe = false }
+            for (index, item) in toDelete.enumerated() {
+                if index > 0 { try? await Task.sleep(nanoseconds: Self.writeSpacing) }
+                do {
+                    _ = try await client.run(Queries.deleteEntry, variables: ["id": item.value], as: DeleteEntryData.self)
+                    notForMeEntries[item.key] = nil
+                } catch {
+                    // Couldn't reach AniList: what's left stays synced and shows up again; retry later.
+                    settings.dismissedPicks.formUnion(notForMeEntries.keys)
+                    errorMessage = "Couldn't reset all \"Not for me\" shows on AniList. Try again later."
+                    break
+                }
+            }
+            saveNotForMeState()
+        }
+    }
+
+    // MARK: - "Not for me", synced through AniList
+    //
+    // Each dismissed show becomes a private AniList entry (visible only to you, never on your
+    // followers' feed), hidden from your status lists, in a custom list named "Not for me".
+    // The app reads that list back on every refresh, so it survives reinstalls and works across
+    // devices. In read-only username mode it stays on this iPhone.
+
+    static let notForMeList = "Not for me"
+    /// AniList is currently strict about request rates: space writes ~2s apart.
+    private static let writeSpacing: UInt64 = 2_100_000_000
+
+    /// mediaId → AniList entry id of synced "Not for me" shows.
+    @ObservationIgnored private var notForMeEntries: [Int: Int] = [:]
+    /// Dismissed here but not uploaded yet (offline, or just tapped).
+    @ObservationIgnored private var pendingNotForMe: Set<Int> = []
+    @ObservationIgnored private var notForMeSync: Task<Void, Never>?
+    private(set) var isResettingNotForMe = false
+
+    /// Whether AniList's own record for this show is just a "Not for me" marker.
+    func isNotForMeEntry(_ lite: EntryLite?) -> Bool {
+        guard let lite else { return false }
+        return notForMeEntries[lite.mediaId] == lite.id
+    }
+
+    private var notForMeKey: String { "notForMe-\(viewer?.id ?? 0)" }
+
+    @ObservationIgnored private var notForMeLoadedFor: Int?
+
+    /// Loads this account's saved sync state once (before anything reads or writes it).
+    private func ensureNotForMeLoaded() {
+        guard let id = viewer?.id, notForMeLoadedFor != id else { return }
+        notForMeLoadedFor = id
+        loadNotForMeState()
+    }
+
+    private func loadNotForMeState() {
+        let stored = defaults.dictionary(forKey: notForMeKey + "-entries") as? [String: Int] ?? [:]
+        notForMeEntries = Dictionary(stored.compactMap { k, v in Int(k).map { ($0, v) } }, uniquingKeysWith: { a, _ in a })
+        pendingNotForMe = Set(defaults.array(forKey: notForMeKey + "-pending") as? [Int] ?? [])
+    }
+
+    private func saveNotForMeState() {
+        guard viewer != nil, notForMeLoadedFor == viewer?.id else { return }
+        defaults.set(Dictionary(uniqueKeysWithValues: notForMeEntries.map { (String($0.key), $0.value) }),
+                     forKey: notForMeKey + "-entries")
+        defaults.set(Array(pendingNotForMe), forKey: notForMeKey + "-pending")
+    }
+
+    /// AniList is the source of truth; shows dismissed here but not yet uploaded are kept and sent.
+    private func mergeNotForMe(remote: [Int: Int]) {
+        ensureNotForMeLoaded()
+        let migratedKey = notForMeKey + "-migrated"
+        if !defaults.bool(forKey: migratedKey) {
+            // First sync: upload what was dismissed before syncing existed.
+            pendingNotForMe.formUnion(settings.dismissedPicks.subtracting(remote.keys).filter { entry(for: $0) == nil })
+            defaults.set(true, forKey: migratedKey)
+        }
+        pendingNotForMe.subtract(remote.keys)
+        notForMeEntries = remote
+        let merged = Set(remote.keys).union(pendingNotForMe)
+        if merged != settings.dismissedPicks {
+            settings.dismissedPicks = merged
+            for id in merged { for key in feeds.keys { feeds[key]?.remove(id) } }
+        }
+        saveNotForMeState()
+        syncNotForMe()
+    }
+
+    /// Uploads pending dismissals one by one, gently. Safe to call any time.
+    private func syncNotForMe() {
+        guard case .loggedIn = mode, !pendingNotForMe.isEmpty, notForMeSync == nil else { return }
+        notForMeSync = Task {
+            defer { notForMeSync = nil }
+            guard await ensureNotForMeListExists() else { return }
+            var first = true
+            while let mediaId = pendingNotForMe.first {
+                if !first { try? await Task.sleep(nanoseconds: Self.writeSpacing) }
+                first = false
+                // Added to your list meanwhile: it's not a dismissal any more.
+                if entry(for: mediaId) != nil || !settings.dismissedPicks.contains(mediaId) {
+                    pendingNotForMe.remove(mediaId)
+                    continue
+                }
+                do {
+                    let saved = try await client.run(Queries.saveNotForMe,
+                                                     variables: ["mediaId": mediaId, "lists": [Self.notForMeList]],
+                                                     as: NotForMeData.self).entry
+                    notForMeEntries[saved.mediaId] = saved.id
+                    pendingNotForMe.remove(mediaId)
+                    saveNotForMeState()
+                } catch {
+                    break   // offline or rate limited: the rest goes up on the next refresh
+                }
+            }
+            saveNotForMeState()
+        }
+    }
+
+    /// Adds "Not for me" to your custom lists, keeping every list you already have.
+    @ObservationIgnored private var notForMeListReady = false
+    private func ensureNotForMeListExists() async -> Bool {
+        if notForMeListReady { return true }
+        guard let data = try? await client.run(Queries.listOptions, as: ListOptionsData.self),
+              let current = data.viewer?.mediaListOptions?.animeList?.customLists else {
+            return false   // couldn't read your lists: never risk overwriting them
+        }
+        if current.contains(Self.notForMeList) {
+            notForMeListReady = true
+            return true
+        }
+        guard let updated = try? await client.run(Queries.updateCustomLists,
+                                                  variables: ["lists": current + [Self.notForMeList]],
+                                                  as: UpdateUserListsData.self),
+              updated.user?.mediaListOptions?.animeList?.customLists?.contains(Self.notForMeList) == true else {
+            return false
+        }
+        notForMeListReady = true
+        try? await Task.sleep(nanoseconds: Self.writeSpacing)
+        return true
     }
 
     /// Pick settings changed: rebuild every feed on its next visit.

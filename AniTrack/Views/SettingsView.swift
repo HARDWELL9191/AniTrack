@@ -46,12 +46,12 @@ struct SettingsView: View {
                     Button("Reset \"Not for me\" (\(settings.dismissedPicks.count))") {
                         model.resetDismissedPicks()
                     }
-                    .disabled(settings.dismissedPicks.isEmpty)
+                    .disabled(settings.dismissedPicks.isEmpty || model.isResettingNotForMe)
                     LabeledContent("AI explanations", value: explainerStatus)
                 } header: {
                     Text("For You picks")
                 } footer: {
-                    Text("Picks combine fan recommendations from the shows you rated highly, your favorite genres and tags, and (when on-device AI is on) the meaning of each synopsis compared on your iPhone with Apple's Natural Language models. Nothing leaves your device except normal AniList requests. Picks are saved and only rebuilt when your list changes, each synopsis is analyzed once and cached, and the AI step pauses in Low Power Mode or when your iPhone is hot, so this costs almost no battery day to day.")
+                    Text("Picks combine fan recommendations from the shows you rated highly, your favorite genres and tags, and (when on-device AI is on) the meaning of each synopsis compared on your iPhone with Apple's Natural Language models. Nothing leaves your device except normal AniList requests. \"Not for me\" is saved to your AniList as a private, hidden custom list, so it survives reinstalls and other devices (in read-only mode it stays on this iPhone). Picks are saved and only rebuilt when your list changes, each synopsis is analyzed once and cached, and the AI step pauses in Low Power Mode or when your iPhone is hot, so this costs almost no battery day to day.")
                 }
 
                 Section {

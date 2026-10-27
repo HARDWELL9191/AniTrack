@@ -477,6 +477,25 @@ struct SaveEntryData: Decodable {
 
 struct DeletedResult: Decodable { let deleted: Bool? }
 
+struct ListOptionsData: Decodable {
+    struct AnimeList: Decodable { let customLists: [String]? }
+    struct Options: Decodable { let animeList: AnimeList? }
+    struct V: Decodable { let id: Int; let mediaListOptions: Options? }
+    let viewer: V?
+    enum CodingKeys: String, CodingKey { case viewer = "Viewer" }
+}
+
+struct UpdateUserListsData: Decodable {
+    let user: ListOptionsData.V?
+    enum CodingKeys: String, CodingKey { case user = "UpdateUser" }
+}
+
+struct NotForMeData: Decodable {
+    struct Saved: Decodable { let id: Int; let mediaId: Int }
+    let entry: Saved
+    enum CodingKeys: String, CodingKey { case entry = "SaveMediaListEntry" }
+}
+
 struct DeleteEntryData: Decodable {
     let result: DeletedResult?
     enum CodingKeys: String, CodingKey { case result = "DeleteMediaListEntry" }

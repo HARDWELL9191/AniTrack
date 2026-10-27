@@ -266,14 +266,48 @@ enum Queries {
     """
 
     static let saveEntry = """
-    mutation ($mediaId: Int, $status: MediaListStatus, $progress: Int, $scoreRaw: Int) {
-      SaveMediaListEntry(mediaId: $mediaId, status: $status, progress: $progress, scoreRaw: $scoreRaw) {
+    mutation ($mediaId: Int, $status: MediaListStatus, $progress: Int, $scoreRaw: Int,
+              $private: Boolean, $hiddenFromStatusLists: Boolean, $customLists: [String]) {
+      SaveMediaListEntry(mediaId: $mediaId, status: $status, progress: $progress, scoreRaw: $scoreRaw,
+                         private: $private, hiddenFromStatusLists: $hiddenFromStatusLists,
+                         customLists: $customLists) {
         id
         mediaId
         status
         score(format: POINT_100)
         progress
         updatedAt
+      }
+    }
+    """
+
+    /// Your anime custom list names (needed before adding "Not for me", so none are lost).
+    static let listOptions = """
+    query {
+      Viewer {
+        id
+        mediaListOptions { animeList { customLists } }
+      }
+    }
+    """
+
+    static let updateCustomLists = """
+    mutation ($lists: [String]) {
+      UpdateUser(animeListOptions: { customLists: $lists }) {
+        id
+        mediaListOptions { animeList { customLists } }
+      }
+    }
+    """
+
+    /// "Not for me": a private entry (only you can see it, nothing on your followers' feed),
+    /// hidden from your normal status lists, filed under the "Not for me" custom list.
+    static let saveNotForMe = """
+    mutation ($mediaId: Int, $lists: [String]) {
+      SaveMediaListEntry(mediaId: $mediaId, status: PLANNING, private: true,
+                         hiddenFromStatusLists: true, customLists: $lists) {
+        id
+        mediaId
       }
     }
     """

@@ -26,7 +26,8 @@ struct MediaDetailView: View {
         .task(id: mediaId) { if detail == nil { await load() } }
         .sheet(isPresented: $showEditor) {
             if let media = detail?.media {
-                EntryEditorView(media: media, existing: model.entry(for: mediaId), lite: detail?.mediaListEntry)
+                EntryEditorView(media: media, existing: model.entry(for: mediaId),
+                                lite: model.isNotForMeEntry(detail?.mediaListEntry) ? nil : detail?.mediaListEntry)
                     .presentationDetents([.medium, .large])
             }
         }
@@ -73,7 +74,9 @@ struct MediaDetailView: View {
                 .padding(.horizontal)
                 .padding(.top, -80)
 
-                listControls(media: media, entry: entry, lite: d.mediaListEntry)
+                // A "Not for me" marker isn't a real list entry: show the show as not on your list.
+                listControls(media: media, entry: entry,
+                             lite: model.isNotForMeEntry(d.mediaListEntry) ? nil : d.mediaListEntry)
                     .padding(.horizontal)
 
                 infoGrid(media: media, studios: d.studios?.nodes?.map(\.name) ?? [])
