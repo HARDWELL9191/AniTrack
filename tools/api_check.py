@@ -51,23 +51,22 @@ for ua in ["Python-urllib/3.12", UA]:
         hdrs = {k: v for k, v in e.headers.items() if k.lower() in ("server", "cf-ray", "content-type", "retry-after", "x-ratelimit-remaining")}
         note("probe " + ua, f"HTTP {e.code} headers={hdrs} body={e.read()[:600]!r}", "warning")
 
-user = os.environ.get("ANILIST_USER", "Josh")
-status, raw, dt = run(query("userByName"), {"name": user})
-data = json.loads(raw)
-note("userByName", f"HTTP {status} in {dt:.1f}s errors={data.get('errors')} user={json.dumps((data.get('data') or {}).get('User'))[:400]}")
-uid = ((data.get("data") or {}).get("User") or {}).get("id")
-
-if uid:
+def check_user(uid, label):
     status, raw, dt = run(query("listCollection"), {"userId": uid})
-    data = json.loads(raw)
+    try:
+        data = json.loads(raw)
+    except Exception:
+        note("listCollection " + label, f"HTTP {status} non-JSON body={raw[:500]!r}", "error")
+        return
     lists = (((data.get("data") or {}).get("MediaListCollection") or {}).get("lists")) or []
     summary = [(l.get("name"), l.get("status"), l.get("isCustomList"), len(l.get("entries") or [])) for l in lists]
-    note("listCollection",
+    note("listCollection " + label,
          f"HTTP {status} in {dt:.1f}s, {len(raw)//1024} KB, errors={data.get('errors')}, lists={summary}",
          "notice" if status == 200 and not data.get("errors") else "error")
-    # Check every entry decodes the way the Swift models expect.
     problems = []
     for l in lists:
+        if l.get("status") is not None and l.get("status") not in {"CURRENT", "PLANNING", "COMPLETED", "PAUSED", "DROPPED", "REPEATING"}:
+            problems.append(f"list status={l.get('status')}")
         for e in l.get("entries") or []:
             m = e.get("media") or {}
             if e.get("status") not in {"CURRENT", "PLANNING", "COMPLETED", "PAUSED", "DROPPED", "REPEATING"}:
@@ -75,6 +74,8 @@ if uid:
             for k in ("id", "mediaId"):
                 if not isinstance(e.get(k), int):
                     problems.append(f"entry {e.get('id')} {k}={e.get(k)!r}")
+            if e.get("score") is not None and not isinstance(e.get("score"), (int, float)):
+                problems.append(f"entry {e.get('id')} score={e.get('score')!r}")
             if not isinstance(m.get("id"), int) or not isinstance(m.get("title"), dict):
                 problems.append(f"entry {e.get('id')} media id/title={m.get('id')!r}")
             for t in m.get("tags") or []:
@@ -86,7 +87,26 @@ if uid:
             for k in ("averageScore", "meanScore", "popularity", "episodes", "duration", "seasonYear"):
                 if m.get(k) is not None and not isinstance(m.get(k), int):
                     problems.append(f"media {m.get('id')} {k}={m.get(k)!r}")
-    note("decode-check", f"{len(problems)} problem(s): {problems[:30]}", "error" if problems else "notice")
+    note("decode-check " + label, f"{len(problems)} problem(s): {problems[:30]}", "error" if problems else "notice")
+
+
+targets = []
+user = os.environ.get("ANILIST_USER", "")
+if user:
+    status, raw, dt = run(query("userByName"), {"name": user})
+    u = (json.loads(raw).get("data") or {}).get("User")
+    note("userByName", f"HTTP {status} user={json.dumps(u)[:300]}")
+    if u: targets.append((u["id"], "input:" + user))
+# A heavy user (stress test) and a typical recently active user.
+status, raw, dt = run("query { Page(perPage: 1) { users(sort: [WATCHED_TIME_DESC]) { id name } } }", {})
+for u in (json.loads(raw).get("data") or {}).get("Page", {}).get("users", []):
+    targets.append((u["id"], "top-watcher:" + u["name"]))
+status, raw, dt = run("query { Page(perPage: 3) { activities(type: ANIME_LIST, sort: ID_DESC) { ... on ListActivity { user { id name } } } } }", {})
+for a in ((json.loads(raw).get("data") or {}).get("Page", {}).get("activities") or [])[:2]:
+    if a.get("user"): targets.append((a["user"]["id"], "recent:" + a["user"]["name"]))
+for uid, label in targets:
+    check_user(uid, label)
+    time.sleep(2)
 
 for name, variables in [("browse", {"page": 1, "perPage": 25, "sort": ["TRENDING_DESC"], "isAdult": False}),
                         ("detail", {"id": 1})]:
