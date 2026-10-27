@@ -47,7 +47,14 @@ def run(q, variables):
 
 if os.environ.get("ANILIST_USER", "") == "twins":
     # Only the taste-twins check (keeps AniList's rate limit for it).
-    exec(open(__file__).read().split("# Taste twins (collaborative filtering): mirrors")[1].split("\n", 1)[1])
+    import traceback
+    try:
+        code = open(__file__).read().split("# Taste twins (collaborative filtering): mirrors")[1].split("\n", 1)[1]
+        exec(code, globals())
+    except SystemExit:
+        pass
+    except Exception:
+        note("twins crash", traceback.format_exc()[-1500:], "error")
     raise SystemExit(0)
 
 SEASONS_ONLY = os.environ.get("ANILIST_USER", "") == "seasons"   # GitHub shows max 10 notices per step
