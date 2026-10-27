@@ -124,6 +124,7 @@ final class AppModel {
         pendingNotForMe = []
         notForMeListReady = false
         notForMeLoadedFor = nil
+        notForMeMedia = [:]
         DiskCache.clearAll()
     }
 
@@ -170,7 +171,10 @@ final class AppModel {
             var result: [ListEntry] = []
             var notForMe: [Int: Int] = [:]   // mediaId → entry id
             for group in data.collection?.lists ?? [] where group.isCustomList == true && group.name == Self.notForMeList {
-                for entry in group.entries ?? [] { notForMe[entry.mediaId] = entry.id }
+                for entry in group.entries ?? [] {
+                    notForMe[entry.mediaId] = entry.id
+                    notForMeMedia[entry.mediaId] = entry.media
+                }
             }
             for group in data.collection?.lists ?? [] where group.isCustomList != true {
                 for entry in group.entries ?? [] where !seen.contains(entry.id) {
@@ -620,6 +624,39 @@ final class AppModel {
     @ObservationIgnored private var pendingNotForMe: Set<Int> = []
     @ObservationIgnored private var notForMeSync: Task<Void, Never>?
     private(set) var isResettingNotForMe = false
+    /// Show details for the "Not for me" list in Lists (synced ones arrive with your list).
+    private(set) var notForMeMedia: [Int: Media] = [:]
+
+    /// Fetches details for dismissed shows that aren't known yet (local-only or older ones).
+    func loadNotForMeMedia() async {
+        let missing = Array(settings.dismissedPicks.filter { notForMeMedia[$0] == nil })
+        var start = 0
+        while start < missing.count {
+            let chunk = Array(missing[start..<min(start + 50, missing.count)])
+            start += 50
+            guard let data = try? await client.run(Queries.mediaByIds,
+                                                    variables: ["ids": chunk, "perPage": chunk.count],
+                                                    as: PageData.self) else { return }
+            for m in data.page.media { notForMeMedia[m.id] = m }
+        }
+    }
+
+    /// Brings one show back: it can be suggested again (and leaves AniList's "Not for me" list).
+    func undoNotForMe(_ mediaId: Int) async {
+        ensureNotForMeLoaded()
+        settings.dismissedPicks.remove(mediaId)
+        pendingNotForMe.remove(mediaId)
+        saveNotForMeState()
+        guard case .loggedIn = mode, let entryId = notForMeEntries[mediaId] else { return }
+        do {
+            _ = try await client.run(Queries.deleteEntry, variables: ["id": entryId], as: DeleteEntryData.self)
+            notForMeEntries[mediaId] = nil
+            saveNotForMeState()
+        } catch {
+            settings.dismissedPicks.insert(mediaId)   // still on AniList: keep it consistent
+            errorMessage = "Couldn't update AniList. Try again in a moment."
+        }
+    }
 
     /// Whether AniList's own record for this show is just a "Not for me" marker.
     func isNotForMeEntry(_ lite: EntryLite?) -> Bool {

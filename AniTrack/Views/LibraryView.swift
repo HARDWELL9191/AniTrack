@@ -14,6 +14,7 @@ struct LibraryView: View {
     }
 
     @State private var status: ListStatus = .CURRENT
+    @State private var showingNotForMe = false
     @State private var userPickedStatus = false
     @State private var sort: SortOrder = .updated
     @State private var filter = ""
@@ -42,6 +43,20 @@ struct LibraryView: View {
         return list
     }
 
+    /// Shows you marked "Not for me", filtered like the other lists.
+    private var notForMeItems: [Media] {
+        let lang = model.settings.titleLanguage
+        var list = model.settings.dismissedPicks.compactMap { model.notForMeMedia[$0] }
+        let text = filter.trimmingCharacters(in: .whitespaces)
+        if !text.isEmpty {
+            list = list.filter { m in
+                [m.title.english, m.title.romaji, m.title.native].compactMap { $0 }
+                    .contains { $0.localizedCaseInsensitiveContains(text) }
+            }
+        }
+        return list.sorted { $0.displayTitle(lang).localizedCompare($1.displayTitle(lang)) == .orderedAscending }
+    }
+
     var body: some View {
         NavigationStack {
             List {
@@ -52,6 +67,9 @@ struct LibraryView: View {
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
 
+                if showingNotForMe {
+                    notForMeRows
+                } else {
                 Group {
                     if items.isEmpty {
                         Text(model.isLoadingList ? "Loading…" : "No shows marked \(status.label.lowercased()).")
@@ -64,6 +82,7 @@ struct LibraryView: View {
                         .removeFromListSwipe(entry)
                     }
                 }
+                }
             }
             // Flat rows with thin separators (no rounded card behind every show).
             .listStyle(.plain)
@@ -73,6 +92,7 @@ struct LibraryView: View {
             .searchable(text: $filter, prompt: "Filter this list")
             .refreshable { await model.refreshList() }
             .onAppear { pickDefaultStatus() }
+            .task(id: showingNotForMe) { if showingNotForMe { await model.loadNotForMeMedia() } }
             .onChange(of: model.entries.count) { _, _ in pickDefaultStatus() }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -95,19 +115,33 @@ struct LibraryView: View {
                 ForEach(ListStatus.allCases) { s in
                     Button {
                         userPickedStatus = true
+                        showingNotForMe = false
                         status = s
                     } label: {
-                        if s == status {
+                        if s == status && !showingNotForMe {
                             Label("\(s.label) (\(model.count(of: s)))", systemImage: "checkmark")
                         } else {
                             Label("\(s.label) (\(model.count(of: s)))", systemImage: s.symbol)
                         }
                     }
                 }
+                Divider()
+                Button {
+                    userPickedStatus = true
+                    showingNotForMe = true
+                } label: {
+                    Label("Not for me (\(model.settings.dismissedPicks.count))",
+                          systemImage: showingNotForMe ? "checkmark" : "hand.thumbsdown")
+                }
             } label: {
                 HStack(spacing: 6) {
-                    Image(systemName: status.symbol)
-                    Text("\(status.label) (\(model.count(of: status)))")
+                    if showingNotForMe {
+                        Image(systemName: "hand.thumbsdown")
+                        Text("Not for me (\(model.settings.dismissedPicks.count))")
+                    } else {
+                        Image(systemName: status.symbol)
+                        Text("\(status.label) (\(model.count(of: status)))")
+                    }
                     Image(systemName: "chevron.down").font(.caption.weight(.semibold))
                 }
                 .font(.subheadline.weight(.semibold))
@@ -118,9 +152,38 @@ struct LibraryView: View {
         }
     }
 
+    @ViewBuilder
+    private var notForMeRows: some View {
+        let shows = notForMeItems
+        if shows.isEmpty {
+            Text(model.settings.dismissedPicks.isEmpty
+                 ? "Nothing here. Shows you mark \"Not for me\" in For You appear here."
+                 : (filter.isEmpty ? "Loading…" : "No matches."))
+                .foregroundStyle(.secondary)
+        } else {
+            Text("Hidden from your picks. Swipe left on a show to bring it back.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .listRowSeparator(.hidden)
+        }
+        ForEach(shows) { media in
+            NavigationLink(value: MediaLink(id: media.id)) {
+                MediaRow(media: media, subtitle: [media.formatLabel, media.seasonLabel].compactMap { $0 }.joined(separator: " · "))
+            }
+            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                Button {
+                    Task { await model.undoNotForMe(media.id) }
+                } label: {
+                    Label("Undo", systemImage: "arrow.uturn.backward")
+                }
+                .tint(.blue)
+            }
+        }
+    }
+
     /// Opens on the first status that actually has shows, unless you already picked one.
     private func pickDefaultStatus() {
-        guard !userPickedStatus, model.count(of: status) == 0 else { return }
+        guard !userPickedStatus, !showingNotForMe, model.count(of: status) == 0 else { return }
         let order: [ListStatus] = [.CURRENT, .REPEATING, .PLANNING, .COMPLETED, .PAUSED, .DROPPED]
         if let first = order.first(where: { model.count(of: $0) > 0 }) { status = first }
     }
