@@ -73,7 +73,6 @@ final class AppModel {
         await loadViewer()
         await loadCachedList()
         await loadCachedFanSignal()
-        await loadCachedTwins()
         await refreshList()
     }
 
@@ -127,10 +126,6 @@ final class AppModel {
         notForMeListReady = false
         notForMeLoadedFor = nil
         notForMeMedia = [:]
-        twinTask?.cancel()
-        twinTask = nil
-        twinResult = nil
-        matcher.update(dislikes: [])
         DiskCache.clearAll()
     }
 
@@ -398,53 +393,7 @@ final class AppModel {
                             titleLanguage: settings.titleLanguage,
                             useOnDeviceAI: settings.useOnDeviceAI,
                             category: category,
-                            aiAllowedNow: SemanticEngine.shouldRunNow,
-                            twinScores: twinResult?.scores ?? [:],
-                            twinRanked: twinResult?.ranked ?? [],
-                            dislikedMedia: dislikedMedia)
-    }
-
-    private var dislikedMedia: [Media] {
-        settings.dismissedPicks.compactMap { notForMeMedia[$0] }
-    }
-
-    /// Keeps the match % in step with your "Not for me" shows.
-    private func syncDislikesToMatcher() {
-        matcher.update(dislikes: dislikedMedia)
-    }
-
-    // MARK: - Taste twins
-
-    @ObservationIgnored private var twinResult: TasteTwins.Result?
-    @ObservationIgnored private var twinTask: Task<Void, Never>?
-
-    private func loadCachedTwins() async {
-        guard let id = viewer?.id, let cached = await TasteTwins.shared.cached(viewerId: id) else { return }
-        twinResult = cached
-        matcher.addFanSignal(cached.scores)
-    }
-
-    /// Finds people with your taste in the background (at most ~weekly, network only, gentle).
-    /// When it's new, the next visit to For You rebuilds with it; nothing reshuffles under you.
-    private func refreshTwinsInBackground() {
-        guard twinTask == nil, let viewerId = viewer?.id, !entries.isEmpty else { return }
-        let entries = self.entries
-        let weights = Recommender.weights(for: entries)
-        if TasteTwins.isFresh(twinResult, weights: weights) { return }
-        let client = self.client
-        twinTask = Task(priority: .utility) {
-            let result = await TasteTwins.shared.refreshIfNeeded(viewerId: viewerId, entries: entries,
-                                                                  weights: weights, client: client)
-            self.twinTask = nil
-            guard let result, self.viewer?.id == viewerId else { return }
-            let isNew = result.computedAt != self.twinResult?.computedAt
-            self.twinResult = result
-            self.matcher.addFanSignal(result.scores)
-            if isNew {
-                self.forceRebuild.formUnion(self.feeds.keys)
-                self.forceRebuild.insert(Self.feedKey(nil))
-            }
-        }
+                            aiAllowedNow: SemanticEngine.shouldRunNow)
     }
 
     func feed(for category: AnimeCategory?) -> RecommendationResult? {
@@ -554,11 +503,6 @@ final class AppModel {
         }
         loadingFeeds.insert(key)
         recommendationError = nil
-        // Details of "Not for me" shows, so they can count as dislikes (only missing ones load).
-        if !settings.dismissedPicks.isEmpty {
-            await loadNotForMeMedia()
-            syncDislikesToMatcher()
-        }
         let picks: [Recommendation]
         do {
             let (found, usedAI, fans) = try await Recommender.run(entries: entries, client: client, options: options)
@@ -575,7 +519,6 @@ final class AppModel {
             return
         }
         loadingFeeds.remove(key)
-        refreshTwinsInBackground()
         // A thin first round (small list or narrow category): top it up right away.
         if picks.count < 10 { await loadMorePicks(category: category) }
     }
@@ -627,12 +570,7 @@ final class AppModel {
     }
 
     func dismissPick(_ mediaId: Int) {
-        if notForMeMedia[mediaId] == nil,
-           let media = feeds.values.lazy.flatMap(\.picks).first(where: { $0.id == mediaId })?.media {
-            notForMeMedia[mediaId] = media
-        }
         settings.dismissedPicks.insert(mediaId)
-        syncDislikesToMatcher()
         ensureNotForMeLoaded()
         if case .loggedIn = mode, notForMeEntries[mediaId] == nil {
             pendingNotForMe.insert(mediaId)
@@ -655,7 +593,6 @@ final class AppModel {
         ensureNotForMeLoaded()
         let toDelete = Array(notForMeEntries)
         settings.dismissedPicks = []
-        matcher.update(dislikes: [])
         pendingNotForMe = []
         saveNotForMeState()
         invalidatePicks()
@@ -723,7 +660,6 @@ final class AppModel {
         settings.dismissedPicks.remove(mediaId)
         pendingNotForMe.remove(mediaId)
         saveNotForMeState()
-        syncDislikesToMatcher()
         guard case .loggedIn = mode, let entryId = notForMeEntries[mediaId] else { return }
         do {
             _ = try await client.run(Queries.deleteEntry, variables: ["id": entryId], as: DeleteEntryData.self)
@@ -782,7 +718,6 @@ final class AppModel {
             for id in merged { for key in feeds.keys { feeds[key]?.remove(id) } }
         }
         saveNotForMeState()
-        syncDislikesToMatcher()
         syncNotForMe()
     }
 

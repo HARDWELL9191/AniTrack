@@ -557,21 +557,3 @@ struct CategoryCollectionData: Decodable {
 struct MediaLink: Hashable {
     let id: Int
 }
-
-
-// MARK: - Taste twins
-
-struct ShowFansData: Decodable {
-    struct Row: Decodable { let userId: Int?; let score: Double? }
-    struct P: Decodable { let mediaList: [Row]? }
-    let page: P?
-    enum CodingKeys: String, CodingKey { case page = "Page" }
-}
-
-struct RatingsOnlyData: Decodable {
-    struct Entry: Decodable { let mediaId: Int; let status: ListStatus?; let score: Double? }
-    struct Group: Decodable { let entries: [Entry]? }
-    struct Collection: Decodable { let lists: [Group]? }
-    let collection: Collection?
-    enum CodingKeys: String, CodingKey { case collection = "MediaListCollection" }
-}
