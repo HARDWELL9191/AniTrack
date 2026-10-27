@@ -242,7 +242,7 @@ enum Recommender {
                     client: AniListClient,
                     options: Options,
                     round: Int = 1,
-                    exclude: Set<Int> = []) async throws -> (picks: [Recommendation], usedAI: Bool) {
+                    exclude: Set<Int> = []) async throws -> (picks: [Recommendation], usedAI: Bool, fanSignal: [Int: Double]) {
         let scored = entries.map(\.scoreValue).filter { $0 > 0 }
         let mean = scored.isEmpty ? 70 : scored.reduce(0, +) / Double(scored.count)
         let variance = scored.isEmpty ? 0 : scored.reduce(0) { $0 + ($1 - mean) * ($1 - mean) } / Double(scored.count)
@@ -361,6 +361,8 @@ enum Recommender {
 
         // 3) Cheap first pass (no AI) to pick a short list worth spending the AI work on.
         let maxCollab = max(collab.values.max() ?? 1, 0.0001)
+        // How strongly fans of the shows you loved recommend each show (0...1), for match %.
+        let fanSignal = collab.mapValues { min(1, max(0, $0 / maxCollab)) }
 
         func allowed(_ m: Media) -> Bool {
             if onList[m.id] != nil || exclude.contains(m.id) { return false }
@@ -441,7 +443,7 @@ enum Recommender {
                                   because: Array((reasons[item.media.id] ?? []).prefix(3)),
                                   sharedHighlights: profile.highlights(for: item.media))
         }
-        return (Array(picks), usedAI)
+        return (Array(picks), usedAI, fanSignal)
     }
 }
 

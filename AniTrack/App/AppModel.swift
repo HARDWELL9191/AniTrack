@@ -72,6 +72,7 @@ final class AppModel {
     func reloadAll() async {
         await loadViewer()
         await loadCachedList()
+        await loadCachedFanSignal()
         await refreshList()
     }
 
@@ -198,6 +199,13 @@ final class AppModel {
               let cached = await DiskCache.loadInBackground([ListEntry].self, name: cacheName("list")),
               entries.isEmpty else { return }
         entries = cached
+    }
+
+    /// Fan-recommendation strengths from earlier picks builds, so match % has them right away.
+    private func loadCachedFanSignal() async {
+        guard viewer != nil,
+              let cached = await DiskCache.loadInBackground([Int: Double].self, name: cacheName("fans")) else { return }
+        matcher.addFanSignal(cached)
     }
 
     private func isAuthError(_ error: Error) -> Bool {
@@ -497,7 +505,9 @@ final class AppModel {
         recommendationError = nil
         let picks: [Recommendation]
         do {
-            let (found, usedAI) = try await Recommender.run(entries: entries, client: client, options: options)
+            let (found, usedAI, fans) = try await Recommender.run(entries: entries, client: client, options: options)
+            matcher.addFanSignal(fans)
+            DiskCache.saveInBackground(matcher.fanSnapshot, name: cacheName("fans"))
             picks = found
             let result = RecommendationResult(picks: found, generatedAt: Date(), fingerprint: fingerprint,
                                               usedOnDeviceAI: usedAI, round: 1, exhausted: false)
@@ -529,8 +539,10 @@ final class AppModel {
             let round = current.round + 1
             current.round = round
             do {
-                let (more, usedAI) = try await Recommender.run(entries: entries, client: client, options: options,
+                let (more, usedAI, fans) = try await Recommender.run(entries: entries, client: client, options: options,
                                                                round: round, exclude: shown)
+                matcher.addFanSignal(fans)
+                DiskCache.saveInBackground(matcher.fanSnapshot, name: cacheName("fans"))
                 let fresh = more.filter { !shown.contains($0.id) }
                 if fresh.isEmpty {
                     emptyRounds += 1

@@ -20,6 +20,9 @@ final class MatchEngine {
     @ObservationIgnored private var dirty = true
     @ObservationIgnored private var profile = Recommender.TasteProfile()
     @ObservationIgnored private var weights: [Int: Double] = [:]
+    @ObservationIgnored private var ratings: [Int: Double] = [:]      // your score (0...1) for rated shows
+    /// Fan-recommendation strength (0...1) from the shows you loved, collected while picks are built.
+    @ObservationIgnored private var fanSignal: [Int: Double] = [:]
     @ObservationIgnored private var tagScale: (lo: Double, hi: Double) = (0, 1)
     @ObservationIgnored private var memo: [Int: Int] = [:]
 
@@ -28,7 +31,7 @@ final class MatchEngine {
     @ObservationIgnored private var tasteRaw: [Float] = []           // before normalizing (for leave-one-out)
     @ObservationIgnored private var anchorWeights: [Int: Float] = [:] // shows that built the taste vector
     @ObservationIgnored private var semScale: (lo: Float, hi: Float) = (0, 1)
-    @ObservationIgnored private var semantic: [Int: Float] = [:]     // normalized 0...1
+    @ObservationIgnored private var semantic: [Int: Float] = [:]     // calibrated, -1...1 (0 = "low", 1 = "high")
     @ObservationIgnored private var pending: [Int: Media] = [:]
     @ObservationIgnored private var batchTask: Task<Void, Never>?
     @ObservationIgnored private var tasteTask: Task<Void, Never>?
@@ -62,6 +65,8 @@ final class MatchEngine {
         newProfile.finalize()
         profile = newProfile
         weights = newWeights
+        ratings = Dictionary(entries.filter { $0.scoreValue > 0 }.map { ($0.mediaId, min(1, $0.scoreValue / 100)) },
+                             uniquingKeysWith: { a, _ in a })
 
         // Calibrate: your well-liked shows define "very high match", the spread of your list "low".
         // Each list show is compared with the rest of your list (leave-one-out), never with itself.
@@ -88,16 +93,49 @@ final class MatchEngine {
         guard profile.norm > 0 else { return nil }
         if let cached = memo[media.id] { return cached }
 
+        // Prediction on a calibrated scale: 0 = as unlike your list as your least-liked part,
+        // 1 = as close as your favorites. Below 0 is allowed so unrelated shows spread out
+        // (20–50%) instead of all sitting at 50%.
         let raw = profile.similarity(to: media, excludingWeight: weights[media.id] ?? 0)
-        var value = max(0, min(1, (raw - tagScale.lo) / (tagScale.hi - tagScale.lo)))
+        var z = max(-1, min(1, (raw - tagScale.lo) / (tagScale.hi - tagScale.lo)))
         if let sem = semantic[media.id] {
-            value = 0.55 * value + 0.45 * Double(sem)
+            z = 0.55 * z + 0.45 * Double(sem)
         } else if aiEnabled() {
             queueForAI(media)
         }
-        let percent = Int((50 + 49 * value).rounded())
+        // Fans of shows you loved recommend it: lifts the prediction toward 1, never lowers it.
+        if let fans = fanSignal[media.id], fans > 0, z < 1 {
+            z += (1 - z) * 0.6 * fans
+        }
+
+        let percent: Int
+        if let rating = ratings[media.id] {
+            // You rated it: the badge follows your score, nudged a little by the prediction
+            // (10/10 → 95–99%, 8/10 → 80–84%, 5/10 → 58–62%).
+            let predicted = max(0, min(1, z))
+            percent = Int((20 + 79 * (0.95 * rating + 0.05 * predicted)).rounded())
+        } else if z >= 0 {
+            percent = Int((50 + 49 * min(z, 1)).rounded())
+        } else {
+            percent = Int((50 + 30 * z).rounded())   // down to 20% for shows far from your taste
+        }
         memo[media.id] = percent
         return percent
+    }
+
+    var fanSnapshot: [Int: Double] { fanSignal }
+
+    /// Adds fan-recommendation strengths from a picks build (keeps the strongest per show).
+    func addFanSignal(_ signal: [Int: Double]) {
+        guard !signal.isEmpty else { return }
+        if fanSignal.count > 5000 { fanSignal.removeAll(keepingCapacity: true) }
+        var changed = false
+        for (id, value) in signal where value > (fanSignal[id] ?? 0) + 0.01 {
+            fanSignal[id] = value
+            memo[id] = nil
+            changed = true
+        }
+        if changed { version &+= 1 }
     }
 
     // MARK: AI layer
@@ -165,7 +203,7 @@ final class MatchEngine {
         for (id, v) in vectors where v.count == taste.count {
             let cosine = anchorWeights[id].map { Self.leaveOneOutCosine(raw: tasteRaw, vector: v, weight: $0) }
                 ?? SemanticEngine.cosine(taste, v)
-            semantic[id] = max(0, min(1, (cosine - semScale.lo) / span))
+            semantic[id] = max(-1, min(1, (cosine - semScale.lo) / span))
             memo[id] = nil
             pending[id] = nil
             changed = true
