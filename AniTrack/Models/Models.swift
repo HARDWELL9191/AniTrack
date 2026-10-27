@@ -161,42 +161,101 @@ enum Seasons {
     static func words(_ s: String?) -> [String] {
         (s ?? "").lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init)
     }
+
+    // MARK: Season markers
+    // Only titles that literally say "this is another season" count. Anything else (a named
+    // sequel, spin-off, arc, remake, or a title we can't read) is treated as its own show and
+    // stays recommendable: when in doubt, the show is shown, never hidden.
+
+    // "v"/"x" left out on purpose: too many titles end in a letter X or V that isn't a season.
+    private static let romans: Set<String> = ["ii", "iii", "iv", "vi", "vii", "viii", "ix"]
+    private static let units: Set<String> = ["season", "part", "cour"]
+    private static let ordinalWords: Set<String> = ["second", "third", "fourth", "fifth", "sixth", "final"]
+
+    /// Roman numerals count on their own ("Overlord IV"); plain numbers only after
+    /// "Season"/"Part"/"Cour", since "Kaiju No. 8" or "Mob Psycho 100" aren't season numbers.
+    private static func isCount(_ w: String, after before: String) -> Bool {
+        if romans.contains(w) { return true }
+        if let n = Int(w), (1...20).contains(n), units.contains(before) { return true }
+        return false
+    }
+
+    private static func isOrdinal(_ w: String) -> Bool {
+        if ordinalWords.contains(w) { return true }
+        guard w.count >= 3, let n = Int(w.dropLast(2)), n >= 1 else { return false }
+        return ["st", "nd", "rd", "th"].contains(String(w.suffix(2)))
+    }
+
+    /// Title words with trailing season markers removed, and whether any were found.
+    /// "Tensei Shitara Slime Datta Ken 2nd Season Part 2" → ("tensei shitara slime datta ken", true)
+    static func split(_ title: String?) -> (base: [String], marked: Bool) {
+        var w = words(title)
+        let original = w.count
+        var changed = true
+        while changed && w.count > 1 {
+            changed = false
+            let last = w[w.count - 1]
+            let before = w.count > 2 ? w[w.count - 2] : ""
+            if isCount(last, after: before) {
+                if units.contains(before) { w.removeLast(2) } else { w.removeLast() }   // "Season 2" / "II"
+                changed = true
+            } else if units.contains(last) && isOrdinal(before) {
+                w.removeLast(2)                                                         // "2nd Season" / "Final Season"
+                if w.count > 1 && w.last == "the" { w.removeLast() }
+                changed = true
+            }
+        }
+        return (w, w.count < original)
+    }
+
+    static func hasSeasonMarker(_ t: MediaTitle?) -> Bool {
+        split(t?.romaji).marked || split(t?.english).marked
+    }
+
+    /// Same show, ignoring season markers ("X 2nd Season" ↔ "X"). Exact words, not a fuzzy prefix.
+    static func sameBase(_ a: MediaTitle?, _ b: MediaTitle?) -> Bool {
+        for (x, y) in [(a?.romaji, b?.romaji), (a?.english, b?.english)] {
+            let p = split(x).base, q = split(y).base
+            if !p.isEmpty && p == q { return true }
+        }
+        return false
+    }
 }
 
-/// Shows (TV/ONA series) already on your list, indexed by the first word of their titles, so
-/// "Slime" Season 1 is recognised as known when Season 2 is on your list. Purely local and fast.
-/// A title only matches when one is a whole-word prefix of the other and at least two words
-/// long ("Shingeki no Kyojin" ↔ "Shingeki no Kyojin Season 3", but not "Monster" ↔ "Monster Musume").
+/// TV/ONA shows on your list by base title, so other *seasons* of them aren't suggested.
+/// Matches only when the base titles are identical word-for-word and at least one side is
+/// marked as a season ("Slime" ↔ "Slime 2nd Season"). Named sequels, spin-offs and remakes
+/// ("Fairy Tail: 100 Years Quest", "SAO Alternative", "Fruits Basket (2019)") never match.
 struct ListFranchises {
-    private var byFirstWord: [String: [[String]]] = [:]
+    private var plain: Set<String> = []
+    private var seasons: Set<String> = []
 
     init(_ media: [Media] = []) {
         for m in media where Seasons.isSeries(m.format) {
             for title in [m.title.romaji, m.title.english] {
-                let w = Seasons.words(title)
-                guard w.count >= 2 else { continue }
-                byFirstWord[w[0], default: []].append(w)
+                let s = Seasons.split(title)
+                guard !s.base.isEmpty else { continue }
+                let key = s.base.joined(separator: " ")
+                if s.marked { seasons.insert(key) } else { plain.insert(key) }
             }
         }
     }
 
     func contains(_ media: Media) -> Bool {
-        guard Seasons.isSeries(media.format) else { return false }   // movies/OVAs are fine to suggest
+        guard Seasons.isSeries(media.format) else { return false }   // movies/OVAs/specials: always allowed
         for title in [media.title.romaji, media.title.english] {
-            let w = Seasons.words(title)
-            guard w.count >= 2, let group = byFirstWord[w[0]] else { continue }
-            for other in group {
-                let n = min(w.count, other.count)
-                if n >= 2 && w.prefix(n) == other.prefix(n) { return true }
-            }
+            let s = Seasons.split(title)
+            guard !s.base.isEmpty else { continue }
+            let key = s.base.joined(separator: " ")
+            if seasons.contains(key) || (s.marked && plain.contains(key)) { return true }
         }
         return false
     }
 }
 
 extension Media {
-    /// The entry right before this one in the same show (any format: AniList sometimes puts an
-    /// OVA between seasons, e.g. Slime S1 → Coleus OVA → S2). Series formats are preferred.
+    /// The entry right before this one in the same franchise (any format: AniList sometimes puts
+    /// an OVA between seasons, e.g. Slime S1 → Coleus OVA → S2). Used only to walk back.
     var prequelId: Int? {
         let edges = (relations?.edges ?? []).filter { edge in
             guard edge.relationType == "PREQUEL", let node = edge.node else { return false }
@@ -205,21 +264,11 @@ extension Media {
         return (edges.first { Seasons.isSeries($0.node?.format) } ?? edges.first)?.node?.id
     }
 
-    /// Set when this is Season 2+ of a TV/ONA show (movies, OVAs and renamed sequels: nil).
-    var previousSeasonId: Int? { Seasons.isSeries(format) ? prequelId : nil }
-
-    /// Later TV seasons of this same show.
-    var nextSeasonIds: [Int] {
-        guard Seasons.isSeries(format) else { return [] }
-        return (relations?.edges ?? []).compactMap { edge in
-            guard edge.relationType == "SEQUEL", let node = edge.node, node.type == nil || node.type == "ANIME",
-                  Seasons.isSeries(node.format), Seasons.sameShow(title, node.title) else { return nil }
-            return node.id
-        }
+    /// A TV/ONA entry whose title says it's another season ("2nd Season", "Part 2", "II"…) and
+    /// that has an earlier entry. Named sequels are not later seasons.
+    var isLaterSeason: Bool {
+        Seasons.isSeries(format) && Seasons.hasSeasonMarker(title) && prequelId != nil
     }
-
-    /// Season 2+ of a show (as opposed to a first season, movie, OVA or renamed sequel).
-    var isLaterSeason: Bool { previousSeasonId != nil }
 }
 
 enum TitleLanguage: String, CaseIterable, Identifiable {

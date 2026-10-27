@@ -332,7 +332,6 @@ final class AppModel {
             if firstSeasonsOnly {
                 // Season 2+ of a show, or a show where you already have another season: skip.
                 if media.isLaterSeason { return false }
-                if media.nextSeasonIds.contains(where: { entry(for: $0) != nil }) { return false }
                 if franchises.contains(media) { return false }
             }
             return true

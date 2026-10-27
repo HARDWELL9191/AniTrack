@@ -154,54 +154,58 @@ enum Recommender {
         var known = await SeasonCache.shared.merged(with: candidates)
         let later = candidates.values.filter(\.isLaterSeason)
 
-        /// Follows prequels as far as the loaded data goes. Returns the visited ids, the earliest
-        /// TV/ONA season reached, and the next id to load (nil when the chain is complete).
-        func walk(_ media: Media) -> (chain: [Int], root: Media, next: Int?) {
-            var chain = [media.id]
+        /// Earlier entries of the same franchise that are loaded, newest first, plus the next id to load.
+        func walk(_ media: Media) -> (nodes: [Media], next: Int?) {
+            var nodes: [Media] = []
+            var visited: Set<Int> = [media.id]
             var current = media
-            var root = media
-            while let previous = current.prequelId, chain.count < 15, !chain.contains(previous) {
-                chain.append(previous)
-                if onList[previous] != nil { return (chain, root, nil) }
-                guard let earlier = known[previous] else { return (chain, root, previous) }
+            while let previous = current.prequelId, visited.count < 15, !visited.contains(previous) {
+                visited.insert(previous)
+                guard let earlier = known[previous] else { return (nodes, previous) }
+                nodes.append(earlier)
                 current = earlier
-                if Seasons.isSeries(earlier.format) { root = earlier }
             }
-            return (chain, root, nil)
+            return (nodes, nil)
         }
 
-        // Load missing links (a few hops covers Season 5 → OVA → Season 1). Fetched seasons are
+        // Load missing links (a few hops covers Season 5 → OVA → Season 1). Fetched entries are
         // remembered for the session, so endless-feed rounds don't request them again.
-        for _ in 0..<5 {
-            let missing = Array(Set(later.compactMap { walk($0).next }))
-            guard !missing.isEmpty else { break }
-            var fetched: [Media] = []
-            var start = 0
-            while start < missing.count {
-                let chunk = Array(missing[start..<min(start + 50, missing.count)])
-                start += 50
-                if let data = try? await client.run(Queries.mediaByIds,
-                                                     variables: ["ids": chunk, "perPage": chunk.count],
-                                                     as: PageData.self) {
-                    for m in data.page.media { known[m.id] = m; fetched.append(m) }
+        if !later.isEmpty {
+            for _ in 0..<5 {
+                let missing = Array(Set(later.compactMap { walk($0).next }))
+                guard !missing.isEmpty else { break }
+                var fetched: [Media] = []
+                var start = 0
+                while start < missing.count {
+                    let chunk = Array(missing[start..<min(start + 50, missing.count)])
+                    start += 50
+                    if let data = try? await client.run(Queries.mediaByIds,
+                                                         variables: ["ids": chunk, "perPage": chunk.count],
+                                                         as: PageData.self) {
+                        for m in data.page.media { known[m.id] = m; fetched.append(m) }
+                    }
+                    if start < missing.count { try? await Task.sleep(nanoseconds: 300_000_000) }
                 }
-                if start < missing.count { try? await Task.sleep(nanoseconds: 300_000_000) }
+                await SeasonCache.shared.store(fetched)
+                if fetched.isEmpty { break }   // offline or rate limited: use what we have
             }
-            await SeasonCache.shared.store(fetched)
-            if fetched.isEmpty { break }   // offline or rate limited: use what we have
         }
 
         var result: [Int: Media] = [:]
         for (id, media) in candidates {
-            let (chain, root, _) = walk(media)
-            // You already know this show if any part of it is on your list.
-            if chain.contains(where: { onList[$0] != nil }) { continue }
-            if media.nextSeasonIds.contains(where: { onList[$0] != nil }) { continue }
-            if root.nextSeasonIds.contains(where: { onList[$0] != nil }) { continue }
-            if franchises.contains(root) || franchises.contains(media) { continue }
-            // If Season 1 couldn't be loaded (offline), the earliest season we have is used,
-            // so a show is never dropped just because a request failed.
+            // Another season of a show already on your list (strict title match): you know it.
+            if franchises.contains(media) { continue }
+            guard media.isLaterSeason else {
+                result[id] = result[id] ?? media
+                continue
+            }
+            let nodes = walk(media).nodes
+            if nodes.contains(where: { onList[$0.id] != nil && Seasons.sameBase($0.title, media.title) }) { continue }
+            // Earliest TV/ONA season of this same show. If it can't be identified (odd titles,
+            // offline), the pick is kept as it is: a show is never dropped on a guess.
+            let root = nodes.last { Seasons.isSeries($0.format) && Seasons.sameBase($0.title, media.title) } ?? media
             if root.id != id {
+                if onList[root.id] != nil || franchises.contains(root) { continue }
                 collab[root.id, default: 0] += collab[id] ?? 0
                 for reason in reasons[id] ?? [] where !(reasons[root.id] ?? []).contains(reason) {
                     reasons[root.id, default: []].append(reason)

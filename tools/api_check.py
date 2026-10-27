@@ -142,7 +142,7 @@ for name, variables in [("browse", {"page": 1, "perPage": 25, "sort": ["TRENDING
 
 
 # Season collapse: mirrors Seasons.sameShow / Media.previousSeasonId in Models.swift.
-import unicodedata
+import re
 SERIES = {"TV", "TV_SHORT", "ONA"}
 def norm(t): return "".join(c for c in (t or "").lower() if c.isalnum())
 def same(a, b):
@@ -156,6 +156,34 @@ def same(a, b):
         shorter = min(len(p), len(q))
         if common >= min(shorter, max(8, shorter * 6 // 10)): return True
     return False
+ROMANS={"ii","iii","iv","vi","vii","viii","ix"}; UNITS={"season","part","cour"}
+ORDW={"second","third","fourth","fifth","sixth","final"}
+def words(s): return [w for w in re.split(r"[^\w]|_", (s or "").lower()) if w]
+def is_count(w, before):
+    if w in ROMANS: return True
+    return w.isdigit() and 1<=int(w)<=20 and before in UNITS
+def is_ord(w):
+    if w in ORDW: return True
+    return len(w)>=3 and w[:-2].isdigit() and int(w[:-2])>=1 and w[-2:] in ("st","nd","rd","th")
+def split(t):
+    w=words(t); n=len(w); ch=True
+    while ch and len(w)>1:
+        ch=False; last=w[-1]; before=w[-2] if len(w)>2 else ""
+        if is_count(last, before):
+            w=w[:-2] if before in UNITS else w[:-1]; ch=True
+        elif last in UNITS and is_ord(before):
+            w=w[:-2]
+            if len(w)>1 and w[-1]=="the": w=w[:-1]
+            ch=True
+    return w, len(w)<n
+
+def same_base(a, b):
+    for k in ("romaji", "english"):
+        p, q = split((a or {}).get(k))[0], split((b or {}).get(k))[0]
+        if p and p == q: return True
+    return False
+def marked(t): return split((t or {}).get("romaji"))[1] or split((t or {}).get("english"))[1]
+
 def prev_season(m):
     edges = [e for e in ((m.get("relations") or {}).get("edges") or [])
              if e.get("relationType") == "PREQUEL" and (e.get("node") or {}).get("type") in (None, "ANIME")
@@ -172,24 +200,25 @@ for name, variables in [("browseWithRelations", {"page": 1, "perPage": 50, "sort
     time.sleep(1)
 
 season_lines, season_batch = [], 1
-for search in ["Tensei shitara Slime Datta Ken 3rd Season", "Kimetsu no Yaiba Yuukaku-hen", "Re:Zero 3rd Season", "Kaguya-sama Ultra Romantic", "Monogatari Second Season", "Tensei shitara Slime Datta Ken 2nd Season", "Mushoku Tensei II", "Bleach Sennen Kessen", "Shingeki no Kyojin Season 3", "Kimetsu no Yaiba Mugen Ressha", "Spy x Family Season 2"]:
+for search in ["Tensei shitara Slime Datta Ken 3rd Season", "Re:Zero 3rd Season", "Shingeki no Kyojin Final Season", "Mushoku Tensei II", "Fairy Tail 100 Years Quest", "Kimetsu no Yaiba Yuukaku-hen", "Sword Art Online Alternative", "Overlord IV", "Spy x Family Season 2", "Kaiju No. 8 Season 2", "Bleach Sennen Kessen", "Haikyuu Second Season"]:
     time.sleep(1)
     status, raw, dt = run("query($s:String){ Media(search:$s, type: ANIME){ id format title { romaji english } relations { edges { relationType node { id type format title { romaji english } } } } } }", {"s": search})
     m = (safe_json(raw, search).get("data") or {}).get("Media") or {}
     chain = [f"{m.get('id')} {m.get('format')} {(m.get('title') or {}).get('romaji')}"]
     cur = m
     root = m
-    for _ in range(8 if m.get("format") in SERIES else 0):
+    later = m.get("format") in SERIES and marked(m.get("title")) and prev_season(m)
+    for _ in range(8 if later else 0):
         pid = prev_season(cur)
         if not pid: break
-        time.sleep(1)
+        time.sleep(2.5)
         st, r2, _ = run(query("mediaByIds"), {"ids": [pid], "perPage": 1})
         items = ((safe_json(r2, "mediaByIds").get("data") or {}).get("Page") or {}).get("media") or []
         if not items: chain.append(f"{pid} (fetch failed HTTP {st})"); break
         cur = items[0]
-        if cur.get("format") in SERIES: root = cur
+        if cur.get("format") in SERIES and same_base(cur.get("title"), m.get("title")): root = cur
         chain.append(f"{cur['id']} {cur.get('format')} {(cur.get('title') or {}).get('romaji')}")
-    chain.append(f"RECOMMEND: {root.get('id')} {(root.get('title') or {}).get('romaji')}")
+    chain.append(("LATER SEASON" if later else "OWN SHOW") + f" -> RECOMMEND: {root.get('id')} {(root.get('title') or {}).get('romaji')}")
     if len(chain) == 2:
         rels = [(e.get("relationType"), (e.get("node") or {}).get("id"), (e.get("node") or {}).get("format"),
                  ((e.get("node") or {}).get("title") or {}).get("romaji"), ((e.get("node") or {}).get("title") or {}).get("english"))
