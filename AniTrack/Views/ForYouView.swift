@@ -36,10 +36,10 @@ struct ForYouView: View {
                 }
             }
             .task(id: category?.id ?? "any") {
-                index = 0
                 if model.entries.isEmpty { await model.refreshList() }
                 await model.generateRecommendations(category: category)
             }
+            .onChange(of: category) { _, _ in index = 0 }
             .onChange(of: index) { _, newValue in preloadIfNeeded(at: newValue) }
         }
     }

@@ -46,7 +46,7 @@ struct SettingsView: View {
                 } header: {
                     Text("For You picks")
                 } footer: {
-                    Text("Picks combine fan recommendations from the shows you rated highly, your favorite genres and tags, and (when on-device AI is on) the meaning of each synopsis compared on your iPhone with Apple's Natural Language models. Nothing leaves your device except normal AniList requests. Picks are saved and only rebuilt when your list changes, so this costs almost no battery day to day.")
+                    Text("Picks combine fan recommendations from the shows you rated highly, your favorite genres and tags, and (when on-device AI is on) the meaning of each synopsis compared on your iPhone with Apple's Natural Language models. Nothing leaves your device except normal AniList requests. Picks are saved and only rebuilt when your list changes, each synopsis is analyzed once and cached, and the AI step pauses in Low Power Mode or when your iPhone is hot, so this costs almost no battery day to day.")
                 }
 
                 Section {

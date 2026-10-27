@@ -9,6 +9,7 @@ struct DiscoverView: View {
     @State private var showAllCategories = false
     @State private var results: [Media] = []
     @State private var isSearching = false
+    @State private var lastSearchKey = ""
 
     @State private var trending: [Media] = []
     @State private var thisSeason: [Media] = []
@@ -151,7 +152,9 @@ struct DiscoverView: View {
 
     private func search() async {
         let text = query.trimmingCharacters(in: .whitespaces)
-        guard !text.isEmpty else { results = []; return }
+        guard !text.isEmpty else { results = []; lastSearchKey = ""; return }
+        let key = "\(text)|\(searchCategory?.id ?? "")"
+        guard key != lastSearchKey else { return }   // back from a detail page: keep results
         // Debounce typing so we don't hammer the API (and the battery).
         try? await Task.sleep(nanoseconds: 450_000_000)
         guard !Task.isCancelled else { return }
@@ -159,7 +162,10 @@ struct DiscoverView: View {
         defer { isSearching = false }
         do {
             let found = try await model.browse(search: text, sort: ["SEARCH_MATCH"], category: searchCategory, perPage: 30)
-            if !Task.isCancelled { results = found }
+            if !Task.isCancelled {
+                results = found
+                lastSearchKey = key
+            }
         } catch {
             if !Task.isCancelled { results = [] }
         }

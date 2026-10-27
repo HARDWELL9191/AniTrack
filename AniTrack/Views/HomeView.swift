@@ -210,7 +210,7 @@ struct WatchingRow: View {
     var body: some View {
         NavigationLink(value: MediaLink(id: entry.mediaId)) {
             HStack(spacing: 12) {
-                CoverImageView(url: entry.media.coverURL, color: entry.media.coverImage?.color,
+                CoverImageView(url: entry.media.thumbURL, color: entry.media.coverImage?.color,
                                width: 54, height: 78, cornerRadius: 6)
                     .zoomSource(id: entry.mediaId, in: zoom)
                 VStack(alignment: .leading, spacing: 6) {

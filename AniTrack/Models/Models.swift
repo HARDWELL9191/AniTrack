@@ -63,6 +63,8 @@ struct Media: Codable, Identifiable, Hashable {
     }
 
     var coverURL: String? { coverImage?.extraLarge ?? coverImage?.large }
+    /// Smaller image for list-row thumbnails (≈230 px wide instead of ≈460 px): less data to download and decode.
+    var thumbURL: String? { coverImage?.large ?? coverImage?.extraLarge }
 
     /// Episodes a viewer can currently watch.
     var availableEpisodes: Int? {

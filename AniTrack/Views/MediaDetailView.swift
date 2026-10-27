@@ -23,7 +23,7 @@ struct MediaDetailView: View {
             }
         }
         .navigationBarTitleDisplayMode(.inline)
-        .task(id: mediaId) { await load() }
+        .task(id: mediaId) { if detail == nil { await load() } }
         .sheet(isPresented: $showEditor) {
             if let media = detail?.media {
                 EntryEditorView(media: media, existing: model.entry(for: mediaId), lite: detail?.mediaListEntry)
@@ -232,6 +232,7 @@ struct EntryEditorView: View {
     @State private var score: Double = 0
     @State private var isSaving = false
     @State private var confirmDelete = false
+    @State private var didLoad = false
 
     private var entryId: Int? { existing?.id ?? lite?.id }
 
@@ -266,7 +267,8 @@ struct EntryEditorView: View {
                 Button("Remove", role: .destructive) { Task { await remove() } }
             }
             .onChange(of: progress) { _, newValue in
-                if let total = media.episodes, newValue >= total, total > 0 { status = .COMPLETED }
+                guard didLoad else { return }   // ignore the initial fill from your existing entry
+                if let total = media.episodes, newValue >= total, total > 0, status != .REPEATING { status = .COMPLETED }
                 else if newValue > 0 && status == .PLANNING { status = .CURRENT }
             }
         }
@@ -274,6 +276,7 @@ struct EntryEditorView: View {
             status = existing?.status ?? lite?.status ?? .PLANNING
             progress = existing?.progressValue ?? lite?.progress ?? 0
             score = (existing?.score ?? lite?.score ?? 0) / 10
+            DispatchQueue.main.async { didLoad = true }
         }
     }
 

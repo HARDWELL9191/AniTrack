@@ -3,12 +3,16 @@ import NaturalLanguage
 
 /// On-device semantic similarity using Apple's Natural Language framework.
 ///
-/// Primary model: NLContextualEmbedding (transformer model, downloaded once by iOS and run
-/// with hardware acceleration, which on recent iPhones means the Neural Engine where iOS
-/// decides it's best). Fallback: the built-in NLEmbedding sentence model.
+/// Primary model: NLContextualEmbedding, Apple's on-device transformer. iOS runs it through
+/// Core ML and schedules it on the Neural Engine when it can (apps can't pin NL models to a
+/// compute unit themselves). Fallback: the built-in NLEmbedding sentence model.
 ///
-/// Battery: every synopsis is embedded once and cached on disk, work runs at utility priority
-/// off the main thread, and the model is unloaded as soon as a batch finishes.
+/// Efficiency:
+/// - each synopsis is embedded once, then read back from a compact binary cache (Float32);
+/// - work runs off the main thread at utility priority and yields between items;
+/// - the model stays loaded for a short idle window so back-to-back rounds ("load more")
+///   don't pay the load cost again, then it's unloaded to free memory;
+/// - callers skip the AI pass entirely in Low Power Mode or when the phone is hot.
 actor SemanticEngine {
     static let shared = SemanticEngine()
 
@@ -17,14 +21,27 @@ actor SemanticEngine {
     private var contextual: NLContextualEmbedding?
     private var sentence: NLEmbedding?
     private var backend: Backend?
+    private var idleUnload: Task<Void, Never>?
 
     private var cache: [Int: [Float]] = [:]
     private var cacheLoadedFor: Backend?
     private var cacheDirty = false
+    private static let maxCached = 4000
+    private static let idleSeconds: UInt64 = 45
+
+    /// Whether the AI pass should run right now (battery/thermal friendly).
+    static var shouldRunNow: Bool {
+        let info = ProcessInfo.processInfo
+        if info.isLowPowerModeEnabled { return false }
+        switch info.thermalState {
+        case .serious, .critical: return false
+        default: return true
+        }
+    }
 
     private func cacheURL(_ backend: Backend) -> URL {
         let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-        return dir.appendingPathComponent("embeddings-\(backend.rawValue)-v1.json")
+        return dir.appendingPathComponent("embeddings-\(backend.rawValue)-v2.bin")
     }
 
     // MARK: Model lifecycle
@@ -38,6 +55,7 @@ actor SemanticEngine {
     }
 
     private func prepare() async -> Backend? {
+        idleUnload?.cancel()
         if let backend { return backend }
         if let model = NLContextualEmbedding(language: .english) {
             var ready = model.hasAvailableAssets
@@ -61,35 +79,64 @@ actor SemanticEngine {
         return nil
     }
 
-    private func release() {
+    private func scheduleUnload() {
+        idleUnload?.cancel()
+        idleUnload = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: Self.idleSeconds * 1_000_000_000)
+            guard !Task.isCancelled else { return }
+            await self?.unloadNow()
+        }
+    }
+
+    private func unloadNow() {
         contextual?.unload()
         contextual = nil
         sentence = nil
         backend = nil
     }
 
-    // MARK: Cache
+    // MARK: Binary cache  ("ATE2" | Int32 dim | Int32 count | count × (Int64 id, dim × Float32))
 
     private func loadCache(for backend: Backend) {
         guard cacheLoadedFor != backend else { return }
         cache = [:]
-        if let data = try? Data(contentsOf: cacheURL(backend)),
-           let decoded = try? JSONDecoder().decode([String: [Float]].self, from: data) {
-            for (key, value) in decoded { if let id = Int(key) { cache[id] = value } }
-        }
         cacheLoadedFor = backend
+        guard let data = try? Data(contentsOf: cacheURL(backend), options: .mappedIfSafe), data.count >= 12 else { return }
+        data.withUnsafeBytes { raw in
+            guard raw.loadUnaligned(fromByteOffset: 0, as: UInt32.self) == 0x32455441 else { return }  // "ATE2"
+            let dim = Int(raw.loadUnaligned(fromByteOffset: 4, as: Int32.self))
+            let count = Int(raw.loadUnaligned(fromByteOffset: 8, as: Int32.self))
+            let stride = 8 + dim * 4
+            guard dim > 0, count >= 0, data.count >= 12 + count * stride else { return }
+            var offset = 12
+            for _ in 0..<count {
+                let id = Int(raw.loadUnaligned(fromByteOffset: offset, as: Int64.self))
+                var vector = [Float](repeating: 0, count: dim)
+                for i in 0..<dim {
+                    vector[i] = raw.loadUnaligned(fromByteOffset: offset + 8 + i * 4, as: Float.self)
+                }
+                cache[id] = vector
+                offset += stride
+            }
+        }
     }
 
     private func saveCache() {
-        guard cacheDirty, let backend = cacheLoadedFor else { return }
-        // Keep the cache bounded (~4000 shows ≈ a few MB).
-        if cache.count > 4000 {
-            for key in cache.keys.shuffled().prefix(cache.count - 4000) { cache[key] = nil }
+        guard cacheDirty, let backend = cacheLoadedFor, let dim = cache.values.first?.count else { return }
+        if cache.count > Self.maxCached {
+            for key in cache.keys.shuffled().prefix(cache.count - Self.maxCached) { cache[key] = nil }
         }
-        let encodable = Dictionary(uniqueKeysWithValues: cache.map { (String($0.key), $0.value) })
-        if let data = try? JSONEncoder().encode(encodable) {
-            try? data.write(to: cacheURL(backend), options: .atomic)
+        let items = cache.filter { $0.value.count == dim }
+        var data = Data(capacity: 12 + items.count * (8 + dim * 4))
+        func append<T>(_ value: T) { withUnsafeBytes(of: value) { data.append(contentsOf: $0) } }
+        append(UInt32(0x32455441))
+        append(Int32(dim))
+        append(Int32(items.count))
+        for (id, vector) in items {
+            append(Int64(id))
+            vector.withUnsafeBytes { data.append(contentsOf: $0) }
         }
+        try? data.write(to: cacheURL(backend), options: .atomic)
         cacheDirty = false
     }
 
@@ -99,7 +146,8 @@ actor SemanticEngine {
         let title = media.title.english ?? media.title.romaji ?? media.title.userPreferred ?? ""
         let genres = (media.genres ?? []).joined(separator: ", ")
         let tags = media.visibleTags.prefix(6).map(\.name).joined(separator: ", ")
-        let synopsis = String(media.plainDescription.prefix(600))
+        // ~500 chars of synopsis keeps the input inside the model's sequence length (less work, same signal).
+        let synopsis = String(media.plainDescription.prefix(500))
         return "\(title). \(genres). \(tags). \(synopsis)"
     }
 
@@ -108,16 +156,16 @@ actor SemanticEngine {
         case .contextual:
             guard let model = contextual,
                   let result = try? model.embeddingResult(for: text, language: .english) else { return nil }
-            var sum = [Double](repeating: 0, count: model.dimension)
+            var sum = [Float](repeating: 0, count: model.dimension)
             var count = 0
             result.enumerateTokenVectors(in: text.startIndex..<text.endIndex) { vector, _ in
                 let n = min(vector.count, sum.count)
-                for i in 0..<n { sum[i] += vector[i] }
+                for i in 0..<n { sum[i] += Float(vector[i]) }
                 count += 1
                 return true
             }
             guard count > 0 else { return nil }
-            return Self.normalized(sum.map { Float($0 / Double(count)) })
+            return Self.normalized(sum)   // mean-pooling direction == sum direction after normalizing
         case .sentence:
             guard let vector = sentence?.vector(for: text) else { return nil }
             return Self.normalized(vector.map(Float.init))
@@ -127,7 +175,9 @@ actor SemanticEngine {
     }
 
     static func normalized(_ v: [Float]) -> [Float] {
-        let norm = sqrt(v.reduce(0) { $0 + $1 * $1 })
+        var sumSquares: Float = 0
+        for x in v { sumSquares += x * x }
+        let norm = sumSquares.squareRoot()
         guard norm > 0 else { return v }
         return v.map { $0 / norm }
     }
@@ -139,33 +189,40 @@ actor SemanticEngine {
         return dot // both are already unit length
     }
 
-    /// Returns unit vectors for the given media, using the disk cache where possible.
+    /// Returns unit vectors for the given media. Cached vectors cost nothing; the model is only
+    /// loaded if at least one show hasn't been embedded before.
     func vectors(for media: [Media]) async -> [Int: [Float]] {
-        guard let backend = await prepare() else { return [:] }
-        loadCache(for: backend)
+        // Cache-only fast path: no model load when everything is already known.
+        for backend in [Backend.contextual, .sentence] where cacheLoadedFor == nil {
+            if FileManager.default.fileExists(atPath: cacheURL(backend).path) { loadCache(for: backend); break }
+        }
         var result: [Int: [Float]] = [:]
-        for (index, item) in media.enumerated() {
-            if let cached = cache[item.id] {
-                result[item.id] = cached
-                continue
+        var missing: [Media] = []
+        for item in media {
+            if let cached = cache[item.id] { result[item.id] = cached } else { missing.append(item) }
+        }
+        guard !missing.isEmpty else { return result }
+
+        guard let backend = await prepare() else { return result }
+        if cacheLoadedFor != backend {
+            loadCache(for: backend)
+            result = [:]
+            missing = []
+            for item in media {
+                if let cached = cache[item.id] { result[item.id] = cached } else { missing.append(item) }
             }
+        }
+        for (index, item) in missing.enumerated() {
+            if Task.isCancelled { break }
             if let vector = embed(Self.text(for: item)) {
                 cache[item.id] = vector
                 result[item.id] = vector
                 cacheDirty = true
             }
-            if index % 8 == 0 { await Task.yield() }
+            if index % 8 == 7 { await Task.yield() }
         }
         saveCache()
-        release()
+        scheduleUnload()
         return result
-    }
-
-    var backendName: String {
-        switch backend {
-        case .contextual: return "Contextual embedding"
-        case .sentence: return "Sentence embedding"
-        case .none: return "Not loaded"
-        }
     }
 }

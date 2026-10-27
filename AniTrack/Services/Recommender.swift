@@ -40,6 +40,9 @@ enum Recommender {
         var titleLanguage: TitleLanguage
         var useOnDeviceAI: Bool
         var category: AnimeCategory?
+        /// False in Low Power Mode or when the phone is hot; not part of the fingerprint, so
+        /// saved picks stay valid and the AI pass simply resumes later.
+        var aiAllowedNow: Bool = true
     }
 
     /// Uses FNV-1a (not Swift's Hasher, which is randomly seeded per launch) so it survives restarts.
@@ -281,7 +284,7 @@ enum Recommender {
         var ranked: [(media: Media, score: Double)] = shortList.map { item -> (media: Media, score: Double) in
             (media: item.media, score: item.score)
         }
-        if options.useOnDeviceAI && !shortList.isEmpty {
+        if options.useOnDeviceAI && options.aiAllowedNow && !shortList.isEmpty {
             let anchors = entries
                 .filter { $0.status != .PLANNING && abs(weights[$0.mediaId] ?? 0) >= 0.4 }
                 .sorted { abs(weights[$0.mediaId] ?? 0) > abs(weights[$1.mediaId] ?? 0) }

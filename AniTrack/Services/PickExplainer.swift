@@ -55,7 +55,9 @@ final class PickExplainer {
         Synopsis: \(String(rec.media.plainDescription.prefix(700)))
         """
 
-        let response = try await session.respond(to: prompt)
+        // Short answers only: caps on-device generation work (and the energy it costs).
+        let options = GenerationOptions(sampling: nil, temperature: 0.7, maximumResponseTokens: 120)
+        let response = try await session.respond(to: prompt, options: options)
         let text = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
         cache[rec.id] = text
         return text

@@ -148,6 +148,7 @@ struct CategoryBrowseView: View {
     @State private var canLoadMore = true
     @State private var isLoading = false
     @State private var error: String?
+    @State private var loadedKey: String?
 
     var body: some View {
         List {
@@ -180,8 +181,11 @@ struct CategoryBrowseView: View {
             }
         }
         .task(id: "\(sort.rawValue)|\(search)") {
+            let key = "\(sort.rawValue)|\(search)"
+            guard loadedKey != key else { return }   // coming back from a detail page: keep results
             if !search.isEmpty { try? await Task.sleep(nanoseconds: 450_000_000) }
             guard !Task.isCancelled else { return }
+            loadedKey = key
             items = []
             page = 1
             canLoadMore = true

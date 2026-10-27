@@ -9,7 +9,11 @@ final class AppModel {
 
     private(set) var mode: AccountMode = .none
     private(set) var viewer: Viewer?
-    private(set) var entries: [ListEntry] = []
+    private(set) var entries: [ListEntry] = [] {
+        didSet { entryIndex = Dictionary(entries.indices.map { (entries[$0].mediaId, $0) }, uniquingKeysWith: { a, _ in a }) }
+    }
+    /// mediaId → position in `entries`, so every cover/badge lookup is O(1) instead of a scan.
+    @ObservationIgnored private var entryIndex: [Int: Int] = [:]
     private(set) var isLoadingList = false
     private(set) var didBootstrap = false
     var errorMessage: String?
@@ -47,7 +51,7 @@ final class AppModel {
 
     func reloadAll() async {
         await loadViewer()
-        loadCachedList()
+        await loadCachedList()
         await refreshList()
     }
 
@@ -144,16 +148,17 @@ final class AppModel {
                 }
             }
             entries = result
-            DiskCache.save(result, name: cacheName("list"))
+            DiskCache.saveInBackground(result, name: cacheName("list"))
         } catch {
             errorMessage = error.localizedDescription
         }
     }
 
     /// Shows the last saved list instantly (and offline) while the network refresh runs.
-    private func loadCachedList() {
+    private func loadCachedList() async {
         guard entries.isEmpty, viewer != nil,
-              let cached = DiskCache.load([ListEntry].self, name: cacheName("list")) else { return }
+              let cached = await DiskCache.loadInBackground([ListEntry].self, name: cacheName("list")),
+              entries.isEmpty else { return }
         entries = cached
     }
 
@@ -167,7 +172,9 @@ final class AppModel {
     // MARK: - Queries on the local list
 
     func entry(for mediaId: Int) -> ListEntry? {
-        entries.first { $0.mediaId == mediaId }
+        guard let index = entryIndex[mediaId], index < entries.count else { return nil }
+        let entry = entries[index]   // reading `entries` keeps SwiftUI observation working
+        return entry.mediaId == mediaId ? entry : entries.first { $0.mediaId == mediaId }
     }
 
     func entries(in statuses: [ListStatus]) -> [ListEntry] {
@@ -273,7 +280,8 @@ final class AppModel {
                             dismissed: settings.dismissedPicks,
                             titleLanguage: settings.titleLanguage,
                             useOnDeviceAI: settings.useOnDeviceAI,
-                            category: category)
+                            category: category,
+                            aiAllowedNow: SemanticEngine.shouldRunNow)
     }
 
     func feed(for category: AnimeCategory?) -> RecommendationResult? {
@@ -312,7 +320,9 @@ final class AppModel {
         let options = recommendationOptions(category)
         let fingerprint = Recommender.fingerprint(entries: entries, options: options)
         if !force {
-            if feeds[key] == nil { feeds[key] = DiskCache.load(RecommendationResult.self, name: feedCacheName(category)) }
+            if feeds[key] == nil {
+                feeds[key] = await DiskCache.loadInBackground(RecommendationResult.self, name: feedCacheName(category))
+            }
             if let current = feeds[key],
                current.fingerprint == fingerprint,
                Date().timeIntervalSince(current.generatedAt) < 3 * 86_400,
@@ -322,17 +332,22 @@ final class AppModel {
         }
         loadingFeeds.insert(key)
         recommendationError = nil
-        defer { loadingFeeds.remove(key) }
+        let picks: [Recommendation]
         do {
-            let (picks, usedAI) = try await Recommender.run(entries: entries, client: client, options: options)
-            let result = RecommendationResult(picks: picks, generatedAt: Date(), fingerprint: fingerprint,
+            let (found, usedAI) = try await Recommender.run(entries: entries, client: client, options: options)
+            picks = found
+            let result = RecommendationResult(picks: found, generatedAt: Date(), fingerprint: fingerprint,
                                               usedOnDeviceAI: usedAI, round: 1, exhausted: false)
             feeds[key] = result
-            DiskCache.save(result, name: feedCacheName(category))
-            if picks.count < 10 { await loadMorePicks(category: category) }
+            DiskCache.saveInBackground(result, name: feedCacheName(category))
         } catch {
+            loadingFeeds.remove(key)
             recommendationError = error.localizedDescription
+            return
         }
+        loadingFeeds.remove(key)
+        // A thin first round (small list or narrow category): top it up right away.
+        if picks.count < 10 { await loadMorePicks(category: category) }
     }
 
     /// Called when you get near the end of the feed: digs one round deeper and appends.
@@ -370,7 +385,7 @@ final class AppModel {
         }
         if emptyRounds >= 3 { current.exhausted = true }
         feeds[key] = current
-        DiskCache.save(current, name: feedCacheName(category))
+        DiskCache.saveInBackground(current, name: feedCacheName(category))
     }
 
     func dismissPick(_ mediaId: Int) {
@@ -379,7 +394,7 @@ final class AppModel {
             feeds[key]?.remove(mediaId)
         }
         for (key, value) in feeds {
-            DiskCache.save(value, name: feedCacheName(key: key))
+            DiskCache.saveInBackground(value, name: feedCacheName(key: key))
         }
     }
 

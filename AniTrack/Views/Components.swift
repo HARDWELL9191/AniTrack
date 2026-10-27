@@ -187,7 +187,7 @@ struct MediaRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            CoverImageView(url: media.coverURL, color: media.coverImage?.color, width: 54, height: 78, cornerRadius: 6)
+            CoverImageView(url: media.thumbURL, color: media.coverImage?.color, width: 54, height: 78, cornerRadius: 6)
                 .zoomSource(id: media.id, in: zoom)
             VStack(alignment: .leading, spacing: 4) {
                 Text(media.displayTitle(model.settings.titleLanguage))
