@@ -57,6 +57,7 @@ struct LibraryView: View {
                         NavigationLink(value: MediaLink(id: entry.mediaId)) {
                             MediaRow(media: entry.media, subtitle: subtitle(for: entry))
                         }
+                        .removeFromListSwipe(entry)
                     }
                 }
             }

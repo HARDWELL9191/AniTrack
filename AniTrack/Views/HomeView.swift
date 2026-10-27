@@ -25,7 +25,9 @@ struct HomeView: View {
 
                 if !behind.isEmpty {
                     Section("Ready to watch") {
-                        ForEach(behind) { WatchingRow(entry: $0) }
+                        ForEach(behind) { entry in
+                            WatchingRow(entry: entry).removeFromListSwipe(entry)
+                        }
                     }
                 }
 
@@ -49,7 +51,9 @@ struct HomeView: View {
                              : "Nothing in progress. Start something from Up next.")
                             .foregroundStyle(.secondary)
                     }
-                    ForEach(watching) { WatchingRow(entry: $0) }
+                    ForEach(watching) { entry in
+                        WatchingRow(entry: entry).removeFromListSwipe(entry)
+                    }
                 }
 
                 if !planning.isEmpty {

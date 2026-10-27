@@ -74,18 +74,63 @@ struct BannerImageView: View {
     var height: CGFloat = 200
 
     var body: some View {
-        AsyncImage(url: url.flatMap(URL.init(string:))) { phase in
-            if case .success(let image) = phase {
-                image.resizable().scaledToFill()
-            } else {
-                LinearGradient(colors: [(Color(hex: fallbackColor) ?? Theme.accent).opacity(0.7),
-                                        Color(.systemBackground)],
-                               startPoint: .top, endPoint: .bottom)
+        // The container decides the width; the image only fills and is clipped to it.
+        // (A scaled-to-fill image as the layout root made the whole page wider than the screen.)
+        Rectangle()
+            .fill(LinearGradient(colors: [(Color(hex: fallbackColor) ?? Theme.accent).opacity(0.7),
+                                          Color(.systemBackground)],
+                                 startPoint: .top, endPoint: .bottom))
+            .frame(maxWidth: .infinity)
+            .frame(height: height)
+            .overlay {
+                AsyncImage(url: url.flatMap(URL.init(string:))) { phase in
+                    if case .success(let image) = phase {
+                        image.resizable().scaledToFill()
+                    }
+                }
             }
+            .clipped()
+    }
+}
+
+/// Swipe left on a row to remove the show from your AniList list (asks first).
+struct RemoveFromListSwipe: ViewModifier {
+    @Environment(AppModel.self) private var model
+    let entry: ListEntry
+    @State private var confirm = false
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if model.canEdit {
+            content
+                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                    Button(role: .destructive) {
+                        confirm = true
+                    } label: {
+                        Label("Remove", systemImage: "trash")
+                    }
+                }
+                .confirmationDialog("Remove \(entry.media.displayTitle(model.settings.titleLanguage)) from your list?",
+                                    isPresented: $confirm, titleVisibility: .visible) {
+                    Button("Remove", role: .destructive) {
+                        Task {
+                            do {
+                                try await model.delete(entryId: entry.id)
+                            } catch {
+                                model.errorMessage = error.localizedDescription
+                            }
+                        }
+                    }
+                }
+        } else {
+            content
         }
-        .frame(height: height)
-        .frame(maxWidth: .infinity)
-        .clipped()
+    }
+}
+
+extension View {
+    func removeFromListSwipe(_ entry: ListEntry) -> some View {
+        modifier(RemoveFromListSwipe(entry: entry))
     }
 }
 
