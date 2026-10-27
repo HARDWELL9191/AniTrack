@@ -46,6 +46,10 @@ struct MainTabView: View {
         }
         .tabBarMinimizeBehavior(.onScrollDown)
         .task { await model.loadCategories() }
+        .sheet(item: $model.ratePrompt) { media in
+            RatePromptView(media: media)
+                .presentationDetents([.height(360)])
+        }
     }
 }
 

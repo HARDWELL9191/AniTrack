@@ -123,8 +123,9 @@ struct MediaDetailView: View {
 
                 let recs = (d.recommendations?.nodes ?? []).compactMap(\.mediaRecommendation)
                     .filter { !(model.settings.hideChinese && $0.countryOfOrigin == "CN") }
+                    .sorted { (model.matcher.match(for: $0) ?? 0) > (model.matcher.match(for: $1) ?? 0) }
                 if !recs.isEmpty {
-                    HorizontalMediaSection(title: "Fans also recommend", items: recs)
+                    HorizontalMediaSection(title: "More like this · best match first", items: recs)
                 }
 
                 if let site = media.siteUrl, let url = URL(string: site) {
@@ -143,7 +144,6 @@ struct MediaDetailView: View {
     @ViewBuilder
     private func listControls(media: Media, entry: ListEntry?, lite: EntryLite?) -> some View {
         let status = entry?.status ?? lite?.status
-        let progress = entry?.progressValue ?? lite?.progress ?? 0
         VStack(spacing: 10) {
             if model.canEdit {
                 Button { showEditor = true } label: {
@@ -156,15 +156,12 @@ struct MediaDetailView: View {
                 Label(status.label, systemImage: status.symbol)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            if status != nil {
-                HStack {
-                    Text("Progress \(progress)/\(media.episodes.map(String.init) ?? "?")")
-                    Spacer()
-                    let score = entry?.score ?? lite?.score
-                    if let score, score > 0 { Text("My score ★ \(Fmt.score(score))") }
-                }
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+            let score = entry?.score ?? lite?.score
+            if let score, score > 0 {
+                Text("Your score ★ \(Fmt.score(score))")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
             if let airing = Fmt.airing(media.nextAiringEpisode) {
                 Label(airing, systemImage: "clock")

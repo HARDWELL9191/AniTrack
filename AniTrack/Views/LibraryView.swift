@@ -5,6 +5,7 @@ struct LibraryView: View {
     @Namespace private var zoom
 
     enum SortOrder: String, CaseIterable, Identifiable {
+        case match = "Best match"
         case updated = "Last updated"
         case title = "Title"
         case score = "My score"
@@ -33,6 +34,10 @@ struct LibraryView: View {
         case .title: list.sort { $0.media.displayTitle(lang).localizedCompare($1.media.displayTitle(lang)) == .orderedAscending }
         case .score: list.sort { $0.scoreValue > $1.scoreValue }
         case .average: list.sort { ($0.media.averageScore ?? 0) > ($1.media.averageScore ?? 0) }
+        case .match:
+            // Rated/finished shows have no match; fall back to your score for those.
+            let key: (ListEntry) -> Int = { model.matcher.match(for: $0.media) ?? Int($0.scoreValue) }
+            list.sort { key($0) > key($1) }
         }
         return list
     }
@@ -120,10 +125,9 @@ struct LibraryView: View {
 
     private func subtitle(for entry: ListEntry) -> String {
         var parts: [String] = []
-        let total = entry.media.episodes.map(String.init) ?? "?"
-        parts.append("\(entry.progressValue)/\(total) eps")
-        if entry.scoreValue > 0 { parts.append("★ \(Fmt.score(entry.score))") }
-        if let airing = Fmt.airing(entry.media.nextAiringEpisode) { parts.append(airing) }
+        if entry.scoreValue > 0 { parts.append("Your score ★ \(Fmt.score(entry.score))") }
+        parts.append(entry.media.formatLabel)
+        if let season = entry.media.seasonLabel { parts.append(season) }
         return parts.joined(separator: " · ")
     }
 }

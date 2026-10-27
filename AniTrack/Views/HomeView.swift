@@ -1,9 +1,12 @@
 import SwiftUI
 
+/// Suggestion-first Home: your picks, the best matches airing this season, which planned
+/// show fits you best right now, and what's trending, all with personal match %.
 struct HomeView: View {
     @Environment(AppModel.self) private var model
     @Namespace private var zoom
     @State private var trending: [Media] = []
+    @State private var season: [Media] = []
 
     var body: some View {
         NavigationStack {
@@ -12,75 +15,48 @@ struct HomeView: View {
                     Section { ProfileHeader(viewer: viewer) }
                 }
 
-                let watching = model.entries(in: [.CURRENT, .REPEATING])
-                let planning = model.entries(in: [.PLANNING])
-                let completed = model.entries(in: [.COMPLETED])
-                let behind = watching.filter { entry in
-                    guard let available = entry.media.availableEpisodes else { return false }
-                    return available > entry.progressValue
-                }
-                let airing = watching
-                    .filter { $0.media.nextAiringEpisode != nil }
-                    .sorted { ($0.media.nextAiringEpisode?.airingAt ?? 0) < ($1.media.nextAiringEpisode?.airingAt ?? 0) }
-
-                if !behind.isEmpty {
-                    Section("Ready to watch") {
-                        ForEach(behind) { entry in
-                            WatchingRow(entry: entry).removeFromListSwipe(entry)
-                        }
-                    }
-                }
-
                 pickedForYou
 
-                if !airing.isEmpty {
-                    Section("Airing schedule") {
-                        ForEach(airing) { entry in
-                            NavigationLink(value: MediaLink(id: entry.mediaId)) {
-                                MediaRow(media: entry.media,
-                                         subtitle: Fmt.airing(entry.media.nextAiringEpisode))
-                            }
-                        }
+                let bestThisSeason = seasonBestMatches
+                if !bestThisSeason.isEmpty {
+                    let s = AppModel.currentSeason()
+                    Section {
+                        cardRow(bestThisSeason)
+                    } header: {
+                        Label("Best matches · \(s.season.capitalized) \(String(s.year))", systemImage: "sparkles")
                     }
                 }
 
-                Section("Watching (\(watching.count))") {
-                    if watching.isEmpty && !model.isLoadingList {
-                        Text(planning.isEmpty
-                             ? "Nothing in progress. Find something in Discover or For You."
-                             : "Nothing in progress. Start something from Up next.")
-                            .foregroundStyle(.secondary)
-                    }
-                    ForEach(watching) { entry in
-                        WatchingRow(entry: entry).removeFromListSwipe(entry)
-                    }
-                }
-
+                let planning = planningByMatch
                 if !planning.isEmpty {
                     Section {
-                        cardRow(planning.prefix(15).map(\.media)) { _ in nil }
+                        cardRow(planning)
                     } header: {
-                        sectionHeader("Up next from Planning", action: "All") { model.selectedTab = .lists }
+                        sectionHeader("Start next · best fit from Planning", action: "All") { model.selectedTab = .lists }
                     }
                 }
 
                 if !trending.isEmpty {
-                    let season = AppModel.currentSeason()
                     Section {
-                        cardRow(trending) { _ in nil }
+                        cardRow(trending)
                     } header: {
-                        Text("Trending · \(season.season.capitalized) \(String(season.year))")
+                        Label("Trending now", systemImage: "flame")
                     }
                 }
 
-                if !completed.isEmpty {
-                    Section("Recently completed") {
-                        ForEach(completed.prefix(5)) { entry in
-                            NavigationLink(value: MediaLink(id: entry.mediaId)) {
-                                MediaRow(media: entry.media,
-                                         subtitle: entry.scoreValue > 0 ? "Your score ★ \(Fmt.score(entry.score))" : "Completed")
-                            }
-                        }
+                let watching = model.entries(in: [.CURRENT, .REPEATING])
+                if !watching.isEmpty {
+                    Section {
+                        cardRow(watching.map(\.media))
+                    } header: {
+                        Text("Currently watching")
+                    }
+                }
+
+                if model.entries.isEmpty && !model.isLoadingList {
+                    Section {
+                        Text("Add a few shows you liked (Discover → search), and Home fills up with suggestions.")
+                            .foregroundStyle(.secondary)
                     }
                 }
             }
@@ -89,9 +65,9 @@ struct HomeView: View {
             .environment(\.zoomNamespace, zoom)
             .refreshable {
                 await model.reloadAll()
-                await loadTrending(force: true)
+                await loadShelves(force: true)
             }
-            .task { await loadTrending() }
+            .task { await loadShelves() }
             .task(id: model.entries.count) {
                 // Uses the saved picks; only rebuilds when your list changed.
                 if !model.entries.isEmpty { await model.generateRecommendations() }
@@ -100,6 +76,25 @@ struct HomeView: View {
                 if model.isLoadingList && model.entries.isEmpty { ProgressView("Loading your list…") }
             }
         }
+    }
+
+    /// This season's shows you haven't added, ordered by your match (cheap: memoized per show).
+    private var seasonBestMatches: [Media] {
+        season
+            .filter { model.entry(for: $0.id) == nil }
+            .compactMap { m in model.matcher.match(for: m).map { (m, $0) } }
+            .sorted { $0.1 > $1.1 }
+            .prefix(15)
+            .map(\.0)
+    }
+
+    /// Your Planning list, best fit first: answers "what should I start next?".
+    private var planningByMatch: [Media] {
+        model.entries(in: [.PLANNING])
+            .map { ($0.media, model.matcher.match(for: $0.media) ?? 0) }
+            .sorted { $0.1 > $1.1 }
+            .prefix(15)
+            .map(\.0)
     }
 }
 
@@ -116,8 +111,8 @@ extension HomeView {
                         Text("Hoshi is picking shows for you…").foregroundStyle(.secondary)
                     }
                 } else {
-                    let matches = Dictionary(picks.prefix(15).map { ($0.id, $0.match) }, uniquingKeysWith: { a, _ in a })
-                    cardRow(Array(picks.prefix(15).map(\.media)), matches: matches) { _ in nil }
+                    let matches = Dictionary(picks.prefix(20).map { ($0.id, $0.match) }, uniquingKeysWith: { a, _ in a })
+                    cardRow(Array(picks.prefix(20).map(\.media)), matches: matches, width: 140)
                 }
             } header: {
                 sectionHeader("Picked for you", systemImage: "wand.and.stars", action: "See all") {
@@ -142,19 +137,12 @@ extension HomeView {
     }
 
     /// Horizontal row of cover cards inside a List section.
-    func cardRow(_ items: [Media], matches: [Int: Int] = [:], caption: @escaping (Media) -> String?) -> some View {
+    func cardRow(_ items: [Media], matches: [Int: Int] = [:], width: CGFloat = 104) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             LazyHStack(alignment: .top, spacing: 12) {
                 ForEach(items) { media in
                     NavigationLink(value: MediaLink(id: media.id)) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            MediaCard(media: media, width: 104, matchOverride: matches[media.id])
-                            if let text = caption(media) {
-                                Text(text)
-                                    .font(.caption2.weight(.semibold))
-                                    .foregroundStyle(Theme.pink)
-                            }
-                        }
+                        MediaCard(media: media, width: width, matchOverride: matches[media.id])
                     }
                     .buttonStyle(.plain)
                 }
@@ -166,13 +154,15 @@ extension HomeView {
         .listRowBackground(Color.clear)
     }
 
-    func loadTrending(force: Bool = false) async {
-        guard trending.isEmpty || force else { return }
-        let season = AppModel.currentSeason()
-        if let items = try? await model.browse(sort: ["TRENDING_DESC", "POPULARITY_DESC"],
-                                               season: season.season, seasonYear: season.year, perPage: 15) {
-            trending = items
-        }
+    /// Two light requests, once per launch (or on pull to refresh).
+    func loadShelves(force: Bool = false) async {
+        guard season.isEmpty || force else { return }
+        let current = AppModel.currentSeason()
+        async let seasonal = model.browse(sort: ["POPULARITY_DESC"], season: current.season,
+                                          seasonYear: current.year, perPage: 50)
+        async let hot = model.browse(sort: ["TRENDING_DESC", "POPULARITY_DESC"], perPage: 20)
+        if let items = try? await seasonal { season = items }
+        if let items = try? await hot { trending = items.filter { model.entry(for: $0.id) == nil } }
     }
 }
 
@@ -193,78 +183,12 @@ struct ProfileHeader: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(viewer.name).font(.title3.bold())
                 let stats = model.listStats
-                let days = Double(stats.minutes) / 1440
-                Text("\(stats.count) anime · \(stats.episodes) eps · \(String(format: "%.1f", days)) days")
+                Text("\(model.count(of: .COMPLETED)) seen · \(model.count(of: .PLANNING)) planned · \(model.count(of: .DROPPED)) dropped")
                     .font(.caption).foregroundStyle(.secondary)
-                Text("\(model.count(of: .PLANNING)) planned" + (stats.meanScore.map { " · mean score \(String(format: "%.1f", $0))" } ?? ""))
+                Text(stats.meanScore.map { "Your average score \(String(format: "%.1f", $0))/10" } ?? "Rate shows to sharpen your picks")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
         .padding(.vertical, 4)
-    }
-}
-
-struct WatchingRow: View {
-    @Environment(AppModel.self) private var model
-    @Environment(\.zoomNamespace) private var zoom
-    let entry: ListEntry
-    @State private var isSaving = false
-
-    var body: some View {
-        NavigationLink(value: MediaLink(id: entry.mediaId)) {
-            HStack(spacing: 12) {
-                CoverImageView(url: entry.media.thumbURL, color: entry.media.coverImage?.color,
-                               width: 54, height: 78, cornerRadius: 6)
-                    .zoomSource(id: entry.mediaId, in: zoom)
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(entry.media.displayTitle(model.settings.titleLanguage))
-                        .font(.subheadline.weight(.semibold))
-                        .lineLimit(2)
-                    ProgressView(value: progressFraction)
-                        .tint(Theme.accent)
-                    HStack {
-                        Text(progressText).font(.caption).foregroundStyle(.secondary)
-                        if let airing = Fmt.airing(entry.media.nextAiringEpisode) {
-                            Text("· \(airing)").font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-                }
-                Spacer(minLength: 4)
-                if model.canEdit {
-                    Button {
-                        Task {
-                            isSaving = true
-                            await model.incrementProgress(entry)
-                            isSaving = false
-                        }
-                    } label: {
-                        Group {
-                            if isSaving {
-                                ProgressView()
-                            } else {
-                                Text("+1").font(.subheadline.bold())
-                            }
-                        }
-                        .frame(width: 48, height: 34)
-                        .glassEffect(.regular.tint(Theme.accent.opacity(0.3)).interactive(), in: .capsule)
-                    }
-                    // Borderless keeps the tap on the button instead of opening the row.
-                    .buttonStyle(.borderless)
-                    .sensoryFeedback(.increase, trigger: entry.progressValue)
-                    .disabled(isSaving)
-                }
-            }
-        }
-    }
-
-    private var progressText: String {
-        if let total = entry.media.episodes { return "\(entry.progressValue)/\(total)" }
-        return "\(entry.progressValue)/?"
-    }
-
-    private var progressFraction: Double {
-        let total = entry.media.episodes ?? entry.media.availableEpisodes ?? 0
-        guard total > 0 else { return 0 }
-        return min(1, Double(entry.progressValue) / Double(total))
     }
 }

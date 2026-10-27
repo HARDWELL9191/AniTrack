@@ -167,6 +167,7 @@ struct PickCard: View {
     @State private var explanation: String?
     @State private var isExplaining = false
     @State private var explainError: String?
+    @State private var showMoreLikeThis = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -251,10 +252,16 @@ struct PickCard: View {
                             .buttonStyle(.glass)
                         }
                     }
-                    Button(action: onNext) {
-                        Label("Another pick", systemImage: "shuffle").frame(maxWidth: .infinity)
+                    HStack(spacing: 10) {
+                        Button { showMoreLikeThis = true } label: {
+                            Label("More like this", systemImage: "square.stack.3d.up").frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.glass)
+                        Button(action: onNext) {
+                            Label("Another pick", systemImage: "shuffle").frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.glass)
                     }
-                    .buttonStyle(.glass)
                 }
                 .controlSize(.large)
             }
@@ -271,6 +278,10 @@ struct PickCard: View {
                 }
         }
         .onAppear { explanation = PickExplainer.shared.cached(rec.id) }
+        .sheet(isPresented: $showMoreLikeThis) {
+            MoreLikeThisSheet(media: rec.media)
+                .presentationDetents([.medium, .large])
+        }
     }
 
     @ViewBuilder

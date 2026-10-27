@@ -35,6 +35,9 @@ final class AppModel {
     // Lets Home jump to another tab.
     var selectedTab: AppTab = .home
 
+    /// When set, a quick "how did you like it?" sheet appears (scores sharpen picks the most).
+    var ratePrompt: Media?
+
     private let defaults = UserDefaults.standard
     private static let tokenKey = "anilistToken"
 
@@ -258,6 +261,7 @@ final class AppModel {
         do {
             // scoreRaw nil = AniList keeps whatever score you already gave it.
             try await save(media: media, status: .COMPLETED, progress: progress, scoreRaw: nil)
+            if (existing?.scoreValue ?? 0) == 0 { ratePrompt = media }
             // It's on your list now, so it no longer belongs in any picks feed (not a dislike).
             for key in feeds.keys { feeds[key]?.remove(media.id) }
             for (key, value) in feeds { DiskCache.saveInBackground(value, name: feedCacheName(key: key)) }
