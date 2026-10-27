@@ -32,6 +32,9 @@ final class AppModel {
     // Categories (AniList genres + tags), loaded once and cached.
     private(set) var allCategories: [AnimeCategory] = []
 
+    /// Set when pick settings change, so the next visit rebuilds instead of reusing saved picks.
+    @ObservationIgnored private var forceRebuild: Set<String> = []
+
     // Lets Home jump to another tab.
     var selectedTab: AppTab = .home
 
@@ -137,9 +140,10 @@ final class AppModel {
                 errorMessage = "Your AniList login expired. Please log in again."
                 logOut()
             } else {
-                // Offline: fall back to the last known profile so the cached list still shows.
+                // Offline: fall back to the last known profile so the cached list still shows,
+                // and only bother you with an error if there's nothing to show.
                 if viewer == nil { viewer = DiskCache.load(Viewer.self, name: "viewer") }
-                errorMessage = error.localizedDescription
+                if viewer == nil { errorMessage = error.localizedDescription }
             }
         }
     }
@@ -163,7 +167,7 @@ final class AppModel {
             entries = result
             DiskCache.saveInBackground(result, name: cacheName("list"))
         } catch {
-            errorMessage = error.localizedDescription
+            if entries.isEmpty { errorMessage = error.localizedDescription }
         }
     }
 
@@ -226,10 +230,13 @@ final class AppModel {
         let saved = try await client.run(Queries.saveEntry, variables: vars, as: SaveEntryData.self).entry
 
         if let index = entries.firstIndex(where: { $0.mediaId == media.id }) {
-            entries[index].status = saved.status ?? status
-            entries[index].progress = saved.progress
-            entries[index].score = saved.score
-            entries[index].updatedAt = saved.updatedAt ?? Int(Date().timeIntervalSince1970)
+            // Edit a copy and assign once: one taste/match recalculation instead of four.
+            var updated = entries[index]
+            updated.status = saved.status ?? status
+            updated.progress = saved.progress
+            updated.score = saved.score
+            updated.updatedAt = saved.updatedAt ?? Int(Date().timeIntervalSince1970)
+            entries[index] = updated
         } else {
             entries.append(ListEntry(id: saved.id, mediaId: media.id, status: saved.status ?? status,
                                      score: saved.score, progress: saved.progress,
@@ -357,7 +364,9 @@ final class AppModel {
         }
         let options = recommendationOptions(category)
         let fingerprint = Recommender.fingerprint(entries: entries, options: options)
-        if !force {
+        let mustRebuild = force || forceRebuild.contains(key)
+        forceRebuild.remove(key)
+        if !mustRebuild {
             if feeds[key] == nil {
                 feeds[key] = await DiskCache.loadInBackground(RecommendationResult.self, name: feedCacheName(category))
             }
@@ -367,7 +376,13 @@ final class AppModel {
                 // keep a fresh feed for a day so For You doesn't reshuffle under your thumb; the
                 // match % and the next "load more" round already use your updated taste.
                 if (current.fingerprint == fingerprint && age < 3 * 86_400) || age < 86_400 {
-                    let onList = current.picks.filter { entry(for: $0.id) != nil }.map(\.id)
+                    // Drop anything now on your list or excluded by your current settings.
+                    let onList = current.picks.filter { pick in
+                        entry(for: pick.id) != nil
+                            || settings.dismissedPicks.contains(pick.id)
+                            || (settings.hideChinese && pick.media.countryOfOrigin == "CN")
+                            || (!settings.includeUnreleased && pick.media.status == "NOT_YET_RELEASED")
+                    }.map(\.id)
                     if !onList.isEmpty {
                         for id in onList { current.remove(id) }
                         feeds[key] = current
@@ -457,6 +472,13 @@ final class AppModel {
 
     func resetDismissedPicks() {
         settings.dismissedPicks = []
+        invalidatePicks()
+    }
+
+    /// Pick settings changed: rebuild every feed on its next visit.
+    func invalidatePicks() {
+        forceRebuild.formUnion(feeds.keys)
+        forceRebuild.insert("any")
         feeds = [:]
     }
 

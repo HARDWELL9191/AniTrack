@@ -3,6 +3,8 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @State private var pastedToken = ""
+    private enum Field { case clientId, token }
+    @FocusState private var focused: Field?
     @State private var confirmLogout = false
 
     var body: some View {
@@ -29,11 +31,14 @@ struct SettingsView: View {
                         ForEach(TitleLanguage.allCases) { Text($0.label).tag($0) }
                     }
                     Toggle("Hide Chinese animation", isOn: $settings.hideChinese)
+                        .onChange(of: settings.hideChinese) { _, _ in model.invalidatePicks() }
                 }
 
                 Section {
                     Toggle("On-device AI ranking", isOn: $settings.useOnDeviceAI)
+                        .onChange(of: settings.useOnDeviceAI) { _, _ in model.invalidatePicks() }
                     Toggle("Include unreleased shows", isOn: $settings.includeUnreleased)
+                        .onChange(of: settings.includeUnreleased) { _, _ in model.invalidatePicks() }
                     Button("Rebuild picks now") {
                         Task { await model.generateRecommendations(force: true) }
                     }
@@ -52,8 +57,13 @@ struct SettingsView: View {
                 Section {
                     TextField("AniList client ID", text: $settings.clientId)
                         .keyboardType(.numberPad)
+                        .focused($focused, equals: .clientId)
                     SecureField("Paste an access token (optional)", text: $pastedToken)
+                        .focused($focused, equals: .token)
+                        .submitLabel(.done)
+                        .onSubmit { focused = nil }
                     Button("Use token") {
+                        focused = nil
                         Task {
                             await model.useToken(pastedToken)
                             pastedToken = ""
@@ -73,6 +83,14 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Profile")
+            .scrollDismissesKeyboard(.interactively)
+            .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") { focused = nil }
+                        .fontWeight(.semibold)
+                }
+            }
             .confirmationDialog("Log out of AniTrack?", isPresented: $confirmLogout, titleVisibility: .visible) {
                 Button("Log out", role: .destructive) { model.logOut() }
             }

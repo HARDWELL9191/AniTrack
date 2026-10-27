@@ -62,7 +62,12 @@ struct WelcomeView: View {
     @State private var isWorking = false
     @State private var showUsernameField = false
 
+    private enum Field { case clientId, username }
+    @FocusState private var focused: Field?
+
     var body: some View {
+        // NavigationStack (bar hidden) so the keyboard's Done bar has a toolbar to live in.
+        NavigationStack {
         ScrollView {
             VStack(spacing: 28) {
                 VStack(spacing: 12) {
@@ -83,6 +88,7 @@ struct WelcomeView: View {
                     Text("AniList Client ID").font(.headline)
                     TextField("e.g. 12345", text: $clientId)
                         .keyboardType(.numberPad)
+                        .focused($focused, equals: .clientId)
                         .padding(14)
                         .background(.fill.tertiary, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                     Text("Create one once at anilist.co/settings/developer with the redirect URL **\(AniListAuth.redirectURL)**. See the README for steps.")
@@ -93,6 +99,7 @@ struct WelcomeView: View {
                 GlassEffectContainer(spacing: 16) {
                     VStack(spacing: 12) {
                         Button {
+                            focused = nil
                             Task { await logIn() }
                         } label: {
                             Label("Log in with AniList", systemImage: "person.badge.key.fill")
@@ -119,9 +126,13 @@ struct WelcomeView: View {
                         TextField("AniList username", text: $username)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
+                            .focused($focused, equals: .username)
+                            .submitLabel(.done)
+                            .onSubmit { focused = nil }
                             .padding(14)
                             .background(.fill.tertiary, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                         Button {
+                            focused = nil
                             Task {
                                 isWorking = true
                                 await model.useUsername(username)
@@ -143,13 +154,30 @@ struct WelcomeView: View {
             }
             .padding(.horizontal, 24)
             .padding(.bottom, 32)
+            .frame(maxWidth: .infinity)
+            // Tap on any empty spot of the page closes the keyboard (buttons and fields still win).
+            .contentShape(Rectangle())
+            .onTapGesture { focused = nil }
         }
         .scrollDismissesKeyboard(.interactively)
         .background {
             // Soft colorful backdrop so the glass has something to refract.
+            // Tapping empty space anywhere closes the keyboard.
             LinearGradient(colors: [Theme.accent.opacity(0.35), Theme.pink.opacity(0.25), Color(.systemBackground)],
                            startPoint: .topLeading, endPoint: .bottom)
                 .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture { focused = nil }
+        }
+        .toolbar(.hidden, for: .navigationBar)
+        .toolbar {
+            // The number pad has no Return key: give it a Done button.
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") { focused = nil }
+                    .fontWeight(.semibold)
+            }
+        }
         }
         .onAppear { clientId = model.settings.clientId }
     }
