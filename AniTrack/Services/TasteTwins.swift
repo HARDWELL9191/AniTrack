@@ -135,18 +135,22 @@ actor TasteTwins {
         guard twins.count >= 3 else { return nil }
 
         // 3) What your twins love that you haven't seen. Needs at least two twins who liked it.
+        //    Popularity correction: a classic nearly everyone has seen (and mildly likes) shouldn't
+        //    outrank something your twins specifically love, so the total is divided by √(how many
+        //    twins have it at all).
         var sum: [Int: Double] = [:]
         var support: [Int: Int] = [:]
-        let totalSimilarity = twins.reduce(0) { $0 + $1.similarity }
+        var seenBy: [Int: Int] = [:]
         for twin in twins {
             for (id, pref) in twin.prefs where mine[id] == nil {
                 sum[id, default: 0] += twin.similarity * pref
+                seenBy[id, default: 0] += 1
                 if pref > 0.25 { support[id, default: 0] += 1 }
             }
         }
         var raw: [Int: Double] = [:]
         for (id, value) in sum where (support[id] ?? 0) >= 2 && value > 0 {
-            raw[id] = value / totalSimilarity
+            raw[id] = value / Double(max(1, seenBy[id] ?? 1)).squareRoot()
         }
         let top = raw.values.max() ?? 0
         guard top > 0 else { return nil }

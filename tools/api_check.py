@@ -297,13 +297,14 @@ if os.environ.get("ANILIST_USER", "") == "twins":
         sim = agree/math.sqrt(norm)*ov/(ov+4)
         if sim > 0.05: twins.append((sim, prefs))
     tot = sum(t[0] for t in twins) or 1
-    summ, sup = {}, {}
+    summ, sup, seen = {}, {}, {}
     for sim, prefs in twins:
         for i, p in prefs.items():
             if i in entries: continue
             summ[i] = summ.get(i,0) + sim*p
+            seen[i] = seen.get(i,0) + 1
             if p > 0.25: sup[i] = sup.get(i,0)+1
-    raw = {i: v/tot for i, v in summ.items() if sup.get(i,0) >= 2 and v > 0}
+    raw = {i: v/math.sqrt(seen[i]) for i, v in summ.items() if sup.get(i,0) >= 2 and v > 0}
     top = sorted(raw.items(), key=lambda kv: -kv[1])[:20]
     ids = [i for i,_ in top]
     time.sleep(2.2)
