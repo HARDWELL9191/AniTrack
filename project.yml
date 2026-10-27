@@ -40,6 +40,10 @@ targets:
             CFBundleURLSchemes:
               - anitrack
         ITSAppUsesNonExemptEncryption: false
+        UIBackgroundModes:
+          - processing
+        BGTaskSchedulerPermittedIdentifiers:
+          - com.tim.anitrack.prefetch
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.tim.anitrack

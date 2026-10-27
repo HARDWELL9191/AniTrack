@@ -112,9 +112,8 @@ extension HomeView {
                         Text("Hoshi is picking shows for you…").foregroundStyle(.secondary)
                     }
                 } else {
-                    cardRow(Array(picks.prefix(15).map(\.media))) { media in
-                        picks.first { $0.id == media.id }.map { "\($0.match)% match" }
-                    }
+                    let matches = Dictionary(picks.prefix(15).map { ($0.id, $0.match) }, uniquingKeysWith: { a, _ in a })
+                    cardRow(Array(picks.prefix(15).map(\.media)), matches: matches) { _ in nil }
                 }
             } header: {
                 sectionHeader("Picked for you", systemImage: "wand.and.stars", action: "See all") {
@@ -139,13 +138,13 @@ extension HomeView {
     }
 
     /// Horizontal row of cover cards inside a List section.
-    func cardRow(_ items: [Media], caption: @escaping (Media) -> String?) -> some View {
+    func cardRow(_ items: [Media], matches: [Int: Int] = [:], caption: @escaping (Media) -> String?) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             LazyHStack(alignment: .top, spacing: 12) {
                 ForEach(items) { media in
                     NavigationLink(value: MediaLink(id: media.id)) {
                         VStack(alignment: .leading, spacing: 4) {
-                            MediaCard(media: media, width: 104)
+                            MediaCard(media: media, width: 104, matchOverride: matches[media.id])
                             if let text = caption(media) {
                                 Text(text)
                                     .font(.caption2.weight(.semibold))

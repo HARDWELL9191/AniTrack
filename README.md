@@ -6,6 +6,7 @@ A personal AniList client for iPhone (iOS 26+, built against the iOS 27 SDK).
 - **Discover**: search (optionally within a category), category browsing with sorting, trending, this season, next season, all-time top
 - **For You**: "Ask Hoshi" personal picks, one card at a time, filterable by category (Isekai, Romance, Ecchi…), and endless: more picks load as you reach the end
 - **Home**: picked-for-you row, ready to watch, airing schedule, up next, trending this season
+- **Match %**: every show gets a personal match next to its score (genres/tags instantly, refined by on-device AI; most AI work happens while charging)
 - **Lists**: Watching / Planning / Completed / Paused / Dropped / Rewatching, with filter and sorting
 - **Details**: synopsis, info, tags (spoilers hidden), related shows, fan recommendations, edit status / progress / score
 - Syncs both ways with your AniList account

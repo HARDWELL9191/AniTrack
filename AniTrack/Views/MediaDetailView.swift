@@ -64,7 +64,10 @@ struct MediaDetailView: View {
                         if let native = media.title.native, model.settings.titleLanguage != .native {
                             Text(native).font(.caption).foregroundStyle(.secondary)
                         }
-                        ScoreBadge(score: media.averageScore)
+                        HStack(spacing: 12) {
+                            ScoreBadge(score: media.averageScore)
+                            MatchBadge(media: media, showWord: true)
+                        }
                     }
                 }
                 .padding(.horizontal)

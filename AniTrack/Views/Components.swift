@@ -101,6 +101,24 @@ struct ScoreBadge: View {
     }
 }
 
+/// Personal match %, shown next to the community score.
+struct MatchBadge: View {
+    @Environment(AppModel.self) private var model
+    let media: Media
+    var override: Int? = nil
+    var showWord = false
+
+    var body: some View {
+        if let value = override ?? model.matcher.match(for: media) {
+            Label(showWord ? "\(value)% match" : "\(value)%", systemImage: "wand.and.stars")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Theme.pink)
+                .contentTransition(.numericText())
+                .animation(.snappy, value: value)
+        }
+    }
+}
+
 struct Chip: View {
     let text: String
     var tint: Color = Theme.accent
@@ -152,6 +170,8 @@ struct MediaCard: View {
     @Environment(\.zoomNamespace) private var zoom
     let media: Media
     var width: CGFloat = 112
+    /// For You's own match for this pick, so one show never shows two different numbers.
+    var matchOverride: Int? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -159,6 +179,19 @@ struct MediaCard: View {
                 CoverImageView(url: media.coverURL, color: media.coverImage?.color,
                                width: width, height: width * 1.45)
                     .zoomSource(id: media.id, in: zoom)
+                    .overlay(alignment: .bottomLeading) {
+                        if let value = matchOverride ?? model.matcher.match(for: media) {
+                            Text("\(value)%")
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 4)
+                                .glassEffect(.regular.tint(Theme.pink.opacity(0.55)), in: .capsule)
+                                .contentTransition(.numericText())
+                                .animation(.snappy, value: value)
+                                .padding(5)
+                        }
+                    }
                 if let entry = model.entry(for: media.id) {
                     Image(systemName: entry.status.symbol)
                         .font(.caption.weight(.semibold))
@@ -197,7 +230,10 @@ struct MediaRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                ScoreBadge(score: media.averageScore)
+                HStack(spacing: 10) {
+                    ScoreBadge(score: media.averageScore)
+                    MatchBadge(media: media)
+                }
             }
             Spacer(minLength: 0)
         }

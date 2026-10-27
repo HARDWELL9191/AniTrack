@@ -6,11 +6,16 @@ import Observation
 final class AppModel {
     let client = AniListClient()
     let settings = AppSettings()
+    /// Match % for every show (instant genre/tag layer + cached on-device AI layer).
+    let matcher = MatchEngine()
 
     private(set) var mode: AccountMode = .none
     private(set) var viewer: Viewer?
     private(set) var entries: [ListEntry] = [] {
-        didSet { entryIndex = Dictionary(entries.indices.map { (entries[$0].mediaId, $0) }, uniquingKeysWith: { a, _ in a }) }
+        didSet {
+            entryIndex = Dictionary(entries.indices.map { (entries[$0].mediaId, $0) }, uniquingKeysWith: { a, _ in a })
+            matcher.update(entries: entries)
+        }
     }
     /// mediaId → position in `entries`, so every cover/badge lookup is O(1) instead of a scan.
     @ObservationIgnored private var entryIndex: [Int: Int] = [:]
@@ -34,6 +39,11 @@ final class AppModel {
     private static let tokenKey = "anilistToken"
 
     var canEdit: Bool { mode == .loggedIn }
+
+    init() {
+        let settings = self.settings
+        matcher.aiEnabled = { settings.useOnDeviceAI && SemanticEngine.shouldRunNow }
+    }
 
     // MARK: - Lifecycle
 

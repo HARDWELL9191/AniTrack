@@ -77,40 +77,37 @@ struct DiscoverView: View {
         }
     }
 
-    /// Glass tiles for the featured categories; "All categories" opens the full searchable list.
+    /// Minimal "Browse by category" dropdown; picking one opens that category's page.
     private var categoryGrid: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("Categories").font(.title3.weight(.bold))
-                Spacer()
-                Button("All categories") { showAllCategories = true }
-                    .font(.subheadline)
-            }
-            .padding(.horizontal)
-            ScrollView(.horizontal, showsIndicators: false) {
-                GlassEffectContainer(spacing: 10) {
-                    LazyHGrid(rows: [GridItem(.fixed(44)), GridItem(.fixed(44))], spacing: 10) {
-                        ForEach(model.featuredCategories) { category in
-                            NavigationLink(value: category) {
-                                Text(category.name)
-                                    .font(.subheadline.weight(.semibold))
-                                    .padding(.horizontal, 16)
-                                    .frame(height: 40)
-                                    .glassEffect(.regular.tint(tint(for: category)).interactive(), in: .capsule)
-                            }
-                            .buttonStyle(.plain)
-                        }
+        HStack {
+            Text("Categories").font(.title3.weight(.bold))
+            Spacer()
+            Menu {
+                Section("Genres") {
+                    ForEach(model.featuredCategories.filter { $0.kind == .genre }) { category in
+                        Button(category.name) { browseCategory = category }
                     }
-                    .padding(.horizontal)
                 }
+                Section("Tags") {
+                    ForEach(model.featuredCategories.filter { $0.kind == .tag }) { category in
+                        Button(category.name) { browseCategory = category }
+                    }
+                }
+                Divider()
+                Button { showAllCategories = true } label: {
+                    Label("All categories…", systemImage: "magnifyingglass")
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Text("Browse")
+                    Image(systemName: "chevron.down").font(.caption.weight(.semibold))
+                }
+                .font(.subheadline.weight(.semibold))
             }
+            .menuStyle(.button)
+            .buttonStyle(.glass)
         }
-    }
-
-    private func tint(for category: AnimeCategory) -> Color {
-        let palette: [Color] = [Theme.accent, Theme.pink, .purple, .orange, .teal, .indigo, .mint]
-        let index = abs(category.name.unicodeScalars.reduce(0) { $0 &+ Int($1.value) }) % palette.count
-        return palette[index].opacity(0.35)
+        .padding(.horizontal)
     }
 
     private var searchResults: some View {

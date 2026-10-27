@@ -3,11 +3,14 @@ import SwiftUI
 @main
 struct AniTrackApp: App {
     @State private var model = AppModel()
+    @Environment(\.scenePhase) private var scenePhase
 
     init() {
         // Bigger shared cache so cover art loads instantly the second time.
         URLCache.shared = URLCache(memoryCapacity: 64 * 1024 * 1024,
                                    diskCapacity: 512 * 1024 * 1024)
+        // Charging-time pre-analysis must be registered before launch finishes.
+        BackgroundPrefetch.register()
     }
 
     var body: some Scene {
@@ -16,6 +19,9 @@ struct AniTrackApp: App {
                 .environment(model)
                 .tint(Theme.accent)
                 .task { await model.bootstrap() }
+                .onChange(of: scenePhase) { _, phase in
+                    if phase == .background { BackgroundPrefetch.schedule() }
+                }
         }
     }
 }

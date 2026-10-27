@@ -1,46 +1,51 @@
 import SwiftUI
 
-/// Horizontal glass chips: "Any" (optional), featured categories, and "More…".
+/// Minimal category dropdown: "Any category" plus the popular categories, grouped into
+/// Genres and Tags, and "All categories…" for the full searchable list.
 struct CategoryChipsBar: View {
     @Environment(AppModel.self) private var model
     @Binding var selected: AnimeCategory?
     var showAny = true
     @State private var showAll = false
 
+    private var genres: [AnimeCategory] { model.featuredCategories.filter { $0.kind == .genre } }
+    private var tags: [AnimeCategory] { model.featuredCategories.filter { $0.kind == .tag } }
+
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView(.horizontal, showsIndicators: false) {
-                GlassEffectContainer(spacing: 8) {
-                    HStack(spacing: 8) {
-                        if showAny {
-                            chip(title: "Any category", systemImage: "sparkles", isSelected: selected == nil) {
-                                selected = nil
-                            }
-                            .id("any")
-                        }
-                        // Keep a category picked from the full list visible as a chip.
-                        if let selected, !model.featuredCategories.contains(selected) {
-                            chip(title: selected.name, systemImage: nil, isSelected: true) {}
-                                .id(selected.id)
-                        }
-                        ForEach(model.featuredCategories) { category in
-                            chip(title: category.name, systemImage: nil, isSelected: selected == category) {
-                                selected = category
-                            }
-                            .id(category.id)
-                        }
-                        chip(title: "More…", systemImage: "square.grid.2x2", isSelected: false) {
-                            showAll = true
-                        }
+        HStack {
+            Menu {
+                if showAny {
+                    Button { selected = nil } label: {
+                        if selected == nil { Label("Any category", systemImage: "checkmark") } else { Text("Any category") }
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 6)
+                    Divider()
                 }
+                Section("Genres") {
+                    ForEach(genres) { item(for: $0) }
+                }
+                Section("Tags") {
+                    ForEach(tags) { item(for: $0) }
+                }
+                Divider()
+                Button { showAll = true } label: {
+                    Label("All categories…", systemImage: "magnifyingglass")
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "line.3.horizontal.decrease")
+                    Text(selected?.name ?? "Any category")
+                        .lineLimit(1)
+                    Image(systemName: "chevron.down")
+                        .font(.caption.weight(.semibold))
+                }
+                .font(.subheadline.weight(.semibold))
             }
-            .onChange(of: selected) { _, newValue in
-                withAnimation { proxy.scrollTo(newValue?.id ?? "any", anchor: .center) }
-            }
+            .menuStyle(.button)
+            .buttonStyle(.glass)
+            Spacer()
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 4)
         .sheet(isPresented: $showAll) {
             AllCategoriesSheet { picked in
                 selected = picked
@@ -50,25 +55,11 @@ struct CategoryChipsBar: View {
         }
     }
 
-    private func chip(title: String, systemImage: String?, isSelected: Bool, action: @escaping () -> Void) -> some View {
-        Button {
-            withAnimation(.bouncy) { action() }
-        } label: {
-            Group {
-                if let systemImage {
-                    Label(title, systemImage: systemImage)
-                } else {
-                    Text(title)
-                }
-            }
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(isSelected ? Color.white : Color.primary)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 9)
-            .glassEffect(isSelected ? .regular.tint(Theme.accent).interactive() : .regular.interactive(),
-                         in: .capsule)
+    @ViewBuilder
+    private func item(for category: AnimeCategory) -> some View {
+        Button { selected = category } label: {
+            if selected == category { Label(category.name, systemImage: "checkmark") } else { Text(category.name) }
         }
-        .buttonStyle(.plain)
     }
 }
 

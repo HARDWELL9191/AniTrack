@@ -99,12 +99,7 @@ struct ForYouView: View {
                                 Button {
                                     withAnimation(.snappy) { index = offset }
                                 } label: {
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        MediaCard(media: rec.media, width: 96)
-                                        Text("\(rec.match)% match")
-                                            .font(.caption2.weight(.semibold))
-                                            .foregroundStyle(Theme.pink)
-                                    }
+                                    MediaCard(media: rec.media, width: 96, matchOverride: rec.match)
                                 }
                                 .buttonStyle(.plain)
                                 .onAppear { if offset >= picks.count - 3 { preloadIfNeeded(at: offset) } }

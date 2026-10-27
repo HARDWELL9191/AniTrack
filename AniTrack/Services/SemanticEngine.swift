@@ -189,6 +189,16 @@ actor SemanticEngine {
         return dot // both are already unit length
     }
 
+    /// Vectors that are already known, without ever loading the model (used by match badges).
+    func cachedVectors(for ids: [Int]) -> [Int: [Float]] {
+        for backend in [Backend.contextual, .sentence] where cacheLoadedFor == nil {
+            if FileManager.default.fileExists(atPath: cacheURL(backend).path) { loadCache(for: backend); break }
+        }
+        var result: [Int: [Float]] = [:]
+        for id in ids { if let v = cache[id] { result[id] = v } }
+        return result
+    }
+
     /// Returns unit vectors for the given media. Cached vectors cost nothing; the model is only
     /// loaded if at least one show hasn't been embedded before.
     func vectors(for media: [Media]) async -> [Int: [Float]] {
