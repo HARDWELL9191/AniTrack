@@ -45,6 +45,11 @@ def run(q, variables):
         return e.code, e.read(), time.time() - t
 
 
+if os.environ.get("ANILIST_USER", "") == "twins":
+    # Only the taste-twins check (keeps AniList's rate limit for it).
+    exec(open(__file__).read().split("# Taste twins (collaborative filtering): mirrors")[1].split("\n", 1)[1])
+    raise SystemExit(0)
+
 SEASONS_ONLY = os.environ.get("ANILIST_USER", "") == "seasons"   # GitHub shows max 10 notices per step
 
 # Raw probe: show exactly what AniList answers, headers included.
@@ -233,46 +238,72 @@ for search in ["Tensei shitara Slime Datta Ken 3rd Season", "Re:Zero 3rd Season"
 if season_lines: note(f"season batch {season_batch}", "\n".join(season_lines))
 
 
-# Taste twins (collaborative filtering) probe.
+# Taste twins (collaborative filtering): mirrors Services/TasteTwins.swift on a real list.
 if os.environ.get("ANILIST_USER", "") == "twins":
-    FIND = """query ($mediaId: Int, $page: Int) {
-      Page(page: $page, perPage: 50) {
-        pageInfo { hasNextPage }
-        mediaList(mediaId: $mediaId, status: COMPLETED, sort: [UPDATED_TIME_DESC]) {
-          userId
-          score(format: POINT_100)
-        }
-      }
-    }"""
-    LIST = """query ($userId: Int) {
-      MediaListCollection(userId: $userId, type: ANIME, status_in: [COMPLETED, REPEATING, DROPPED]) {
-        lists { entries { mediaId status score(format: POINT_100) } }
-      }
-    }"""
-    variants = {
-        "nosort": FIND.replace(", sort: [UPDATED_TIME_DESC]", ""),
-        "id_desc": FIND.replace("UPDATED_TIME_DESC", "ID_DESC"),
-        "score_desc": FIND.replace("UPDATED_TIME_DESC", "SCORE_DESC"),
-        "nostatus": FIND.replace("status: COMPLETED, sort: [UPDATED_TIME_DESC]", "sort: [ID_DESC]"),
-    }
-    best = None
-    for vname, q in variants.items():
-        status, raw, dt = run(q, {"mediaId": 108465, "page": 1})
-        d = safe_json(raw, "twins " + vname)
-        items = (((d.get("data") or {}).get("Page") or {}).get("mediaList")) or []
-        note("twins variant " + vname, f"HTTP {status} in {dt:.1f}s rows={len(items)} scored={sum(1 for i in items if (i.get('score') or 0) > 0)} errors={str(d.get('errors'))[:200]} sample={items[:4]}")
-        if items and best is None: best = (q, raw)
-        time.sleep(3)
-    status, raw, dt = (200, best[1], 0) if best else (0, b"{}", 0)
-    d = safe_json(raw, "twins find")
-    items = (((d.get("data") or {}).get("Page") or {}).get("mediaList")) or []
-    scored = [i for i in items if (i.get("score") or 0) > 0]
-    note("twins find", f"HTTP {status} in {dt:.1f}s, {len(raw)//1024} KB, errors={d.get('errors')}, rows={len(items)}, scored={len(scored)}, sample={items[:5]}")
-    time.sleep(2.5)
-    for u in [i["userId"] for i in scored[:3]]:
-        status, raw, dt = run(LIST, {"userId": u})
-        d = safe_json(raw, "twins list")
-        lists = (((d.get("data") or {}).get("MediaListCollection") or {}).get("lists")) or []
-        entries = [e for l in lists for e in (l.get("entries") or [])]
-        note("twins list", f"user {u}: HTTP {status} in {dt:.1f}s, {len(raw)//1024} KB, errors={d.get('errors')}, entries={len(entries)}, scored={sum(1 for e in entries if (e.get('score') or 0) > 0)}")
-        time.sleep(2.5)
+    import math, random
+    def gql(q, v):
+        st, raw, dt = run(q, v)
+        try: return json.loads(raw)
+        except Exception: return {}
+    me = gql(query("userByName"), {"name": "HARDWELL9191"})["data"]["User"]
+    coll = gql(query("listCollection"), {"userId": me["id"]})["data"]["MediaListCollection"]
+    entries = {}
+    for l in coll["lists"]:
+        if l.get("isCustomList"): continue
+        for e in l["entries"]: entries[e["mediaId"]] = e
+    scored = [e["score"] for e in entries.values() if e.get("score")]
+    mean = sum(scored)/len(scored) if scored else 70
+    spread = math.sqrt(sum((x-mean)**2 for x in scored)/len(scored)) if scored else 0
+    def weight(e):  # mirrors Recommender.weight (scored part)
+        s = e.get("score") or 0; st = e["status"]
+        if s > 0:
+            if st in ("COMPLETED","REPEATING","PLANNING"): return 0.3 + 1.7*(s/100)**2
+            if st == "DROPPED": return -1
+        return {"COMPLETED":0.7,"CURRENT":0.5,"PLANNING":0.5,"PAUSED":0.1,"DROPPED":-1}.get(st,0)
+    W = {k: weight(e) for k,e in entries.items()}
+    anchors = sorted([e for e in entries.values() if e["status"] in ("COMPLETED","REPEATING") and W[e["mediaId"]] > 0.5],
+                     key=lambda e: -W[e["mediaId"]])[:6]
+    hits = {}
+    for a in anchors:
+        time.sleep(2.2)
+        d = gql(blocks["showFans"], {"mediaId": a["mediaId"], "page": random.randint(1,4)})
+        for r in (((d.get("data") or {}).get("Page") or {}).get("mediaList") or []):
+            if r.get("userId") and (r.get("score") or 0) >= 75: hits[r["userId"]] = hits.get(r["userId"],0)+1
+    cands = sorted(random.sample(list(hits), len(hits)), key=lambda u: -hits[u])[:30]
+    twins = []
+    for u in cands:
+        time.sleep(2.2)
+        d = gql(blocks["ratingsOnly"], {"userId": u})
+        rows = [e for l in ((((d.get("data") or {}).get("MediaListCollection") or {}).get("lists")) or []) for e in (l.get("entries") or [])]
+        sc = [r["score"] for r in rows if (r.get("score") or 0) > 0]
+        if len(sc) < 10: continue
+        m = sum(sc)/len(sc); sd = max(8, math.sqrt(sum((x-m)**2 for x in sc)/len(sc)))
+        prefs = {}
+        for r in rows:
+            if (r.get("score") or 0) > 0: prefs[r["mediaId"]] = max(-2, min(2, (r["score"]-m)/sd))
+            elif r.get("status") == "DROPPED": prefs[r["mediaId"]] = -1
+        agree = norm = 0; ov = 0
+        for i, p in prefs.items():
+            w = W.get(i, 0)
+            if w and i in entries: agree += w*p; norm += w*w; ov += 1
+        if ov < 2 or norm <= 0: continue
+        sim = agree/math.sqrt(norm)*ov/(ov+4)
+        if sim > 0.05: twins.append((sim, prefs))
+    tot = sum(t[0] for t in twins) or 1
+    summ, sup = {}, {}
+    for sim, prefs in twins:
+        for i, p in prefs.items():
+            if i in entries: continue
+            summ[i] = summ.get(i,0) + sim*p
+            if p > 0.25: sup[i] = sup.get(i,0)+1
+    raw = {i: v/tot for i, v in summ.items() if sup.get(i,0) >= 2 and v > 0}
+    top = sorted(raw.items(), key=lambda kv: -kv[1])[:20]
+    ids = [i for i,_ in top]
+    time.sleep(2.2)
+    d = gql(query("mediaByIds"), {"ids": ids, "perPage": len(ids)})
+    names = {m["id"]: f'{(m["title"].get("english") or m["title"].get("romaji"))} [{m.get("format")}{", adult" if m.get("isAdult") else ""}]'
+             for m in (((d.get("data") or {}).get("Page") or {}).get("media") or [])}
+    mx = top[0][1] if top else 1
+    note("twins summary", f"your list: {len(entries)} entries, mean score {mean:.0f}; anchors={[ (entries[a['mediaId']]['media']['title'].get('english') or entries[a['mediaId']]['media']['title'].get('romaji')) for a in anchors]}; candidate people={len(hits)}, used={len(cands)}, twins found={len(twins)}, top similarities={sorted([round(t[0],2) for t in twins], reverse=True)[:8]}")
+    note("twins top 1-10", "\n".join(f"{v/mx:.2f}  {names.get(i, i)}" for i, v in top[:10]))
+    note("twins top 11-20", "\n".join(f"{v/mx:.2f}  {names.get(i, i)}" for i, v in top[10:20]))

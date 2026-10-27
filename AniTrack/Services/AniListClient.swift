@@ -282,6 +282,28 @@ enum Queries {
     }
     """
 
+    /// People who finished a show, with their score (taste twins). Unsorted on purpose:
+    /// sorting all of a popular show's lists makes AniList time out; random pages give variety.
+    static let showFans = """
+    query ($mediaId: Int, $page: Int) {
+      Page(page: $page, perPage: 50) {
+        mediaList(mediaId: $mediaId, status: COMPLETED) {
+          userId
+          score(format: POINT_100)
+        }
+      }
+    }
+    """
+
+    /// Someone else's finished/dropped shows with scores only (no show details: ~25-65 KB).
+    static let ratingsOnly = """
+    query ($userId: Int) {
+      MediaListCollection(userId: $userId, type: ANIME, status_in: [COMPLETED, REPEATING, DROPPED]) {
+        lists { entries { mediaId status score(format: POINT_100) } }
+      }
+    }
+    """
+
     /// Your anime custom list names (needed before adding "Not for me", so none are lost).
     static let listOptions = """
     query {

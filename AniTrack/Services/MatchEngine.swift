@@ -17,6 +17,7 @@ final class MatchEngine {
     private(set) var version = 0
 
     @ObservationIgnored private var entries: [ListEntry] = []
+    @ObservationIgnored private var dislikes: [Media] = []
     @ObservationIgnored private var dirty = true
     @ObservationIgnored private var profile = Recommender.TasteProfile()
     @ObservationIgnored private var weights: [Int: Double] = [:]
@@ -45,6 +46,15 @@ final class MatchEngine {
         version &+= 1
     }
 
+    /// "Not for me" shows: they count against their genres/tags in the match too.
+    func update(dislikes: [Media]) {
+        guard Set(dislikes.map(\.id)) != Set(self.dislikes.map(\.id)) else { return }
+        self.dislikes = dislikes
+        dirty = true
+        memo.removeAll(keepingCapacity: true)
+        version &+= 1
+    }
+
     // MARK: Profile
 
     private func rebuildIfNeeded() {
@@ -61,6 +71,9 @@ final class MatchEngine {
             let w = Recommender.weight(for: e, mean: mean, spread: spread)
             newWeights[e.mediaId] = w
             if w != 0 { newProfile.add(e.media, weight: w) }
+        }
+        for media in dislikes.prefix(60) where newWeights[media.id] == nil {
+            newProfile.add(media, weight: Recommender.dislikeWeight)
         }
         newProfile.finalize()
         profile = newProfile

@@ -202,6 +202,15 @@ struct PickCard: View {
                 }
             }
 
+            if rec.twinLoved == true {
+                Label {
+                    Text("Loved by people with your taste")
+                        .font(.subheadline)
+                } icon: {
+                    Image(systemName: "person.2.fill").foregroundStyle(Theme.accent)
+                }
+            }
+
             if !rec.sharedHighlights.isEmpty {
                 FlowLayout {
                     ForEach(rec.sharedHighlights, id: \.self) { Chip(text: $0) }

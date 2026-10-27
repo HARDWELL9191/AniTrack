@@ -7,6 +7,8 @@ struct Recommendation: Identifiable, Hashable, Codable {
     let match: Int
     let because: [String]
     let sharedHighlights: [String]
+    /// People whose ratings agree with yours loved it (optional so older saved picks still load).
+    var twinLoved: Bool? = nil
 }
 
 /// One category's feed of picks. Grows in "rounds": when you reach the end, the next round
@@ -43,7 +45,25 @@ enum Recommender {
         /// False in Low Power Mode or when the phone is hot; not part of the fingerprint, so
         /// saved picks stay valid and the AI pass simply resumes later.
         var aiAllowedNow: Bool = true
+        /// Taste twins: show id → how much people with your taste love it (0...1), best first.
+        var twinScores: [Int: Double] = [:]
+        var twinRanked: [Int] = []
+        /// Shows you marked "Not for me": count against their genres, tags and synopsis style.
+        var dislikedMedia: [Media] = []
     }
+
+    /// How much each list entry counts in your taste (same rules everywhere).
+    static func weights(for entries: [ListEntry]) -> [Int: Double] {
+        let scored = entries.map(\.scoreValue).filter { $0 > 0 }
+        let mean = scored.isEmpty ? 70 : scored.reduce(0, +) / Double(scored.count)
+        let variance = scored.isEmpty ? 0 : scored.reduce(0) { $0 + ($1 - mean) * ($1 - mean) } / Double(scored.count)
+        let spread = sqrt(variance)
+        return Dictionary(entries.map { ($0.mediaId, weight(for: $0, mean: mean, spread: spread)) },
+                          uniquingKeysWith: { a, _ in a })
+    }
+
+    /// Weight of a "Not for me" show: a clear dislike, a bit softer than dropping it.
+    static let dislikeWeight = -0.6
 
     /// Uses FNV-1a (not Swift's Hasher, which is randomly seeded per launch) so it survives restarts.
     static func fingerprint(entries: [ListEntry], options: Options) -> Int {
@@ -255,9 +275,11 @@ enum Recommender {
             weights[entry.mediaId] = w
             if w != 0 { profile.add(entry.media, weight: w) }
         }
-        profile.finalize()
-
         let onList = Dictionary(entries.map { ($0.mediaId, $0) }, uniquingKeysWith: { a, _ in a })
+        // "Not for me" teaches the profile what you don't want (genres, tags), not just hides.
+        let disliked = options.dislikedMedia.filter { onList[$0.id] == nil }.prefix(60)
+        for media in disliked { profile.add(media, weight: dislikeWeight) }
+        profile.finalize()
 
         // Seeds: your strongest likes (Planning included), newest first among equals.
         let seeds = entries
@@ -354,6 +376,24 @@ enum Recommender {
             try await Task.sleep(nanoseconds: 300_000_000)
         }
 
+        // 2a) Taste twins: what people whose ratings agree with yours loved (deeper on later rounds).
+        if !options.twinRanked.isEmpty {
+            let pageSize = 40
+            let fresh = options.twinRanked.filter {
+                onList[$0] == nil && !exclude.contains($0) && !options.dismissed.contains($0)
+            }
+            let from = (round - 1) * pageSize
+            if from < fresh.count {
+                let ids = Array(fresh[from..<min(from + pageSize, fresh.count)]).filter { candidates[$0] == nil }
+                if !ids.isEmpty,
+                   let data = try? await client.run(Queries.mediaByIds,
+                                                    variables: ["ids": ids, "perPage": ids.count],
+                                                    as: PageData.self) {
+                    for media in data.page.media where media.isAdult != true { candidates[media.id] = media }
+                }
+            }
+        }
+
         // 2b) One pick per show: Season 2+ becomes Season 1, and shows you already have
         //     (any season on your list) are skipped. Movies/OVAs/renamed sequels stay separate.
         await collapseSeasons(candidates: &candidates, collab: &collab, reasons: &reasons,
@@ -361,8 +401,15 @@ enum Recommender {
 
         // 3) Cheap first pass (no AI) to pick a short list worth spending the AI work on.
         let maxCollab = max(collab.values.max() ?? 1, 0.0001)
-        // How strongly fans of the shows you loved recommend each show (0...1), for match %.
-        let fanSignal = collab.mapValues { min(1, max(0, $0 / maxCollab)) }
+        // People signal (0...1): fan recommendations from your favourites, combined with taste
+        // twins. Either one being strong is enough ("1 - both missing"). Also feeds match %.
+        func people(_ id: Int) -> Double {
+            let fans = min(1, max(0, (collab[id] ?? 0) / maxCollab))
+            let twins = options.twinScores[id] ?? 0
+            return 1 - (1 - fans) * (1 - twins)
+        }
+        var fanSignal = collab.mapValues { min(1, max(0, $0 / maxCollab)) }
+        for id in options.twinScores.keys { fanSignal[id] = people(id) }
 
         func allowed(_ m: Media) -> Bool {
             if onList[m.id] != nil || exclude.contains(m.id) { return false }
@@ -378,7 +425,7 @@ enum Recommender {
         struct Scored { let media: Media; let collab: Double; let tagSim: Double; let quality: Double; let score: Double }
         var preScored: [Scored] = []
         for (id, media) in candidates where allowed(media) {
-            let c = (collab[id] ?? 0) / maxCollab
+            let c = people(id)
             let sim = max(0, profile.similarity(to: media))
             let quality = Double(media.averageScore ?? media.meanScore ?? 60) / 100
             preScored.append(Scored(media: media, collab: c, tagSim: sim, quality: quality,
@@ -399,7 +446,8 @@ enum Recommender {
                 .sorted { abs(weights[$0.mediaId] ?? 0) > abs(weights[$1.mediaId] ?? 0) }
                 .prefix(40)
                 .map(\.media)
-            let toEmbed = Array(anchors) + shortList.map(\.media)
+            let dislikedAnchors = Array(disliked.prefix(20))
+            let toEmbed = Array(anchors) + dislikedAnchors + shortList.map(\.media)
             let vectors = await Task.detached(priority: .utility) {
                 await SemanticEngine.shared.vectors(for: toEmbed)
             }.value
@@ -410,6 +458,11 @@ enum Recommender {
                 let w = Float(weights[media.id] ?? 0)
                 if taste.isEmpty { taste = [Float](repeating: 0, count: v.count) }
                 SemanticEngine.accumulate(v, scale: w, into: &taste)
+            }
+            // Synopses like the ones you said "Not for me" to pull a show down.
+            for media in dislikedAnchors {
+                guard let v = vectors[media.id], v.count == taste.count else { continue }
+                SemanticEngine.accumulate(v, scale: Float(dislikeWeight), into: &taste)
             }
             taste = SemanticEngine.normalized(taste)
 
@@ -430,6 +483,7 @@ enum Recommender {
             }
         }
         ranked.sort { $0.score > $1.score }
+        ranked = diversified(ranked)
 
         // Match % is relative to the best pick in this round, so later rounds stay comparable.
         let top = max(ranked.first?.score ?? 1, 0.0001)
@@ -441,12 +495,49 @@ enum Recommender {
                                   score: item.score,
                                   match: match,
                                   because: Array((reasons[item.media.id] ?? []).prefix(3)),
-                                  sharedHighlights: profile.highlights(for: item.media))
+                                  sharedHighlights: profile.highlights(for: item.media),
+                                  twinLoved: (options.twinScores[item.media.id] ?? 0) >= 0.35 ? true : nil)
         }
         return (Array(picks), usedAI, fanSignal)
     }
 }
 
+
+extension Recommender {
+    /// Variety: walks the ranking and gently pushes down a show that's very similar (genres and
+    /// tags) to the last few already placed, so a batch isn't ten near-identical isekai. The
+    /// order only shifts a little: a much better match still comes first.
+    static func diversified(_ ranked: [(media: Media, score: Double)]) -> [(media: Media, score: Double)] {
+        guard ranked.count > 3 else { return ranked }
+        var pool = Array(ranked.prefix(120))
+        let rest = ranked.dropFirst(120)
+        let vectors = Dictionary(pool.map { ($0.media.id, TasteProfile.vector(for: $0.media)) },
+                                 uniquingKeysWith: { a, _ in a })
+        var result: [(media: Media, score: Double)] = []
+        let window = 4, penalty = 0.12
+        while !pool.isEmpty {
+            let recent = result.suffix(window).compactMap { vectors[$0.media.id] }
+            var bestIndex = 0
+            var bestValue = -Double.infinity
+            for (index, item) in pool.enumerated().prefix(25) {   // only near the top matters
+                let v = vectors[item.media.id] ?? [:]
+                let closest = recent.map { cosine(v, $0) }.max() ?? 0
+                let value = item.score - penalty * closest
+                if value > bestValue { bestValue = value; bestIndex = index }
+            }
+            result.append(pool.remove(at: bestIndex))
+        }
+        return result + rest
+    }
+
+    static func cosine(_ a: [String: Double], _ b: [String: Double]) -> Double {
+        guard !a.isEmpty, !b.isEmpty else { return 0 }
+        var dot = 0.0
+        for (k, v) in a { dot += v * (b[k] ?? 0) }
+        let na = sqrt(a.values.reduce(0) { $0 + $1 * $1 }), nb = sqrt(b.values.reduce(0) { $0 + $1 * $1 })
+        return na > 0 && nb > 0 ? dot / (na * nb) : 0
+    }
+}
 
 /// Seasons fetched while collapsing Season 2+ into Season 1, kept for the app session
 /// so endless-feed rounds don't request the same shows again.
