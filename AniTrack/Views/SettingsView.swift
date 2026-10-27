@@ -55,8 +55,18 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    // Numbers keyboard *with* a Done key (the number pad has none, and iOS doesn't
+                    // always show the toolbar Done bar), so the keyboard can always be closed.
                     TextField("AniList client ID", text: $settings.clientId)
-                        .keyboardType(.numberPad)
+                        .keyboardType(.numbersAndPunctuation)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .submitLabel(.done)
+                        .onSubmit { focused = nil }
+                        .onChange(of: settings.clientId) { _, new in
+                            let digits = new.filter(\.isNumber)
+                            if digits != new { settings.clientId = digits }
+                        }
                         .focused($focused, equals: .clientId)
                     SecureField("Paste an access token (optional)", text: $pastedToken)
                         .focused($focused, equals: .token)

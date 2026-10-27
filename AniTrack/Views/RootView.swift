@@ -86,8 +86,17 @@ struct WelcomeView: View {
 
                 VStack(alignment: .leading, spacing: 10) {
                     Text("AniList Client ID").font(.headline)
+                    // Numbers keyboard *with* a Done key, so it can always be closed.
                     TextField("e.g. 12345", text: $clientId)
-                        .keyboardType(.numberPad)
+                        .keyboardType(.numbersAndPunctuation)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .submitLabel(.done)
+                        .onSubmit { focused = nil }
+                        .onChange(of: clientId) { _, new in
+                            let digits = new.filter(\.isNumber)
+                            if digits != new { clientId = digits }
+                        }
                         .focused($focused, equals: .clientId)
                         .padding(14)
                         .background(.fill.tertiary, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
