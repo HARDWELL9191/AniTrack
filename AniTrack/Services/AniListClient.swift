@@ -190,6 +190,7 @@ enum Queries {
             score(format: POINT_100)
             progress
             updatedAt
+            createdAt
             media { ...media }
           }
         }

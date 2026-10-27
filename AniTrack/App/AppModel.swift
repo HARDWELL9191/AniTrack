@@ -276,7 +276,8 @@ final class AppModel {
             entries.append(ListEntry(id: saved.id, mediaId: media.id, status: saved.status ?? status,
                                      score: saved.score, progress: saved.progress,
                                      updatedAt: saved.updatedAt ?? Int(Date().timeIntervalSince1970),
-                                     media: media))
+                                     media: media,
+                                     createdAt: Int(Date().timeIntervalSince1970)))
         }
         // Planned/added from anywhere (detail page, Home, search): it, and other seasons of
         // the same show, leave your saved picks right away.

@@ -6,6 +6,7 @@ struct LibraryView: View {
 
     enum SortOrder: String, CaseIterable, Identifiable {
         case match = "Best match"
+        case added = "Recently added"
         case updated = "Last updated"
         case title = "Title"
         case score = "My score"
@@ -32,6 +33,7 @@ struct LibraryView: View {
         let lang = model.settings.titleLanguage
         switch sort {
         case .updated: list.sort { ($0.updatedAt ?? 0) > ($1.updatedAt ?? 0) }
+        case .added: list.sort { ($0.createdAt ?? $0.updatedAt ?? 0) > ($1.createdAt ?? $1.updatedAt ?? 0) }
         case .title: list.sort { $0.media.displayTitle(lang).localizedCompare($1.media.displayTitle(lang)) == .orderedAscending }
         case .score: list.sort { $0.scoreValue > $1.scoreValue }
         case .average: list.sort { ($0.media.averageScore ?? 0) > ($1.media.averageScore ?? 0) }

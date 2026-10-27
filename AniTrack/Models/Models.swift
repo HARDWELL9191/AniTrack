@@ -321,6 +321,8 @@ struct ListEntry: Codable, Identifiable, Hashable {
     var progress: Int?
     var updatedAt: Int?
     var media: Media
+    /// When you added it to your list (AniList's entry creation time). Optional: older caches lack it.
+    var createdAt: Int? = nil
 
     var scoreValue: Double { score ?? 0 }
     var progressValue: Int { progress ?? 0 }
