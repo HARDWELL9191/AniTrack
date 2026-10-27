@@ -20,6 +20,8 @@ def query(name):
 
 
 def note(title, msg, level="notice"):
+    if os.environ.get("ANILIST_USER", "") == "twins" and not title.startswith("twins"):
+        return
     if os.environ.get("ANILIST_USER", "") == "seasons" and not title.startswith(("season", "browseWithRelations", "seedRecommendations", "mediaByIds")):
         return
     msg = str(msg).replace("%", "%25").replace("\r", "").replace("\n", "%0A")
@@ -229,3 +231,34 @@ for search in ["Tensei shitara Slime Datta Ken 3rd Season", "Re:Zero 3rd Season"
         note(f"season batch {season_batch}", "\n".join(season_lines)); season_lines.clear(); season_batch += 1
     time.sleep(1)
 if season_lines: note(f"season batch {season_batch}", "\n".join(season_lines))
+
+
+# Taste twins (collaborative filtering) probe.
+if os.environ.get("ANILIST_USER", "") == "twins":
+    FIND = """query ($mediaId: Int, $page: Int) {
+      Page(page: $page, perPage: 50) {
+        pageInfo { hasNextPage }
+        mediaList(mediaId: $mediaId, status: COMPLETED, sort: [UPDATED_TIME_DESC]) {
+          userId
+          score(format: POINT_100)
+        }
+      }
+    }"""
+    LIST = """query ($userId: Int) {
+      MediaListCollection(userId: $userId, type: ANIME, status_in: [COMPLETED, REPEATING, DROPPED]) {
+        lists { entries { mediaId status score(format: POINT_100) } }
+      }
+    }"""
+    status, raw, dt = run(FIND, {"mediaId": 108465, "page": 1})
+    d = safe_json(raw, "twins find")
+    items = (((d.get("data") or {}).get("Page") or {}).get("mediaList")) or []
+    scored = [i for i in items if (i.get("score") or 0) > 0]
+    note("twins find", f"HTTP {status} in {dt:.1f}s, {len(raw)//1024} KB, errors={d.get('errors')}, rows={len(items)}, scored={len(scored)}, sample={items[:5]}")
+    time.sleep(2.5)
+    for u in [i["userId"] for i in scored[:3]]:
+        status, raw, dt = run(LIST, {"userId": u})
+        d = safe_json(raw, "twins list")
+        lists = (((d.get("data") or {}).get("MediaListCollection") or {}).get("lists")) or []
+        entries = [e for l in lists for e in (l.get("entries") or [])]
+        note("twins list", f"user {u}: HTTP {status} in {dt:.1f}s, {len(raw)//1024} KB, errors={d.get('errors')}, entries={len(entries)}, scored={sum(1 for e in entries if (e.get('score') or 0) > 0)}")
+        time.sleep(2.5)
