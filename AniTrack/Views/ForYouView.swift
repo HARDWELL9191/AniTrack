@@ -347,6 +347,9 @@ struct PickCard: View {
         do {
             try await model.save(media: rec.media, status: .PLANNING, progress: nil, scoreRaw: nil)
             added = true
+            // Planned = handled: move on to the next pick (the feed drops it, the next card slides in).
+            withAnimation(.snappy) { model.removeFromFeeds(rec.id) }
+            onWatched()
         } catch {
             model.errorMessage = error.localizedDescription
         }

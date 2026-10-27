@@ -68,3 +68,9 @@ For AI explanations, Apple Intelligence must be on: **Settings → Apple Intelli
 ---
 
 Unofficial; not affiliated with AniList.co. Data from the public AniList API.
+
+## Custom app icon
+
+Want your own icon? Add a square image (ideally 1024×1024) named `custom-icon.png` (or `.jpg`)
+to the root of this repository. The next build uses it automatically; delete it to go back to
+the default katana icon.

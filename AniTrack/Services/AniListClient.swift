@@ -161,12 +161,14 @@ enum Queries {
     static let browse = """
     query ($page: Int, $perPage: Int, $search: String, $sort: [MediaSort], $season: MediaSeason,
            $seasonYear: Int, $status: MediaStatus, $genres: [String], $tags: [String],
-           $excludeIds: [Int], $isAdult: Boolean) {
+           $excludeIds: [Int], $isAdult: Boolean, $genresNot: [String],
+           $popularityLesser: Int, $popularityGreater: Int, $scoreGreater: Int) {
       Page(page: $page, perPage: $perPage) {
         pageInfo { hasNextPage }
         media(type: ANIME, search: $search, sort: $sort, season: $season, seasonYear: $seasonYear,
               status: $status, genre_in: $genres, tag_in: $tags, id_not_in: $excludeIds,
-              isAdult: $isAdult) {
+              isAdult: $isAdult, genre_not_in: $genresNot, popularity_lesser: $popularityLesser,
+              popularity_greater: $popularityGreater, averageScore_greater: $scoreGreater) {
           ...media
         }
       }

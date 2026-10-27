@@ -22,6 +22,17 @@ jobs:
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-version
 
+      - name: Use custom icon if provided
+        run: |
+          # Drop any square image named custom-icon.png (or .jpg) in the repo root to use it as the app icon.
+          for f in custom-icon.png custom-icon.jpg custom-icon.jpeg; do
+            if [ -f "$f" ]; then
+              echo "Using $f as the app icon"
+              sips -s format png -z 1024 1024 "$f" --out AniTrack/Assets.xcassets/AppIcon.appiconset/AppIcon.png
+              break
+            fi
+          done
+
       - name: Install XcodeGen
         run: brew install xcodegen
 

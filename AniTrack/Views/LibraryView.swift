@@ -47,13 +47,12 @@ struct LibraryView: View {
             List {
                 // Status picker lives inside the list (a top safe-area inset was hidden
                 // behind the large navigation title on iOS 27).
-                Section {
-                    statusBar
-                        .listRowInsets(EdgeInsets())
-                        .listRowBackground(Color.clear)
-                }
+                statusBar
+                    .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 8, trailing: 16))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
 
-                Section {
+                Group {
                     if items.isEmpty {
                         Text(model.isLoadingList ? "Loading…" : "No shows marked \(status.label.lowercased()).")
                             .foregroundStyle(.secondary)
@@ -66,6 +65,8 @@ struct LibraryView: View {
                     }
                 }
             }
+            // Flat rows with thin separators (no rounded card behind every show).
+            .listStyle(.plain)
             .navigationTitle("Lists")
             .mediaDestination(zoom: zoom)
             .environment(\.zoomNamespace, zoom)
@@ -87,32 +88,33 @@ struct LibraryView: View {
         }
     }
 
-    /// Floating glass status filter; the selected status morphs between chips.
+    /// Status dropdown: one glass button showing the current list and its count.
     private var statusBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            GlassEffectContainer(spacing: 8) {
-                HStack(spacing: 8) {
-                    ForEach(ListStatus.allCases) { s in
-                        let selected = status == s
-                        Button {
-                            userPickedStatus = true
-                            withAnimation(.bouncy) { status = s }
-                        } label: {
-                            Label("\(s.label) \(model.count(of: s))", systemImage: s.symbol)
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(selected ? Color.white : Color.primary)
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 9)
-                                .glassEffect(selected ? .regular.tint(Theme.accent).interactive()
-                                                      : .regular.interactive(),
-                                             in: .capsule)
+        HStack {
+            Menu {
+                ForEach(ListStatus.allCases) { s in
+                    Button {
+                        userPickedStatus = true
+                        status = s
+                    } label: {
+                        if s == status {
+                            Label("\(s.label) (\(model.count(of: s)))", systemImage: "checkmark")
+                        } else {
+                            Label("\(s.label) (\(model.count(of: s)))", systemImage: s.symbol)
                         }
-                        .buttonStyle(.plain)
                     }
                 }
-                .padding(.horizontal, 4)
-                .padding(.vertical, 6)
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: status.symbol)
+                    Text("\(status.label) (\(model.count(of: status)))")
+                    Image(systemName: "chevron.down").font(.caption.weight(.semibold))
+                }
+                .font(.subheadline.weight(.semibold))
             }
+            .menuStyle(.button)
+            .buttonStyle(.glass)
+            Spacer()
         }
     }
 

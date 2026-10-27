@@ -120,15 +120,19 @@ enum Recommender {
     static func weight(for entry: ListEntry, mean: Double, spread: Double) -> Double {
         let score = entry.scoreValue
         if score > 0 {
-            var w = (score - mean) / max(spread, 8) + 0.6
             switch entry.status {
-            case .DROPPED: w = min(w, -0.5)
-            // Finished, rewatching or planned means you liked it enough: never counts against.
-            // Your score still decides how strongly it pulls.
-            case .COMPLETED, .REPEATING, .PLANNING: w = max(w, 0.3)
-            default: break
+            case .COMPLETED, .REPEATING, .PLANNING:
+                // Finished/rewatching/planned always counts as liked; your rating sets how much.
+                // Curved so favorites dominate: 10/10 → 2.0, 9 → 1.69, 8 → 1.39, 6 → 0.91, 4 → 0.57.
+                let t = min(1, score / 100)
+                return 0.3 + 1.7 * t * t
+            case .DROPPED:
+                return -1.0 - 0.5 * (1 - min(1, score / 100))
+            default:
+                // Watching/paused: relative to your own scoring habits.
+                let w = (score - mean) / max(spread, 8) + 0.6
+                return min(2.0, max(-1.0, w))
             }
-            return min(2.0, max(-1.5, w))
         }
         switch entry.status {
         case .COMPLETED, .REPEATING: return 0.7

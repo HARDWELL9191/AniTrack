@@ -263,8 +263,7 @@ final class AppModel {
             try await save(media: media, status: .COMPLETED, progress: progress, scoreRaw: nil)
             if (existing?.scoreValue ?? 0) == 0 { ratePrompt = media }
             // It's on your list now, so it no longer belongs in any picks feed (not a dislike).
-            for key in feeds.keys { feeds[key]?.remove(media.id) }
-            for (key, value) in feeds { DiskCache.saveInBackground(value, name: feedCacheName(key: key)) }
+            removeFromFeeds(media.id)
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -283,9 +282,19 @@ final class AppModel {
                 seasonYear: Int? = nil,
                 status: String? = nil,
                 category: AnimeCategory? = nil,
+                genres: [String]? = nil,
+                excludeGenres: [String]? = nil,
+                minScore: Int? = nil,
+                maxPopularity: Int? = nil,
+                minPopularity: Int? = nil,
                 page: Int = 1,
                 perPage: Int = 25) async throws -> [Media] {
         var vars: [String: Any] = ["page": page, "perPage": perPage, "sort": sort, "isAdult": false]
+        if let genres, !genres.isEmpty { vars["genres"] = genres }
+        if let excludeGenres, !excludeGenres.isEmpty { vars["genresNot"] = excludeGenres }
+        if let minScore { vars["scoreGreater"] = minScore }
+        if let maxPopularity { vars["popularityLesser"] = maxPopularity }
+        if let minPopularity { vars["popularityGreater"] = minPopularity }
         if let search, !search.isEmpty { vars["search"] = search }
         if let category { vars.merge(category.browseVariables) { a, _ in a } }
         if let season { vars["season"] = season }
@@ -352,11 +361,20 @@ final class AppModel {
             if feeds[key] == nil {
                 feeds[key] = await DiskCache.loadInBackground(RecommendationResult.self, name: feedCacheName(category))
             }
-            if let current = feeds[key],
-               current.fingerprint == fingerprint,
-               Date().timeIntervalSince(current.generatedAt) < 3 * 86_400,
-               !current.picks.isEmpty {
-                return
+            if var current = feeds[key], !current.picks.isEmpty {
+                let age = Date().timeIntervalSince(current.generatedAt)
+                // Same list: keep for 3 days. List changed (you planned/finished/rated something):
+                // keep a fresh feed for a day so For You doesn't reshuffle under your thumb; the
+                // match % and the next "load more" round already use your updated taste.
+                if (current.fingerprint == fingerprint && age < 3 * 86_400) || age < 86_400 {
+                    let onList = current.picks.filter { entry(for: $0.id) != nil }.map(\.id)
+                    if !onList.isEmpty {
+                        for id in onList { current.remove(id) }
+                        feeds[key] = current
+                        DiskCache.saveInBackground(current, name: feedCacheName(category))
+                    }
+                    return
+                }
             }
         }
         loadingFeeds.insert(key)
@@ -415,6 +433,12 @@ final class AppModel {
         if emptyRounds >= 3 { current.exhausted = true }
         feeds[key] = current
         DiskCache.saveInBackground(current, name: feedCacheName(category))
+    }
+
+    /// Takes a show out of every picks feed (it's on your list now). Not a dislike.
+    func removeFromFeeds(_ mediaId: Int) {
+        for key in feeds.keys { feeds[key]?.remove(mediaId) }
+        for (key, value) in feeds { DiskCache.saveInBackground(value, name: feedCacheName(key: key)) }
     }
 
     func dismissPick(_ mediaId: Int) {

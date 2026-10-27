@@ -7,6 +7,11 @@ struct HomeView: View {
     @Namespace private var zoom
     @State private var trending: [Media] = []
     @State private var season: [Media] = []
+    // Discovery beyond your usual taste
+    @State private var gems: [Media] = []
+    @State private var outside: [Media] = []
+    @State private var outsideGenres: [String] = []
+    @State private var surprise: [Media] = []
 
     var body: some View {
         NavigationStack {
@@ -41,6 +46,33 @@ struct HomeView: View {
                         cardRow(trending)
                     } header: {
                         Label("Trending now", systemImage: "flame")
+                    }
+                }
+
+                // Beyond your usual: these aren't sorted by match on purpose.
+                if !gems.isEmpty {
+                    Section {
+                        cardRow(gems)
+                    } header: {
+                        Label("Hidden gems", systemImage: "diamond")
+                    }
+                }
+
+                if !outside.isEmpty {
+                    Section {
+                        cardRow(outside)
+                    } header: {
+                        Label("Outside your usual · \(outsideGenres.joined(separator: " & "))", systemImage: "safari")
+                    }
+                }
+
+                if !surprise.isEmpty {
+                    Section {
+                        cardRow(surprise)
+                    } header: {
+                        sectionHeader("Surprise me", systemImage: "dice", action: "Shuffle") {
+                            Task { await loadSurprise() }
+                        }
                     }
                 }
 
@@ -163,6 +195,49 @@ extension HomeView {
         async let hot = model.browse(sort: ["TRENDING_DESC", "POPULARITY_DESC"], perPage: 20)
         if let items = try? await seasonal { season = items }
         if let items = try? await hot { trending = items.filter { model.entry(for: $0.id) == nil } }
+        await loadDiscovery()
+    }
+
+    /// Hidden gems, a couple of genres you rarely watch, and a random well-rated mix.
+    /// Three light requests; nothing here touches the AI or your taste data.
+    func loadDiscovery() async {
+        let usual = usualGenres
+        let allGenres = model.allCategories.filter { $0.kind == .genre }.map(\.name)
+        let pool = (allGenres.isEmpty ? AnimeCategory.featured.filter { $0.kind == .genre }.map(\.name) : allGenres)
+            .filter { !usual.contains($0) && $0 != "Hentai" }
+        let picked = Array(pool.shuffled().prefix(2))
+
+        async let gemsReq = model.browse(sort: ["SCORE_DESC"], minScore: 78, maxPopularity: 45_000,
+                                         minPopularity: 4_000, page: Int.random(in: 1...3), perPage: 25)
+        async let outsideReq = model.browse(sort: ["SCORE_DESC", "POPULARITY_DESC"], genres: picked.isEmpty ? nil : picked,
+                                            excludeGenres: usual.isEmpty ? nil : Array(usual.prefix(3)),
+                                            minScore: 72, minPopularity: 8_000, perPage: 25)
+        if let items = try? await gemsReq { gems = notOnList(items).shuffled() }
+        if let items = try? await outsideReq {
+            outside = notOnList(items)
+            outsideGenres = picked
+        }
+        await loadSurprise()
+    }
+
+    func loadSurprise() async {
+        if let items = try? await model.browse(sort: ["SCORE_DESC"], minScore: 70, minPopularity: 15_000,
+                                               page: Int.random(in: 1...30), perPage: 25) {
+            withAnimation(.snappy) { surprise = notOnList(items).shuffled() }
+        }
+    }
+
+    private func notOnList(_ items: [Media]) -> [Media] {
+        items.filter { model.entry(for: $0.id) == nil }
+    }
+
+    /// Genres you watch most (from shows you finished, are watching or planned).
+    private var usualGenres: [String] {
+        var counts: [String: Int] = [:]
+        for e in model.entries where e.status != .DROPPED {
+            for g in e.media.genres ?? [] { counts[g, default: 0] += 1 }
+        }
+        return counts.sorted { $0.value > $1.value }.prefix(4).map(\.key)
     }
 }
 
