@@ -204,7 +204,7 @@ final class AppModel {
     /// Fan-recommendation strengths from earlier picks builds, so match % has them right away.
     private func loadCachedFanSignal() async {
         guard viewer != nil,
-              let cached = await DiskCache.loadInBackground([Int: Double].self, name: cacheName("fans")) else { return }
+              let cached = await DiskCache.loadInBackground([Int: Double].self, name: cacheName("fans2")) else { return }
         matcher.addFanSignal(cached)
     }
 
@@ -418,7 +418,7 @@ final class AppModel {
 
     private func feedCacheName(key: String) -> String {
         let safe = key.replacingOccurrences(of: "[^A-Za-z0-9]", with: "_", options: .regularExpression)
-        return cacheName("feed2-\(safe)")
+        return cacheName("feed3-\(safe)")
     }
 
     /// Battery-friendly: reuses saved picks unless your list changed or they're over 3 days old.
@@ -507,7 +507,7 @@ final class AppModel {
         do {
             let (found, usedAI, fans) = try await Recommender.run(entries: entries, client: client, options: options)
             matcher.addFanSignal(fans)
-            DiskCache.saveInBackground(matcher.fanSnapshot, name: cacheName("fans"))
+            DiskCache.saveInBackground(matcher.fanSnapshot, name: cacheName("fans2"))
             picks = found
             let result = RecommendationResult(picks: found, generatedAt: Date(), fingerprint: fingerprint,
                                               usedOnDeviceAI: usedAI, round: 1, exhausted: false)
@@ -542,7 +542,7 @@ final class AppModel {
                 let (more, usedAI, fans) = try await Recommender.run(entries: entries, client: client, options: options,
                                                                round: round, exclude: shown)
                 matcher.addFanSignal(fans)
-                DiskCache.saveInBackground(matcher.fanSnapshot, name: cacheName("fans"))
+                DiskCache.saveInBackground(matcher.fanSnapshot, name: cacheName("fans2"))
                 let fresh = more.filter { !shown.contains($0.id) }
                 if fresh.isEmpty {
                     emptyRounds += 1
