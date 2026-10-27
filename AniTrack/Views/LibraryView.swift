@@ -13,6 +13,7 @@ struct LibraryView: View {
     }
 
     @State private var status: ListStatus = .CURRENT
+    @State private var userPickedStatus = false
     @State private var sort: SortOrder = .updated
     @State private var filter = ""
 
@@ -39,9 +40,17 @@ struct LibraryView: View {
     var body: some View {
         NavigationStack {
             List {
+                // Status picker lives inside the list (a top safe-area inset was hidden
+                // behind the large navigation title on iOS 27).
+                Section {
+                    statusBar
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                }
+
                 Section {
                     if items.isEmpty {
-                        Text(model.isLoadingList ? "Loading…" : "Nothing here yet.")
+                        Text(model.isLoadingList ? "Loading…" : "No shows marked \(status.label.lowercased()).")
                             .foregroundStyle(.secondary)
                     }
                     ForEach(items) { entry in
@@ -51,12 +60,13 @@ struct LibraryView: View {
                     }
                 }
             }
-            .safeAreaInset(edge: .top, spacing: 0) { statusBar }
             .navigationTitle("Lists")
             .mediaDestination(zoom: zoom)
             .environment(\.zoomNamespace, zoom)
             .searchable(text: $filter, prompt: "Filter this list")
             .refreshable { await model.refreshList() }
+            .onAppear { pickDefaultStatus() }
+            .onChange(of: model.entries.count) { _, _ in pickDefaultStatus() }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
@@ -79,6 +89,7 @@ struct LibraryView: View {
                     ForEach(ListStatus.allCases) { s in
                         let selected = status == s
                         Button {
+                            userPickedStatus = true
                             withAnimation(.bouncy) { status = s }
                         } label: {
                             Label("\(s.label) \(model.count(of: s))", systemImage: s.symbol)
@@ -93,10 +104,17 @@ struct LibraryView: View {
                         .buttonStyle(.plain)
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 6)
             }
         }
+    }
+
+    /// Opens on the first status that actually has shows, unless you already picked one.
+    private func pickDefaultStatus() {
+        guard !userPickedStatus, model.count(of: status) == 0 else { return }
+        let order: [ListStatus] = [.CURRENT, .REPEATING, .PLANNING, .COMPLETED, .PAUSED, .DROPPED]
+        if let first = order.first(where: { model.count(of: $0) > 0 }) { status = first }
     }
 
     private func subtitle(for entry: ListEntry) -> String {

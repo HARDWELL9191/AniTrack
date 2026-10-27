@@ -12,6 +12,8 @@ struct HomeView: View {
                 }
 
                 let watching = model.entries(in: [.CURRENT, .REPEATING])
+                let planning = model.entries(in: [.PLANNING])
+                let completed = model.entries(in: [.COMPLETED])
                 let behind = watching.filter { entry in
                     guard let available = entry.media.availableEpisodes else { return false }
                     return available > entry.progressValue
@@ -39,10 +41,33 @@ struct HomeView: View {
 
                 Section("Watching (\(watching.count))") {
                     if watching.isEmpty && !model.isLoadingList {
-                        Text("Nothing in progress. Find something in Discover or For You.")
+                        Text(planning.isEmpty
+                             ? "Nothing in progress. Find something in Discover or For You."
+                             : "Nothing in progress. Start something from Up next.")
                             .foregroundStyle(.secondary)
                     }
                     ForEach(watching) { WatchingRow(entry: $0) }
+                }
+
+                if !planning.isEmpty {
+                    Section("Up next from Planning") {
+                        ForEach(planning.prefix(5)) { entry in
+                            NavigationLink(value: MediaLink(id: entry.mediaId)) {
+                                MediaRow(media: entry.media)
+                            }
+                        }
+                    }
+                }
+
+                if !completed.isEmpty {
+                    Section("Recently completed") {
+                        ForEach(completed.prefix(5)) { entry in
+                            NavigationLink(value: MediaLink(id: entry.mediaId)) {
+                                MediaRow(media: entry.media,
+                                         subtitle: entry.scoreValue > 0 ? "Your score ★ \(Fmt.score(entry.score))" : "Completed")
+                            }
+                        }
+                    }
                 }
             }
             .navigationTitle("Home")
@@ -57,6 +82,7 @@ struct HomeView: View {
 }
 
 struct ProfileHeader: View {
+    @Environment(AppModel.self) private var model
     let viewer: Viewer
 
     var body: some View {
@@ -71,15 +97,12 @@ struct ProfileHeader: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(viewer.name).font(.title3.bold())
-                if let stats = viewer.statistics?.anime {
-                    let days = Double(stats.minutesWatched ?? 0) / 1440
-                    Text("\(stats.count ?? 0) anime · \(stats.episodesWatched ?? 0) eps · \(String(format: "%.1f", days)) days")
-                        .font(.caption).foregroundStyle(.secondary)
-                    if let mean = stats.meanScore, mean > 0 {
-                        Text("Mean score \(String(format: "%.1f", mean))")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                }
+                let stats = model.listStats
+                let days = Double(stats.minutes) / 1440
+                Text("\(stats.count) anime · \(stats.episodes) eps · \(String(format: "%.1f", days)) days")
+                    .font(.caption).foregroundStyle(.secondary)
+                Text("\(model.count(of: .PLANNING)) planned" + (stats.meanScore.map { " · mean score \(String(format: "%.1f", $0))" } ?? ""))
+                    .font(.caption).foregroundStyle(.secondary)
             }
         }
         .padding(.vertical, 4)

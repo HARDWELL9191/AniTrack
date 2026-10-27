@@ -172,6 +172,23 @@ final class AppModel {
         entries.filter { $0.status == status }.count
     }
 
+    struct ListStats {
+        var count: Int
+        var episodes: Int
+        var minutes: Int
+        var meanScore: Double?
+    }
+
+    /// Counted from your own list, because AniList's account statistics update with a delay.
+    var listStats: ListStats {
+        let counted = entries.filter { $0.status != .PLANNING }
+        let episodes = counted.reduce(0) { $0 + $1.progressValue }
+        let minutes = counted.reduce(0) { $0 + $1.progressValue * ($1.media.duration ?? 24) }
+        let scores = entries.map(\.scoreValue).filter { $0 > 0 }
+        let mean = scores.isEmpty ? nil : scores.reduce(0, +) / Double(scores.count) / 10
+        return ListStats(count: counted.count, episodes: episodes, minutes: minutes, meanScore: mean)
+    }
+
     // MARK: - Editing
 
     @discardableResult
