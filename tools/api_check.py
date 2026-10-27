@@ -90,8 +90,18 @@ def check_user(uid, label):
     note("decode-check " + label, f"{len(problems)} problem(s): {problems[:30]}", "error" if problems else "notice")
 
 
+def safe_json(raw, label):
+    try:
+        return json.loads(raw)
+    except Exception:
+        note(label, f"non-JSON: {raw[:400]!r}", "error")
+        return {}
+
+
 targets = []
 user = os.environ.get("ANILIST_USER", "")
+if user == "Josh":
+    user = ""
 if user:
     status, raw, dt = run(query("userByName"), {"name": user})
     u = (json.loads(raw).get("data") or {}).get("User")
@@ -99,13 +109,21 @@ if user:
     if u: targets.append((u["id"], "input:" + user))
 # A heavy user (stress test) and a typical recently active user.
 status, raw, dt = run("query { Page(perPage: 1) { users(sort: [WATCHED_TIME_DESC]) { id name } } }", {})
-for u in (json.loads(raw).get("data") or {}).get("Page", {}).get("users", []):
+d = safe_json(raw, "users query")
+note("users query", f"HTTP {status} {str(d)[:400]}")
+for u in (((d.get("data") or {}).get("Page") or {}).get("users") or []):
     targets.append((u["id"], "top-watcher:" + u["name"]))
 status, raw, dt = run("query { Page(perPage: 3) { activities(type: ANIME_LIST, sort: ID_DESC) { ... on ListActivity { user { id name } } } } }", {})
-for a in ((json.loads(raw).get("data") or {}).get("Page", {}).get("activities") or [])[:2]:
-    if a.get("user"): targets.append((a["user"]["id"], "recent:" + a["user"]["name"]))
+d = safe_json(raw, "activity query")
+note("activity query", f"HTTP {status} {str(d)[:400]}")
+for a in ((((d.get("data") or {}).get("Page") or {}).get("activities")) or [])[:2]:
+    if a and a.get("user"): targets.append((a["user"]["id"], "recent:" + a["user"]["name"]))
 for uid, label in targets:
-    check_user(uid, label)
+    try:
+        check_user(uid, label)
+    except Exception as ex:
+        import traceback
+        note("crash " + label, traceback.format_exc(), "error")
     time.sleep(2)
 
 for name, variables in [("browse", {"page": 1, "perPage": 25, "sort": ["TRENDING_DESC"], "isAdult": False}),
