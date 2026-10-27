@@ -1,3 +1,4 @@
+import Accelerate
 import Foundation
 import NaturalLanguage
 
@@ -9,9 +10,12 @@ import NaturalLanguage
 ///
 /// Efficiency:
 /// - each synopsis is embedded once, then read back from a compact binary cache (Float32);
+/// - the cache file is append-only: a batch writes only its new vectors (a few KB) and the
+///   file is compacted only occasionally, instead of rewriting megabytes every time;
+/// - vector math (pooling, normalizing, dot products) uses Accelerate's SIMD routines;
 /// - work runs off the main thread at utility priority and yields between items;
-/// - the model stays loaded for a short idle window so back-to-back rounds ("load more")
-///   don't pay the load cost again, then it's unloaded to free memory;
+/// - the model stays loaded for a short idle window so back-to-back rounds don't reload it,
+///   and is unloaded only when no job is using it;
 /// - callers skip the AI pass entirely in Low Power Mode or when the phone is hot.
 actor SemanticEngine {
     static let shared = SemanticEngine()
@@ -22,12 +26,17 @@ actor SemanticEngine {
     private var sentence: NLEmbedding?
     private var backend: Backend?
     private var idleUnload: Task<Void, Never>?
+    /// Jobs currently inside `vectors(for:)`; the model is never unloaded while this is > 0.
+    private var activeJobs = 0
 
     private var cache: [Int: [Float]] = [:]
     private var cacheLoadedFor: Backend?
-    private var cacheDirty = false
+    private var cacheDim = 0
+    private var unsaved: [Int] = []          // ids embedded since the last append
+    private var recordsOnDisk = 0            // includes superseded duplicates until compaction
     private static let maxCached = 4000
     private static let idleSeconds: UInt64 = 45
+    private static let magic: UInt32 = 0x33455441   // "ATE3"
 
     /// Whether the AI pass should run right now (battery/thermal friendly).
     static var shouldRunNow: Bool {
@@ -41,7 +50,7 @@ actor SemanticEngine {
 
     private func cacheURL(_ backend: Backend) -> URL {
         let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-        return dir.appendingPathComponent("embeddings-\(backend.rawValue)-v2.bin")
+        return dir.appendingPathComponent("embeddings-\(backend.rawValue)-v3.bin")
     }
 
     // MARK: Model lifecycle
@@ -84,60 +93,126 @@ actor SemanticEngine {
         idleUnload = Task { [weak self] in
             try? await Task.sleep(nanoseconds: Self.idleSeconds * 1_000_000_000)
             guard !Task.isCancelled else { return }
-            await self?.unloadNow()
+            await self?.unloadIfIdle()
         }
     }
 
-    private func unloadNow() {
+    private func unloadIfIdle() {
+        guard activeJobs == 0 else { return }   // someone is still embedding: try again later
         contextual?.unload()
         contextual = nil
         sentence = nil
         backend = nil
     }
 
-    // MARK: Binary cache  ("ATE2" | Int32 dim | Int32 count | count × (Int64 id, dim × Float32))
+    // MARK: Append-only binary cache  ("ATE3" | Int32 dim | records: Int64 id + dim × Float32)
+
+    private func loadCacheIfPresent() {
+        guard cacheLoadedFor == nil else { return }
+        removeOldCacheFormats()
+        for b in [Backend.contextual, .sentence] where FileManager.default.fileExists(atPath: cacheURL(b).path) {
+            loadCache(for: b)
+            return
+        }
+    }
+
+    /// One-time cleanup of caches written by older app versions (re-embedded lazily as needed).
+    private func removeOldCacheFormats() {
+        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        for b in ["contextual", "sentence"] {
+            for old in ["embeddings-\(b)-v1.json", "embeddings-\(b)-v2.bin"] {
+                try? FileManager.default.removeItem(at: dir.appendingPathComponent(old))
+            }
+        }
+    }
 
     private func loadCache(for backend: Backend) {
         guard cacheLoadedFor != backend else { return }
         cache = [:]
+        cacheDim = 0
+        recordsOnDisk = 0
+        unsaved = []
         cacheLoadedFor = backend
-        guard let data = try? Data(contentsOf: cacheURL(backend), options: .mappedIfSafe), data.count >= 12 else { return }
+        guard let data = try? Data(contentsOf: cacheURL(backend), options: .mappedIfSafe), data.count >= 8 else { return }
         data.withUnsafeBytes { raw in
-            guard raw.loadUnaligned(fromByteOffset: 0, as: UInt32.self) == 0x32455441 else { return }  // "ATE2"
+            guard raw.loadUnaligned(fromByteOffset: 0, as: UInt32.self) == Self.magic else { return }
             let dim = Int(raw.loadUnaligned(fromByteOffset: 4, as: Int32.self))
-            let count = Int(raw.loadUnaligned(fromByteOffset: 8, as: Int32.self))
             let stride = 8 + dim * 4
-            guard dim > 0, count >= 0, data.count >= 12 + count * stride else { return }
-            var offset = 12
-            for _ in 0..<count {
+            guard dim > 0 else { return }
+            cacheDim = dim
+            var offset = 8
+            while offset + stride <= raw.count {
                 let id = Int(raw.loadUnaligned(fromByteOffset: offset, as: Int64.self))
                 var vector = [Float](repeating: 0, count: dim)
-                for i in 0..<dim {
-                    vector[i] = raw.loadUnaligned(fromByteOffset: offset + 8 + i * 4, as: Float.self)
+                vector.withUnsafeMutableBytes { dest in
+                    dest.copyMemory(from: UnsafeRawBufferPointer(rebasing: raw[(offset + 8)..<(offset + stride)]))
                 }
-                cache[id] = vector
+                cache[id] = vector          // later records win
+                recordsOnDisk += 1
                 offset += stride
             }
         }
     }
 
+    /// Appends only new vectors; compacts the file when it's mostly duplicates or too big.
     private func saveCache() {
-        guard cacheDirty, let backend = cacheLoadedFor, let dim = cache.values.first?.count else { return }
+        guard let backend = cacheLoadedFor, !unsaved.isEmpty else { return }
+        if cacheDim == 0 { cacheDim = cache[unsaved[0]]?.count ?? 0 }
+        guard cacheDim > 0 else { return }
+        let url = cacheURL(backend)
+
         if cache.count > Self.maxCached {
             for key in cache.keys.shuffled().prefix(cache.count - Self.maxCached) { cache[key] = nil }
+            compact(to: url)
+            return
         }
-        let items = cache.filter { $0.value.count == dim }
-        var data = Data(capacity: 12 + items.count * (8 + dim * 4))
-        func append<T>(_ value: T) { withUnsafeBytes(of: value) { data.append(contentsOf: $0) } }
-        append(UInt32(0x32455441))
-        append(Int32(dim))
-        append(Int32(items.count))
-        for (id, vector) in items {
-            append(Int64(id))
-            vector.withUnsafeBytes { data.append(contentsOf: $0) }
+        if recordsOnDisk > 0 && recordsOnDisk + unsaved.count > cache.count * 3 / 2 + 50 {
+            compact(to: url)
+            return
         }
-        try? data.write(to: cacheURL(backend), options: .atomic)
-        cacheDirty = false
+
+        var data = Data()
+        if !FileManager.default.fileExists(atPath: url.path) {
+            data.append(header())
+            recordsOnDisk = 0
+        }
+        for id in unsaved {
+            guard let v = cache[id], v.count == cacheDim else { continue }
+            append(id: id, vector: v, to: &data)
+            recordsOnDisk += 1
+        }
+        if FileManager.default.fileExists(atPath: url.path), let handle = try? FileHandle(forWritingTo: url) {
+            defer { try? handle.close() }
+            _ = try? handle.seekToEnd()
+            try? handle.write(contentsOf: data)
+        } else {
+            try? data.write(to: url, options: .atomic)
+        }
+        unsaved = []
+    }
+
+    private func compact(to url: URL) {
+        var data = header()
+        var written = 0
+        for (id, v) in cache where v.count == cacheDim {
+            append(id: id, vector: v, to: &data)
+            written += 1
+        }
+        try? data.write(to: url, options: .atomic)
+        recordsOnDisk = written
+        unsaved = []
+    }
+
+    private func header() -> Data {
+        var data = Data()
+        withUnsafeBytes(of: Self.magic) { data.append(contentsOf: $0) }
+        withUnsafeBytes(of: Int32(cacheDim)) { data.append(contentsOf: $0) }
+        return data
+    }
+
+    private func append(id: Int, vector: [Float], to data: inout Data) {
+        withUnsafeBytes(of: Int64(id)) { data.append(contentsOf: $0) }
+        vector.withUnsafeBytes { data.append(contentsOf: $0) }
     }
 
     // MARK: Embedding
@@ -156,44 +231,45 @@ actor SemanticEngine {
         case .contextual:
             guard let model = contextual,
                   let result = try? model.embeddingResult(for: text, language: .english) else { return nil }
-            var sum = [Float](repeating: 0, count: model.dimension)
+            // Sum the token vectors with SIMD adds (mean pooling: the direction is the same after normalizing).
+            var sum = [Double](repeating: 0, count: model.dimension)
             var count = 0
             result.enumerateTokenVectors(in: text.startIndex..<text.endIndex) { vector, _ in
-                let n = min(vector.count, sum.count)
-                for i in 0..<n { sum[i] += Float(vector[i]) }
+                if vector.count == sum.count { sum = vDSP.add(sum, vector) }
                 count += 1
                 return true
             }
             guard count > 0 else { return nil }
-            return Self.normalized(sum)   // mean-pooling direction == sum direction after normalizing
+            return Self.normalized(vDSP.doubleToFloat(sum))
         case .sentence:
             guard let vector = sentence?.vector(for: text) else { return nil }
-            return Self.normalized(vector.map(Float.init))
+            return Self.normalized(vDSP.doubleToFloat(vector))
         case .none:
             return nil
         }
     }
 
     static func normalized(_ v: [Float]) -> [Float] {
-        var sumSquares: Float = 0
-        for x in v { sumSquares += x * x }
-        let norm = sumSquares.squareRoot()
+        guard !v.isEmpty else { return v }
+        let norm = vDSP.sumOfSquares(v).squareRoot()
         guard norm > 0 else { return v }
-        return v.map { $0 / norm }
+        return vDSP.divide(v, norm)
     }
 
     static func cosine(_ a: [Float], _ b: [Float]) -> Float {
         guard a.count == b.count, !a.isEmpty else { return 0 }
-        var dot: Float = 0
-        for i in 0..<a.count { dot += a[i] * b[i] }
-        return dot // both are already unit length
+        return vDSP.dot(a, b)   // both are already unit length
+    }
+
+    /// Adds `scale * v` into `into` (used to build the taste vector).
+    static func accumulate(_ v: [Float], scale: Float, into acc: inout [Float]) {
+        guard v.count == acc.count else { return }
+        acc = vDSP.add(multiplication: (a: v, b: scale), acc)
     }
 
     /// Vectors that are already known, without ever loading the model (used by match badges).
     func cachedVectors(for ids: [Int]) -> [Int: [Float]] {
-        for backend in [Backend.contextual, .sentence] where cacheLoadedFor == nil {
-            if FileManager.default.fileExists(atPath: cacheURL(backend).path) { loadCache(for: backend); break }
-        }
+        loadCacheIfPresent()
         var result: [Int: [Float]] = [:]
         for id in ids { if let v = cache[id] { result[id] = v } }
         return result
@@ -202,10 +278,7 @@ actor SemanticEngine {
     /// Returns unit vectors for the given media. Cached vectors cost nothing; the model is only
     /// loaded if at least one show hasn't been embedded before.
     func vectors(for media: [Media]) async -> [Int: [Float]] {
-        // Cache-only fast path: no model load when everything is already known.
-        for backend in [Backend.contextual, .sentence] where cacheLoadedFor == nil {
-            if FileManager.default.fileExists(atPath: cacheURL(backend).path) { loadCache(for: backend); break }
-        }
+        loadCacheIfPresent()
         var result: [Int: [Float]] = [:]
         var missing: [Media] = []
         for item in media {
@@ -213,8 +286,15 @@ actor SemanticEngine {
         }
         guard !missing.isEmpty else { return result }
 
+        activeJobs += 1
+        defer {
+            activeJobs -= 1
+            scheduleUnload()
+        }
         guard let backend = await prepare() else { return result }
         if cacheLoadedFor != backend {
+            saveCache()
+            cacheLoadedFor = nil
             loadCache(for: backend)
             result = [:]
             missing = []
@@ -224,15 +304,15 @@ actor SemanticEngine {
         }
         for (index, item) in missing.enumerated() {
             if Task.isCancelled { break }
+            if cache[item.id] != nil { result[item.id] = cache[item.id]; continue }   // another job got it meanwhile
             if let vector = embed(Self.text(for: item)) {
                 cache[item.id] = vector
                 result[item.id] = vector
-                cacheDirty = true
+                unsaved.append(item.id)
             }
             if index % 8 == 7 { await Task.yield() }
         }
         saveCache()
-        scheduleUnload()
         return result
     }
 }

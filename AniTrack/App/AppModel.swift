@@ -294,6 +294,7 @@ final class AppModel {
                 minScore: Int? = nil,
                 maxPopularity: Int? = nil,
                 minPopularity: Int? = nil,
+                firstSeasonsOnly: Bool = false,
                 page: Int = 1,
                 perPage: Int = 25) async throws -> [Media] {
         var vars: [String: Any] = ["page": page, "perPage": perPage, "sort": sort, "isAdult": false]
@@ -307,8 +308,17 @@ final class AppModel {
         if let season { vars["season"] = season }
         if let seasonYear { vars["seasonYear"] = seasonYear }
         if let status { vars["status"] = status }
-        let data = try await client.run(Queries.browse, variables: vars, as: PageData.self)
-        return data.page.media.filter { !(settings.hideChinese && $0.countryOfOrigin == "CN") }
+        let data = try await client.run(firstSeasonsOnly ? Queries.browseWithRelations : Queries.browse,
+                                        variables: vars, as: PageData.self)
+        return data.page.media.filter { media in
+            if settings.hideChinese && media.countryOfOrigin == "CN" { return false }
+            if firstSeasonsOnly {
+                // Season 2+ of a show, or a show where you already have another season: skip.
+                if media.isLaterSeason { return false }
+                if media.nextSeasonIds.contains(where: { entry(for: $0) != nil }) { return false }
+            }
+            return true
+        }
     }
 
     func detail(id: Int) async throws -> MediaDetail {
@@ -351,7 +361,7 @@ final class AppModel {
 
     private func feedCacheName(key: String) -> String {
         let safe = key.replacingOccurrences(of: "[^A-Za-z0-9]", with: "_", options: .regularExpression)
-        return cacheName("feed-\(safe)")
+        return cacheName("feed2-\(safe)")
     }
 
     /// Battery-friendly: reuses saved picks unless your list changed or they're over 3 days old.

@@ -191,8 +191,8 @@ extension HomeView {
         guard season.isEmpty || force else { return }
         let current = AppModel.currentSeason()
         async let seasonal = model.browse(sort: ["POPULARITY_DESC"], season: current.season,
-                                          seasonYear: current.year, perPage: 50)
-        async let hot = model.browse(sort: ["TRENDING_DESC", "POPULARITY_DESC"], perPage: 20)
+                                          seasonYear: current.year, firstSeasonsOnly: true, perPage: 50)
+        async let hot = model.browse(sort: ["TRENDING_DESC", "POPULARITY_DESC"], firstSeasonsOnly: true, perPage: 20)
         if let items = try? await seasonal { season = items }
         if let items = try? await hot { trending = items.filter { model.entry(for: $0.id) == nil } }
         await loadDiscovery()
@@ -208,10 +208,11 @@ extension HomeView {
         let picked = Array(pool.shuffled().prefix(2))
 
         async let gemsReq = model.browse(sort: ["SCORE_DESC"], minScore: 78, maxPopularity: 45_000,
-                                         minPopularity: 4_000, page: Int.random(in: 1...3), perPage: 25)
+                                         minPopularity: 4_000, firstSeasonsOnly: true,
+                                         page: Int.random(in: 1...3), perPage: 25)
         async let outsideReq = model.browse(sort: ["SCORE_DESC", "POPULARITY_DESC"], genres: picked.isEmpty ? nil : picked,
                                             excludeGenres: usual.isEmpty ? nil : Array(usual.prefix(3)),
-                                            minScore: 72, minPopularity: 8_000, perPage: 25)
+                                            minScore: 72, minPopularity: 8_000, firstSeasonsOnly: true, perPage: 25)
         if let items = try? await gemsReq { gems = notOnList(items).shuffled() }
         if let items = try? await outsideReq {
             outside = notOnList(items)
@@ -222,7 +223,7 @@ extension HomeView {
 
     func loadSurprise() async {
         if let items = try? await model.browse(sort: ["SCORE_DESC"], minScore: 70, minPopularity: 15_000,
-                                               page: Int.random(in: 1...30), perPage: 25) {
+                                               firstSeasonsOnly: true, page: Int.random(in: 1...30), perPage: 25) {
             withAnimation(.snappy) { surprise = notOnList(items).shuffled() }
         }
     }

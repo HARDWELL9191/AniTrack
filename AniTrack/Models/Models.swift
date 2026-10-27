@@ -49,6 +49,8 @@ struct Media: Codable, Identifiable, Hashable {
     var nextAiringEpisode: AiringEpisode?
     var description: String?
     var tags: [MediaTag]?
+    /// Only filled by suggestion queries (which season comes before/after this one).
+    var relations: MediaRelations?
 
     func displayTitle(_ language: TitleLanguage) -> String {
         let t = title
@@ -118,6 +120,69 @@ struct Media: Codable, Identifiable, Hashable {
     var visibleTags: [MediaTag] {
         (tags ?? []).filter { $0.isMediaSpoiler != true }
     }
+}
+
+/// Minimal relation data: enough to tell numbered seasons of one show apart.
+struct MediaRelations: Codable, Hashable {
+    struct Node: Codable, Hashable {
+        let id: Int
+        let type: String?
+        let format: String?
+        let title: MediaTitle?
+    }
+    struct Edge: Codable, Hashable { let relationType: String?; let node: Node? }
+    var edges: [Edge]?
+}
+
+/// Seasons vs. everything else. Only *numbered TV seasons of the same show* are collapsed;
+/// movies, OVAs, specials and sequels with their own name stay separate recommendations.
+enum Seasons {
+    static let seriesFormats: Set<String> = ["TV", "TV_SHORT", "ONA"]
+
+    static func normalized(_ s: String?) -> String {
+        (s ?? "").lowercased().unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) }.map(String.init).joined()
+    }
+
+    /// Same base title: e.g. "Tensei shitara Slime Datta Ken 2nd Season" vs "Tensei shitara Slime Datta Ken".
+    static func sameShow(_ a: MediaTitle?, _ b: MediaTitle?) -> Bool {
+        for (x, y) in [(a?.romaji, b?.romaji), (a?.english, b?.english)] {
+            let p = normalized(x), q = normalized(y)
+            guard !p.isEmpty, !q.isEmpty else { continue }
+            let common = zip(p, q).prefix { $0 == $1 }.count
+            let shorter = min(p.count, q.count)
+            // Short titles ("Bleach") just need to be a full prefix; longer ones share >= 60%.
+            if common >= min(shorter, max(8, shorter * 6 / 10)) { return true }
+        }
+        return false
+    }
+
+    static func isSeries(_ format: String?) -> Bool { format.map(seriesFormats.contains) ?? false }
+}
+
+extension Media {
+    /// The previous TV season of this same show, if this is Season 2+ (not a movie/OVA/renamed sequel).
+    var previousSeasonId: Int? {
+        guard Seasons.isSeries(format) else { return nil }
+        for edge in relations?.edges ?? [] where edge.relationType == "PREQUEL" {
+            guard let node = edge.node, node.type == nil || node.type == "ANIME",
+                  Seasons.isSeries(node.format), Seasons.sameShow(title, node.title) else { continue }
+            return node.id
+        }
+        return nil
+    }
+
+    /// Later TV seasons of this same show.
+    var nextSeasonIds: [Int] {
+        guard Seasons.isSeries(format) else { return [] }
+        return (relations?.edges ?? []).compactMap { edge in
+            guard edge.relationType == "SEQUEL", let node = edge.node, node.type == nil || node.type == "ANIME",
+                  Seasons.isSeries(node.format), Seasons.sameShow(title, node.title) else { return nil }
+            return node.id
+        }
+    }
+
+    /// Season 2+ of a show (as opposed to a first season, movie, OVA or renamed sequel).
+    var isLaterSeason: Bool { previousSeasonId != nil }
 }
 
 enum TitleLanguage: String, CaseIterable, Identifiable {

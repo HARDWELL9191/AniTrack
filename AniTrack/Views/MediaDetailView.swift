@@ -121,8 +121,9 @@ struct MediaDetailView: View {
                     }
                 }
 
+                // Season 2+ of other shows is left out (their Season 1 shows up instead, elsewhere).
                 let recs = (d.recommendations?.nodes ?? []).compactMap(\.mediaRecommendation)
-                    .filter { !(model.settings.hideChinese && $0.countryOfOrigin == "CN") }
+                    .filter { !(model.settings.hideChinese && $0.countryOfOrigin == "CN") && !$0.isLaterSeason }
                     .sorted { (model.matcher.match(for: $0) ?? 0) > (model.matcher.match(for: $1) ?? 0) }
                 if !recs.isEmpty {
                     HorizontalMediaSection(title: "More like this · best match first", items: recs)

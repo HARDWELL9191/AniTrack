@@ -103,7 +103,8 @@ struct MoreLikeThisSheet: View {
             let detail = try await model.detail(id: media.id)
             items = (detail.recommendations?.nodes ?? [])
                 .compactMap(\.mediaRecommendation)
-                .filter { model.entry(for: $0.id) == nil && $0.isAdult != true }
+                .filter { model.entry(for: $0.id) == nil && $0.isAdult != true && !$0.isLaterSeason }
+                .filter { !$0.nextSeasonIds.contains { model.entry(for: $0) != nil } }
                 .filter { !(model.settings.hideChinese && $0.countryOfOrigin == "CN") }
                 .sorted { (model.matcher.match(for: $0) ?? 0) > (model.matcher.match(for: $1) ?? 0) }
         } catch {

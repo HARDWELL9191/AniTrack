@@ -119,9 +119,7 @@ final class MatchEngine {
             for media in anchors {
                 guard let v = vectors[media.id] else { continue }
                 if taste.isEmpty { taste = [Float](repeating: 0, count: v.count) }
-                guard v.count == taste.count else { continue }
-                let k = Float(w[media.id] ?? 0)
-                for i in 0..<v.count { taste[i] += k * v[i] }
+                SemanticEngine.accumulate(v, scale: Float(w[media.id] ?? 0), into: &taste)
             }
             guard !taste.isEmpty else { return }
             taste = SemanticEngine.normalized(taste)

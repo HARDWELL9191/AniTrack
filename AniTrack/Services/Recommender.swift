@@ -143,6 +143,64 @@ enum Recommender {
         }
     }
 
+    // MARK: Seasons
+
+    static func collapseSeasons(candidates: inout [Int: Media],
+                                collab: inout [Int: Double],
+                                reasons: inout [Int: [String]],
+                                onList: [Int: ListEntry],
+                                client: AniListClient) async {
+        var known = await SeasonCache.shared.merged(with: candidates)
+        // Fetch earlier seasons we don't have yet (a few hops covers Season 4 → 1).
+        // Already-fetched seasons are remembered, so later rounds cost no extra requests.
+        for _ in 0..<4 {
+            let missing = Array(Set(known.values.compactMap(\.previousSeasonId))
+                .filter { known[$0] == nil && onList[$0] == nil })
+            guard !missing.isEmpty else { break }
+            var fetched: [Media] = []
+            var start = 0
+            while start < missing.count {
+                let chunk = Array(missing[start..<min(start + 50, missing.count)])
+                start += 50
+                if let data = try? await client.run(Queries.mediaByIds,
+                                                     variables: ["ids": chunk, "perPage": chunk.count],
+                                                     as: PageData.self) {
+                    for m in data.page.media { known[m.id] = m; fetched.append(m) }
+                }
+                if start < missing.count { try? await Task.sleep(nanoseconds: 300_000_000) }
+            }
+            await SeasonCache.shared.store(fetched)
+            if fetched.isEmpty { break }   // offline or rate limited: use what we have
+        }
+
+        var result: [Int: Media] = [:]
+        for (id, media) in candidates {
+            // Walk back to the first season.
+            var chain = [id]
+            var current = media
+            while let previous = current.previousSeasonId, chain.count < 12 {
+                chain.append(previous)
+                guard let earlier = known[previous] else { break }
+                current = earlier
+            }
+            // You already know this show if any season of it is on your list.
+            if chain.contains(where: { onList[$0] != nil }) { continue }
+            if media.nextSeasonIds.contains(where: { onList[$0] != nil }) { continue }
+            if current.nextSeasonIds.contains(where: { onList[$0] != nil }) { continue }
+            // If Season 1 couldn't be loaded (offline), keep the earliest season we have
+            // instead of silently dropping the show.
+            let root = current
+            if root.id != id {
+                collab[root.id, default: 0] += collab[id] ?? 0
+                for reason in reasons[id] ?? [] where !(reasons[root.id] ?? []).contains(reason) {
+                    reasons[root.id, default: []].append(reason)
+                }
+            }
+            result[root.id] = root
+        }
+        candidates = result
+    }
+
     // MARK: Run one round
 
     /// Returns new picks for `round` (1 = first screen). `exclude` holds IDs already shown.
@@ -254,13 +312,18 @@ enum Recommender {
             }
         }
         for vars in explorations {
-            if let data = try? await client.run(Queries.browse, variables: vars, as: PageData.self) {
+            if let data = try? await client.run(Queries.browseWithRelations, variables: vars, as: PageData.self) {
                 for media in data.page.media where candidates[media.id] == nil {
                     candidates[media.id] = media
                 }
             }
             try await Task.sleep(nanoseconds: 300_000_000)
         }
+
+        // 2b) One pick per show: Season 2+ becomes Season 1, and shows you already have
+        //     (any season on your list) are skipped. Movies/OVAs/renamed sequels stay separate.
+        await collapseSeasons(candidates: &candidates, collab: &collab, reasons: &reasons,
+                              onList: onList, client: client)
 
         // 3) Cheap first pass (no AI) to pick a short list worth spending the AI work on.
         let maxCollab = max(collab.values.max() ?? 1, 0.0001)
@@ -310,8 +373,7 @@ enum Recommender {
                 guard let v = vectors[media.id] else { continue }
                 let w = Float(weights[media.id] ?? 0)
                 if taste.isEmpty { taste = [Float](repeating: 0, count: v.count) }
-                guard v.count == taste.count else { continue }
-                for i in 0..<v.count { taste[i] += w * v[i] }
+                SemanticEngine.accumulate(v, scale: w, into: &taste)
             }
             taste = SemanticEngine.normalized(taste)
 
@@ -346,5 +408,22 @@ enum Recommender {
                                   sharedHighlights: profile.highlights(for: item.media))
         }
         return (Array(picks), usedAI)
+    }
+}
+
+
+/// Seasons fetched while collapsing Season 2+ into Season 1, kept for the app session
+/// so endless-feed rounds don't request the same shows again.
+actor SeasonCache {
+    static let shared = SeasonCache()
+    private var media: [Int: Media] = [:]
+
+    func merged(with candidates: [Int: Media]) -> [Int: Media] {
+        media.merging(candidates) { _, new in new }
+    }
+
+    func store(_ items: [Media]) {
+        if media.count > 1500 { media.removeAll(keepingCapacity: true) }
+        for m in items { media[m.id] = m }
     }
 }

@@ -111,6 +111,45 @@ enum Queries {
     }
     """
 
+    /// Small extra fragment for suggestion queries only: linked shows' format and title,
+    /// enough to tell a numbered season apart from a movie, OVA or renamed sequel.
+    static let relFragment = """
+    fragment rel on Media {
+      relations { edges { relationType node { id type format title { romaji english } } } }
+    }
+    """
+
+    /// Same as `browse`, plus relations, for suggestion shelves and the recommender.
+    static let browseWithRelations = """
+    query ($page: Int, $perPage: Int, $search: String, $sort: [MediaSort], $season: MediaSeason,
+           $seasonYear: Int, $status: MediaStatus, $genres: [String], $tags: [String],
+           $excludeIds: [Int], $isAdult: Boolean, $genresNot: [String],
+           $popularityLesser: Int, $popularityGreater: Int, $scoreGreater: Int) {
+      Page(page: $page, perPage: $perPage) {
+        pageInfo { hasNextPage }
+        media(type: ANIME, search: $search, sort: $sort, season: $season, seasonYear: $seasonYear,
+              status: $status, genre_in: $genres, tag_in: $tags, id_not_in: $excludeIds,
+              isAdult: $isAdult, genre_not_in: $genresNot, popularity_lesser: $popularityLesser,
+              popularity_greater: $popularityGreater, averageScore_greater: $scoreGreater) {
+          ...media
+          ...rel
+        }
+      }
+    }
+    """ + mediaFragment + relFragment
+
+    /// Full media + relations for a set of ids (used to walk back to a show's first season).
+    static let mediaByIds = """
+    query ($ids: [Int], $perPage: Int) {
+      Page(page: 1, perPage: $perPage) {
+        media(id_in: $ids, type: ANIME) {
+          ...media
+          ...rel
+        }
+      }
+    }
+    """ + mediaFragment + relFragment
+
     static let viewer = """
     query {
       Viewer {
@@ -183,13 +222,13 @@ enum Queries {
           recommendations(sort: RATING_DESC, page: $recsPage, perPage: $recsPerMedia) {
             nodes {
               rating
-              mediaRecommendation { ...media }
+              mediaRecommendation { ...media ...rel }
             }
           }
         }
       }
     }
-    """ + mediaFragment
+    """ + mediaFragment + relFragment
 
     static let detail = """
     query ($id: Int) {
@@ -211,13 +250,13 @@ enum Queries {
         recommendations(sort: RATING_DESC, page: 1, perPage: 15) {
           nodes {
             rating
-            mediaRecommendation { ...media }
+            mediaRecommendation { ...media ...rel }
           }
         }
         mediaListEntry { id mediaId status score(format: POINT_100) progress updatedAt }
       }
     }
-    """ + mediaFragment
+    """ + mediaFragment + relFragment
 
     static let categories = """
     query {

@@ -10,11 +10,13 @@ import urllib.request
 SRC = open("AniTrack/Services/AniListClient.swift").read()
 blocks = dict(re.findall(r'static let (\w+) = """\n(.*?)\n\s*"""', SRC, re.S))
 fragment = blocks["mediaFragment"]
+relfrag = blocks.get("relFragment", "")
 
 
 def query(name):
     after = SRC.split(f"static let {name} = ")[1].split("static let")[0]
-    return blocks[name] + ("\n" + fragment if "+ mediaFragment" in after else "")
+    return (blocks[name] + ("\n" + fragment if "+ mediaFragment" in after else "")
+            + ("\n" + relfrag if "+ relFragment" in after else ""))
 
 
 def note(title, msg, level="notice"):
@@ -132,3 +134,52 @@ for name, variables in [("browse", {"page": 1, "perPage": 25, "sort": ["TRENDING
     data = json.loads(raw)
     note(name, f"HTTP {status} in {dt:.1f}s errors={data.get('errors')}",
          "notice" if status == 200 and not data.get("errors") else "error")
+
+
+# Season collapse: mirrors Seasons.sameShow / Media.previousSeasonId in Models.swift.
+import unicodedata
+SERIES = {"TV", "TV_SHORT", "ONA"}
+def norm(t): return "".join(c for c in (t or "").lower() if c.isalnum())
+def same(a, b):
+    for k in ("romaji", "english"):
+        p, q = norm((a or {}).get(k)), norm((b or {}).get(k))
+        if not p or not q: continue
+        common = 0
+        for x, y in zip(p, q):
+            if x != y: break
+            common += 1
+        shorter = min(len(p), len(q))
+        if common >= min(shorter, max(8, shorter * 6 // 10)): return True
+    return False
+def prev_season(m):
+    if m.get("format") not in SERIES: return None
+    for e in ((m.get("relations") or {}).get("edges") or []):
+        n = e.get("node") or {}
+        if e.get("relationType") == "PREQUEL" and n.get("type") in (None, "ANIME") and n.get("format") in SERIES and same(m.get("title"), n.get("title")):
+            return n["id"]
+    return None
+
+for name, variables in [("browseWithRelations", {"page": 1, "perPage": 50, "sort": ["POPULARITY_DESC"], "isAdult": False}),
+                        ("seedRecommendations", {"ids": [101280], "recsPage": 1})]:
+    status, raw, dt = run(query(name), variables)
+    data = safe_json(raw, name)
+    note(name, f"HTTP {status} in {dt:.1f}s, {len(raw)//1024} KB, errors={data.get('errors')}",
+         "notice" if status == 200 and not data.get("errors") else "error")
+    time.sleep(1)
+
+for search in ["Tensei shitara Slime Datta Ken 2nd Season", "Mushoku Tensei II", "Bleach Sennen Kessen", "Shingeki no Kyojin Season 3", "Kimetsu no Yaiba Mugen Ressha", "Spy x Family Season 2"]:
+    status, raw, dt = run("query($s:String){ Media(search:$s, type: ANIME){ id format title { romaji english } relations { edges { relationType node { id type format title { romaji english } } } } } }", {"s": search})
+    m = (safe_json(raw, search).get("data") or {}).get("Media") or {}
+    chain = [f"{m.get('id')} {m.get('format')} {(m.get('title') or {}).get('romaji')}"]
+    cur = m
+    for _ in range(6):
+        pid = prev_season(cur)
+        if not pid: break
+        time.sleep(1)
+        st, r2, _ = run(query("mediaByIds"), {"ids": [pid], "perPage": 1})
+        items = ((safe_json(r2, "mediaByIds").get("data") or {}).get("Page") or {}).get("media") or []
+        if not items: chain.append(f"{pid} (fetch failed HTTP {st})"); break
+        cur = items[0]
+        chain.append(f"{cur['id']} {cur.get('format')} {(cur.get('title') or {}).get('romaji')}")
+    note("season " + search, " -> ".join(chain))
+    time.sleep(1)
