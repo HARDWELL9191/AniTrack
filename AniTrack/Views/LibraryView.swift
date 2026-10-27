@@ -89,6 +89,8 @@ struct LibraryView: View {
             // Flat rows with thin separators (no rounded card behind every show).
             .listStyle(.plain)
             .navigationTitle("Lists")
+            // Large title on the same row as the toolbar buttons (no empty row above it).
+            .toolbarTitleDisplayMode(.inlineLarge)
             .mediaDestination(zoom: zoom)
             .environment(\.zoomNamespace, zoom)
             .searchable(text: $filter, prompt: "Filter this list")

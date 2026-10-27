@@ -93,6 +93,8 @@ struct HomeView: View {
                 }
             }
             .navigationTitle("Home")
+            // Large title on the same row as the toolbar buttons (no empty row above it).
+            .toolbarTitleDisplayMode(.inlineLarge)
             .mediaDestination(zoom: zoom)
             .environment(\.zoomNamespace, zoom)
             .refreshable {

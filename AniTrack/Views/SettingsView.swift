@@ -93,6 +93,8 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Profile")
+            // Large title on the same row as the toolbar buttons (no empty row above it).
+            .toolbarTitleDisplayMode(.inlineLarge)
             .scrollDismissesKeyboard(.interactively)
             .toolbar {
                 ToolbarItemGroup(placement: .keyboard) {

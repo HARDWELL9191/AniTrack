@@ -29,10 +29,14 @@ struct DiscoverView: View {
                 }
             }
             .navigationTitle("Discover")
+            // Large title on the same row as the toolbar buttons (no empty row above it).
+            .toolbarTitleDisplayMode(.inlineLarge)
             .mediaDestination(zoom: zoom)
             .environment(\.zoomNamespace, zoom)
             .navigationDestination(for: AnimeCategory.self) { CategoryBrowseView(category: $0) }
-            .searchable(text: $query, prompt: "Search anime or a category")
+            // Always visible (iOS otherwise hides it until you pull the page down).
+            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always),
+                        prompt: "Search anime or a category")
             .task(id: "\(query)|\(searchCategory?.id ?? "")") { await search() }
             .sheet(isPresented: $showAllCategories) {
                 AllCategoriesSheet { picked in

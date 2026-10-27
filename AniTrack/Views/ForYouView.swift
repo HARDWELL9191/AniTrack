@@ -15,13 +15,16 @@ struct ForYouView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 18) {
+                VStack(spacing: 12) {
                     CategoryChipsBar(selected: $category)
                     content
                 }
-                .padding(.vertical)
+                .padding(.top, 4)
+                .padding(.bottom)
             }
             .navigationTitle("For You")
+            // Large title on the same row as the toolbar buttons (no empty row above it).
+            .toolbarTitleDisplayMode(.inlineLarge)
             .mediaDestination(zoom: zoom)
             .environment(\.zoomNamespace, zoom)
             .toolbar {
@@ -205,9 +208,10 @@ struct PickCard: View {
                 }
             }
 
+            // Four lines keeps the whole card (and its buttons) on screen; Details has the rest.
             Text(rec.media.plainDescription)
                 .font(.subheadline)
-                .lineLimit(6)
+                .lineLimit(4)
                 .foregroundStyle(.secondary)
 
             aiExplanation

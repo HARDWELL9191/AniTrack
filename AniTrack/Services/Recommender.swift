@@ -96,6 +96,25 @@ enum Recommender {
             return dot / (norm * vNorm)
         }
 
+        /// Similarity to the profile *without* this show's own contribution (leave-one-out), so a
+        /// show on your list is matched against the rest of your taste instead of against itself.
+        func similarity(to media: Media, excludingWeight w: Double) -> Double {
+            guard w != 0 else { return similarity(to: media) }
+            let v = Self.vector(for: media)
+            let vNorm = sqrt(v.values.reduce(0) { $0 + $1 * $1 })
+            guard vNorm > 0 else { return 0 }
+            var normSq = norm * norm
+            var dot = 0.0
+            for (key, value) in v {
+                let f = features[key] ?? 0
+                let without = f - value * w
+                normSq += without * without - f * f
+                dot += value * without
+            }
+            guard normSq > 1e-9 else { return 0 }
+            return dot / (sqrt(normSq) * vNorm)
+        }
+
         /// The features the candidate shares with your strongest likes, for the "why" chips.
         func highlights(for media: Media, limit: Int = 3) -> [String] {
             Self.vector(for: media)

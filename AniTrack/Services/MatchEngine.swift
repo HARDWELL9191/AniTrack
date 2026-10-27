@@ -22,10 +22,11 @@ final class MatchEngine {
     @ObservationIgnored private var weights: [Int: Double] = [:]
     @ObservationIgnored private var tagScale: (lo: Double, hi: Double) = (0, 1)
     @ObservationIgnored private var memo: [Int: Int] = [:]
-    @ObservationIgnored private var hiddenIds: Set<Int> = []        // rated/finished: show your score instead
 
     // AI layer
     @ObservationIgnored private var tasteVector: [Float]?
+    @ObservationIgnored private var tasteRaw: [Float] = []           // before normalizing (for leave-one-out)
+    @ObservationIgnored private var anchorWeights: [Int: Float] = [:] // shows that built the taste vector
     @ObservationIgnored private var semScale: (lo: Float, hi: Float) = (0, 1)
     @ObservationIgnored private var semantic: [Int: Float] = [:]     // normalized 0...1
     @ObservationIgnored private var pending: [Int: Media] = [:]
@@ -61,11 +62,12 @@ final class MatchEngine {
         newProfile.finalize()
         profile = newProfile
         weights = newWeights
-        hiddenIds = Set(entries.filter { $0.status == .COMPLETED || $0.status == .REPEATING || $0.scoreValue > 0 }.map(\.mediaId))
 
         // Calibrate: your well-liked shows define "very high match", the spread of your list "low".
-        let liked = entries.filter { (newWeights[$0.mediaId] ?? 0) > 0.5 }.map { newProfile.similarity(to: $0.media) }.sorted()
-        let all = entries.filter { $0.status != .PLANNING }.map { newProfile.similarity(to: $0.media) }.sorted()
+        // Each list show is compared with the rest of your list (leave-one-out), never with itself.
+        let loo: (ListEntry) -> Double = { newProfile.similarity(to: $0.media, excludingWeight: newWeights[$0.mediaId] ?? 0) }
+        let liked = entries.filter { (newWeights[$0.mediaId] ?? 0) > 0.5 }.map(loo).sorted()
+        let all = entries.filter { $0.status != .PLANNING }.map(loo).sorted()
         let hi = liked.isEmpty ? 0.6 : liked[min(liked.count - 1, Int(Double(liked.count) * 0.75))]
         let lo = all.isEmpty ? 0.0 : min(all[Int(Double(all.count - 1) * 0.1)], hi * 0.4)
         tagScale = (lo, max(hi, lo + 0.05))
@@ -78,14 +80,15 @@ final class MatchEngine {
 
     // MARK: Public
 
-    /// Match % for a show, or nil when it isn't meaningful (empty list, or you already rated/finished it).
+    /// Match % for any show, including ones you've finished or rated (those are matched against
+    /// the rest of your list, so a show can't match itself). nil only while your list is empty.
     func match(for media: Media) -> Int? {
         _ = version   // observe changes
         rebuildIfNeeded()
-        guard profile.norm > 0, !hiddenIds.contains(media.id) else { return nil }
+        guard profile.norm > 0 else { return nil }
         if let cached = memo[media.id] { return cached }
 
-        let raw = profile.similarity(to: media)
+        let raw = profile.similarity(to: media, excludingWeight: weights[media.id] ?? 0)
         var value = max(0, min(1, (raw - tagScale.lo) / (tagScale.hi - tagScale.lo)))
         if let sem = semantic[media.id] {
             value = 0.55 * value + 0.45 * Double(sem)
@@ -122,11 +125,20 @@ final class MatchEngine {
                 SemanticEngine.accumulate(v, scale: Float(w[media.id] ?? 0), into: &taste)
             }
             guard !taste.isEmpty else { return }
+            let raw = taste
+            var anchorW: [Int: Float] = [:]
+            for media in anchors where vectors[media.id] != nil { anchorW[media.id] = Float(w[media.id] ?? 0) }
             taste = SemanticEngine.normalized(taste)
-            // Calibrate on whatever part of your list is already embedded (no extra model work).
+            // Calibrate on whatever part of your list is already embedded (no extra model work),
+            // each show compared with the taste of the *rest* of your list.
             let refVectors = await SemanticEngine.shared.cachedVectors(for: reference.map(\.id))
-            let sims = refVectors.values.filter { $0.count == taste.count }.map { SemanticEngine.cosine(taste, $0) }.sorted()
+            let sims = refVectors.compactMap { id, v -> Float? in
+                guard v.count == raw.count else { return nil }
+                return MatchEngine.leaveOneOutCosine(raw: raw, vector: v, weight: anchorW[id] ?? 0)
+            }.sorted()
             guard let self, !Task.isCancelled else { return }
+            self.tasteRaw = raw
+            self.anchorWeights = anchorW
             if sims.count >= 3 {
                 self.semScale = (sims[Int(Double(sims.count - 1) * 0.1)], sims[Int(Double(sims.count - 1) * 0.9)])
             } else {
@@ -151,12 +163,23 @@ final class MatchEngine {
         let span = max(semScale.hi - semScale.lo, 0.0001)
         var changed = false
         for (id, v) in vectors where v.count == taste.count {
-            semantic[id] = max(0, min(1, (SemanticEngine.cosine(taste, v) - semScale.lo) / span))
+            let cosine = anchorWeights[id].map { Self.leaveOneOutCosine(raw: tasteRaw, vector: v, weight: $0) }
+                ?? SemanticEngine.cosine(taste, v)
+            semantic[id] = max(0, min(1, (cosine - semScale.lo) / span))
             memo[id] = nil
             pending[id] = nil
             changed = true
         }
         if changed { version &+= 1 }
+    }
+
+    /// Cosine between a unit vector and the taste vector with that show's own share removed.
+    nonisolated static func leaveOneOutCosine(raw: [Float], vector v: [Float], weight w: Float) -> Float {
+        let rv = SemanticEngine.cosine(raw, v)                  // dot product (v is unit length)
+        let rr = SemanticEngine.cosine(raw, raw)                // |raw|²
+        let normSq = rr - 2 * w * rv + w * w
+        guard normSq > 1e-9 else { return 0 }
+        return (rv - w) / normSq.squareRoot()
     }
 
     private func queueForAI(_ media: Media) {
