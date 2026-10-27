@@ -89,11 +89,12 @@ struct BannerImageView: View {
     }
 }
 
+/// Community score shown out of 10 (AniList stores it as 0–100), with a mood smiley.
 struct ScoreBadge: View {
     let score: Int?
     var body: some View {
-        if let score {
-            Label("\(score)%", systemImage: score >= 75 ? "face.smiling.inverse" : "face.smiling")
+        if let score, score > 0 {
+            Label(Fmt.outOfTen(score), systemImage: Fmt.smiley(score))
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(score >= 75 ? .green : (score >= 60 ? .orange : .red))
         }
@@ -247,6 +248,17 @@ enum Fmt {
         guard let next else { return nil }
         let remaining = max(0, next.airingAt - Int(Date().timeIntervalSince1970))
         return "Ep \(next.episode) in \(countdown(remaining))"
+    }
+
+    /// 82 → "8.2/10"
+    static func outOfTen(_ score: Int) -> String {
+        String(format: "%.1f/10", Double(score) / 10)
+    }
+
+    static func smiley(_ score: Int) -> String {
+        if score >= 75 { return "face.smiling.inverse" }
+        if score >= 60 { return "face.smiling" }
+        return "face.dashed"
     }
 
     static func score(_ raw: Double?) -> String {

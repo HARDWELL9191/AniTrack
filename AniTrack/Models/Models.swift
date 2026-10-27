@@ -329,6 +329,56 @@ struct DeleteEntryData: Decodable {
     enum CodingKeys: String, CodingKey { case result = "DeleteMediaListEntry" }
 }
 
+// MARK: - Categories (AniList genres and tags)
+
+struct AnimeCategory: Codable, Hashable, Identifiable {
+    enum Kind: String, Codable { case genre, tag }
+    let name: String
+    let kind: Kind
+    var id: String { "\(kind.rawValue):\(name)" }
+
+    static func genre(_ name: String) -> AnimeCategory { AnimeCategory(name: name, kind: .genre) }
+    static func tag(_ name: String) -> AnimeCategory { AnimeCategory(name: name, kind: .tag) }
+
+    /// Quick picks shown as chips; anything AniList doesn't know is filtered out at runtime.
+    static let featured: [AnimeCategory] = [
+        .tag("Isekai"), .genre("Romance"), .genre("Ecchi"), .genre("Action"), .genre("Fantasy"),
+        .tag("Reincarnation"), .tag("Harem"), .genre("Comedy"), .tag("Magic"), .tag("Super Power"),
+        .genre("Adventure"), .genre("Slice of Life"), .tag("School"), .genre("Drama"), .tag("Demons"),
+        .genre("Mystery"), .genre("Psychological"), .genre("Sci-Fi"), .tag("Revenge"), .genre("Supernatural"),
+        .genre("Horror"), .genre("Sports"), .genre("Mecha"), .genre("Thriller")
+    ]
+
+    /// Whether a show belongs to this category (tags need a decent relevance rank).
+    func matches(_ media: Media) -> Bool {
+        switch kind {
+        case .genre: return media.genres?.contains(name) == true
+        case .tag: return media.tags?.contains { $0.name == name && ($0.rank ?? 0) >= 45 } == true
+        }
+    }
+
+    /// GraphQL variables that filter a browse query to this category.
+    var browseVariables: [String: Any] {
+        kind == .genre ? ["genres": [name]] : ["tags": [name]]
+    }
+}
+
+struct TagInfo: Decodable {
+    let name: String
+    let category: String?
+    let isAdult: Bool?
+    let isGeneralSpoiler: Bool?
+}
+
+struct CategoryCollectionData: Decodable {
+    let genres: [String]?
+    let tags: [TagInfo]?
+    enum CodingKeys: String, CodingKey {
+        case genres = "GenreCollection"
+        case tags = "MediaTagCollection"
+    }
+}
+
 /// Used for navigation to a detail page.
 struct MediaLink: Hashable {
     let id: Int

@@ -3,6 +3,7 @@ import SwiftUI
 struct HomeView: View {
     @Environment(AppModel.self) private var model
     @Namespace private var zoom
+    @State private var trending: [Media] = []
 
     var body: some View {
         NavigationStack {
@@ -28,6 +29,8 @@ struct HomeView: View {
                     }
                 }
 
+                pickedForYou
+
                 if !airing.isEmpty {
                     Section("Airing schedule") {
                         ForEach(airing) { entry in
@@ -50,12 +53,19 @@ struct HomeView: View {
                 }
 
                 if !planning.isEmpty {
-                    Section("Up next from Planning") {
-                        ForEach(planning.prefix(5)) { entry in
-                            NavigationLink(value: MediaLink(id: entry.mediaId)) {
-                                MediaRow(media: entry.media)
-                            }
-                        }
+                    Section {
+                        cardRow(planning.prefix(15).map(\.media)) { _ in nil }
+                    } header: {
+                        sectionHeader("Up next from Planning", action: "All") { model.selectedTab = .lists }
+                    }
+                }
+
+                if !trending.isEmpty {
+                    let season = AppModel.currentSeason()
+                    Section {
+                        cardRow(trending) { _ in nil }
+                    } header: {
+                        Text("Trending · \(season.season.capitalized) \(String(season.year))")
                     }
                 }
 
@@ -73,10 +83,92 @@ struct HomeView: View {
             .navigationTitle("Home")
             .mediaDestination(zoom: zoom)
             .environment(\.zoomNamespace, zoom)
-            .refreshable { await model.reloadAll() }
+            .refreshable {
+                await model.reloadAll()
+                await loadTrending(force: true)
+            }
+            .task { await loadTrending() }
+            .task(id: model.entries.count) {
+                // Uses the saved picks; only rebuilds when your list changed.
+                if !model.entries.isEmpty { await model.generateRecommendations() }
+            }
             .overlay {
                 if model.isLoadingList && model.entries.isEmpty { ProgressView("Loading your list…") }
             }
+        }
+    }
+}
+
+extension HomeView {
+    /// The AI row: same feed as For You (no category), shown as cards.
+    @ViewBuilder
+    var pickedForYou: some View {
+        let picks = model.picks(for: nil)
+        if !picks.isEmpty || model.isLoadingFeed(nil) {
+            Section {
+                if picks.isEmpty {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                        Text("Hoshi is picking shows for you…").foregroundStyle(.secondary)
+                    }
+                } else {
+                    cardRow(Array(picks.prefix(15).map(\.media))) { media in
+                        picks.first { $0.id == media.id }.map { "\($0.match)% match" }
+                    }
+                }
+            } header: {
+                sectionHeader("Picked for you", systemImage: "wand.and.stars", action: "See all") {
+                    model.selectedTab = .forYou
+                }
+            }
+        }
+    }
+
+    func sectionHeader(_ title: String, systemImage: String? = nil, action: String, perform: @escaping () -> Void) -> some View {
+        HStack {
+            if let systemImage {
+                Label(title, systemImage: systemImage)
+            } else {
+                Text(title)
+            }
+            Spacer()
+            Button(action, action: perform)
+                .font(.subheadline.weight(.semibold))
+                .textCase(nil)
+        }
+    }
+
+    /// Horizontal row of cover cards inside a List section.
+    func cardRow(_ items: [Media], caption: @escaping (Media) -> String?) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            LazyHStack(alignment: .top, spacing: 12) {
+                ForEach(items) { media in
+                    NavigationLink(value: MediaLink(id: media.id)) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            MediaCard(media: media, width: 104)
+                            if let text = caption(media) {
+                                Text(text)
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(Theme.pink)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+        }
+        .listRowInsets(EdgeInsets())
+        .listRowBackground(Color.clear)
+    }
+
+    func loadTrending(force: Bool = false) async {
+        guard trending.isEmpty || force else { return }
+        let season = AppModel.currentSeason()
+        if let items = try? await model.browse(sort: ["TRENDING_DESC", "POPULARITY_DESC"],
+                                               season: season.season, seasonYear: season.year, perPage: 15) {
+            trending = items
         }
     }
 }

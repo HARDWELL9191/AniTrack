@@ -174,11 +174,11 @@ enum Queries {
     """ + mediaFragment
 
     static let seedRecommendations = """
-    query ($ids: [Int], $perPage: Int, $recsPerMedia: Int) {
+    query ($ids: [Int], $perPage: Int, $recsPage: Int, $recsPerMedia: Int) {
       Page(page: 1, perPage: $perPage) {
         media(id_in: $ids, type: ANIME) {
           id
-          recommendations(sort: RATING_DESC, page: 1, perPage: $recsPerMedia) {
+          recommendations(sort: RATING_DESC, page: $recsPage, perPage: $recsPerMedia) {
             nodes {
               rating
               mediaRecommendation { ...media }
@@ -216,6 +216,13 @@ enum Queries {
       }
     }
     """ + mediaFragment
+
+    static let categories = """
+    query {
+      GenreCollection
+      MediaTagCollection { name category isAdult isGeneralSpoiler }
+    }
+    """
 
     static let saveEntry = """
     mutation ($mediaId: Int, $status: MediaListStatus, $progress: Int, $scoreRaw: Int) {

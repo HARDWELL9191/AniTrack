@@ -180,7 +180,7 @@ struct MediaDetailView: View {
             ("Season", media.seasonLabel ?? "?"),
             ("Studio", studios.first ?? "?"),
             ("Popularity", media.popularity.map { $0.formatted() } ?? "?"),
-            ("Mean score", media.meanScore.map { "\($0)%" } ?? "?")
+            ("Mean score", media.meanScore.map { Fmt.outOfTen($0) } ?? "?")
         ]
         return LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 10) {
             ForEach(rows, id: \.0) { row in

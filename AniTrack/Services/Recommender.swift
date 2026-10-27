@@ -7,28 +7,28 @@ struct Recommendation: Identifiable, Hashable, Codable {
     let match: Int
     let because: [String]
     let sharedHighlights: [String]
-    let onPlanning: Bool
 }
 
+/// One category's feed of picks. Grows in "rounds": when you reach the end, the next round
+/// digs deeper (next page of fan recommendations, next page of category/tag exploration).
 struct RecommendationResult: Codable {
-    /// New shows that aren't on your list (or are only on Planning).
-    var discover: [Recommendation]
-    /// Ranked picks from your own Planning list.
-    var planning: [Recommendation]
-    let generatedAt: Date
+    var picks: [Recommendation]
+    var generatedAt: Date
     /// Fingerprint of the list the picks were built from; picks are rebuilt only when it changes.
-    var fingerprint: Int = 0
-    /// True when on-device semantic similarity was part of the ranking.
-    var usedOnDeviceAI: Bool = false
+    var fingerprint: Int
+    var usedOnDeviceAI: Bool
+    /// How many rounds have been loaded so far.
+    var round: Int
+    /// True when several deeper rounds found nothing new.
+    var exhausted: Bool
 
     mutating func remove(_ mediaId: Int) {
-        discover.removeAll { $0.id == mediaId }
-        planning.removeAll { $0.id == mediaId }
+        picks.removeAll { $0.id == mediaId }
     }
 }
 
 /// Builds a taste profile from the user's list and ranks candidates by a blend of
-/// (1) AniList community recommendations from the shows you rated highly,
+/// (1) AniList fan recommendations from the shows you rated highly,
 /// (2) genre/tag similarity to your taste profile,
 /// (3) on-device semantic similarity of synopses (Natural Language embeddings), and
 /// (4) overall community score.
@@ -39,17 +39,16 @@ enum Recommender {
         var dismissed: Set<Int>
         var titleLanguage: TitleLanguage
         var useOnDeviceAI: Bool
+        var category: AnimeCategory?
     }
 
-    /// Changes whenever something that affects the picks changes.
     /// Uses FNV-1a (not Swift's Hasher, which is randomly seeded per launch) so it survives restarts.
     static func fingerprint(entries: [ListEntry], options: Options) -> Int {
         var text = ""
         for e in entries.sorted(by: { $0.id < $1.id }) {
             text += "\(e.id):\(e.status.rawValue):\(Int(e.scoreValue));"
         }
-        text += "|\(options.hideChinese)|\(options.includeUnreleased)|\(options.useOnDeviceAI)|"
-        text += options.dismissed.sorted().map(String.init).joined(separator: ",")
+        text += "|\(options.hideChinese)|\(options.includeUnreleased)|\(options.useOnDeviceAI)|\(options.category?.id ?? "any")|"
         var hash: UInt64 = 0xcbf29ce484222325
         for byte in text.utf8 {
             hash ^= UInt64(byte)
@@ -94,7 +93,7 @@ enum Recommender {
             return dot / (norm * vNorm)
         }
 
-        /// The features the candidate shares with your strongest likes, for the "why" line.
+        /// The features the candidate shares with your strongest likes, for the "why" chips.
         func highlights(for media: Media, limit: Int = 3) -> [String] {
             Self.vector(for: media)
                 .compactMap { key, value -> (String, Double)? in
@@ -127,13 +126,18 @@ enum Recommender {
         case .CURRENT: return 0.5
         case .PAUSED: return 0.1
         case .DROPPED: return -1.0
-        case .PLANNING: return 0
+        case .PLANNING: return 0.2   // you were interested enough to plan it
         }
     }
 
-    // MARK: Run
+    // MARK: Run one round
 
-    static func run(entries: [ListEntry], client: AniListClient, options: Options) async throws -> RecommendationResult {
+    /// Returns new picks for `round` (1 = first screen). `exclude` holds IDs already shown.
+    static func run(entries: [ListEntry],
+                    client: AniListClient,
+                    options: Options,
+                    round: Int = 1,
+                    exclude: Set<Int> = []) async throws -> (picks: [Recommendation], usedAI: Bool) {
         let scored = entries.map(\.scoreValue).filter { $0 > 0 }
         let mean = scored.isEmpty ? 70 : scored.reduce(0, +) / Double(scored.count)
         let variance = scored.isEmpty ? 0 : scored.reduce(0) { $0 + ($1 - mean) * ($1 - mean) } / Double(scored.count)
@@ -149,11 +153,10 @@ enum Recommender {
         profile.finalize()
 
         let onList = Dictionary(entries.map { ($0.mediaId, $0) }, uniquingKeysWith: { a, _ in a })
-        let planningIds = Set(entries.filter { $0.status == .PLANNING }.map(\.mediaId))
 
-        // Seeds: your strongest likes, newest first among equals.
+        // Seeds: your strongest likes (never Planning), newest first among equals.
         let seeds = entries
-            .filter { (weights[$0.mediaId] ?? 0) > 0.3 }
+            .filter { $0.status != .PLANNING && (weights[$0.mediaId] ?? 0) > 0.3 }
             .sorted {
                 let a = weights[$0.mediaId] ?? 0, b = weights[$1.mediaId] ?? 0
                 return a == b ? ($0.updatedAt ?? 0) > ($1.updatedAt ?? 0) : a > b
@@ -164,55 +167,78 @@ enum Recommender {
         var reasons: [Int: [String]] = [:]
         var candidates: [Int: Media] = [:]
 
-        // 1) Community recommendations from your top shows.
+        // 1) Fan recommendations from your top shows (deeper pages on later rounds).
         let seedList = Array(seeds)
         var start = 0
         let batchSize = 6
+        var firstBatch = true
         while start < seedList.count {
             let batch = Array(seedList[start..<min(start + batchSize, seedList.count)])
             start += batchSize
             let ids = batch.map(\.mediaId)
-            let data: SeedPageData
             do {
-                data = try await client.run(Queries.seedRecommendations,
-                                            variables: ["ids": ids, "perPage": ids.count, "recsPerMedia": 8],
-                                            as: SeedPageData.self)
-            } catch {
-                // One failed batch shouldn't kill the whole run.
-                if start <= batchSize { throw error } else { continue }
-            }
-            for seedMedia in data.page.media {
-                guard let seed = onList[seedMedia.id] else { continue }
-                let seedWeight = weights[seedMedia.id] ?? 0.5
-                let seedTitle = seed.media.displayTitle(options.titleLanguage)
-                for node in seedMedia.recommendations?.nodes ?? [] {
-                    guard let rec = node.mediaRecommendation, rec.id != seedMedia.id else { continue }
-                    let rating = Double(max(node.rating ?? 0, 0))
-                    guard rating > 0 else { continue }
-                    collab[rec.id, default: 0] += seedWeight * log(1 + rating)
-                    candidates[rec.id] = rec
-                    if !(reasons[rec.id] ?? []).contains(seedTitle) {
-                        reasons[rec.id, default: []].append(seedTitle)
+                let data = try await client.run(Queries.seedRecommendations,
+                                                variables: ["ids": ids, "perPage": ids.count,
+                                                            "recsPage": round, "recsPerMedia": 8],
+                                                as: SeedPageData.self)
+                for seedMedia in data.page.media {
+                    guard let seed = onList[seedMedia.id] else { continue }
+                    let seedWeight = weights[seedMedia.id] ?? 0.5
+                    let seedTitle = seed.media.displayTitle(options.titleLanguage)
+                    for node in seedMedia.recommendations?.nodes ?? [] {
+                        guard let rec = node.mediaRecommendation, rec.id != seedMedia.id else { continue }
+                        let rating = Double(max(node.rating ?? 0, 0))
+                        guard rating > 0 else { continue }
+                        collab[rec.id, default: 0] += seedWeight * log(1 + rating)
+                        candidates[rec.id] = rec
+                        if !(reasons[rec.id] ?? []).contains(seedTitle) {
+                            reasons[rec.id, default: []].append(seedTitle)
+                        }
                     }
                 }
+            } catch {
+                // One failed batch shouldn't kill the whole round, but a failing first batch means
+                // something's wrong (offline, rate limit), so surface it.
+                if firstBatch && round == 1 { throw error }
             }
+            firstBatch = false
             try await Task.sleep(nanoseconds: 300_000_000)
         }
 
-        // 2) Explore by your top tags and genres to surface shows nobody linked yet.
-        let excludeIds = Array(onList.keys.filter { !planningIds.contains($0) })
+        // 2) Explore beyond what fans linked: your top tags/genres, and the chosen category.
+        let excludeIds = Array(Set(onList.keys).union(exclude))
         let topTags = profile.top(prefix: "t:", count: 3)
         let topGenres = profile.top(prefix: "g:", count: 2)
         var explorations: [[String: Any]] = []
-        if !topTags.isEmpty {
-            explorations.append(["tags": topTags, "sort": ["SCORE_DESC"], "page": 1, "perPage": 40,
-                                 "isAdult": false, "excludeIds": excludeIds])
-        }
-        if !topGenres.isEmpty {
-            var vars: [String: Any] = ["genres": topGenres, "sort": ["POPULARITY_DESC"],
-                                       "page": 1, "perPage": 40, "isAdult": false, "excludeIds": excludeIds]
-            if let firstTag = topTags.first { vars["tags"] = [firstTag] }
-            explorations.append(vars)
+        let base: [String: Any] = ["page": round, "perPage": 40, "isAdult": false, "excludeIds": excludeIds]
+
+        if let category = options.category {
+            // Category mode: the category is the main source, ranked by your taste below.
+            var byScore = base.merging(category.browseVariables) { a, _ in a }
+            byScore["sort"] = ["SCORE_DESC"]
+            var byPopularity = base.merging(category.browseVariables) { a, _ in a }
+            byPopularity["sort"] = ["POPULARITY_DESC"]
+            explorations += [byScore, byPopularity]
+            if let tag = topTags.first, category.kind == .genre {
+                var mixed = base.merging(category.browseVariables) { a, _ in a }
+                mixed["tags"] = [tag]
+                mixed["sort"] = ["SCORE_DESC"]
+                explorations.append(mixed)
+            }
+        } else {
+            if !topTags.isEmpty {
+                var vars = base
+                vars["tags"] = topTags
+                vars["sort"] = ["SCORE_DESC"]
+                explorations.append(vars)
+            }
+            if !topGenres.isEmpty {
+                var vars = base
+                vars["genres"] = topGenres
+                vars["sort"] = ["POPULARITY_DESC"]
+                if let firstTag = topTags.first { vars["tags"] = [firstTag] }
+                explorations.append(vars)
+            }
         }
         for vars in explorations {
             if let data = try? await client.run(Queries.browse, variables: vars, as: PageData.self) {
@@ -223,27 +249,23 @@ enum Recommender {
             try await Task.sleep(nanoseconds: 300_000_000)
         }
 
-        // Planning entries are always candidates for the Planning picker.
-        for id in planningIds { if let e = onList[id] { candidates[id] = candidates[id] ?? e.media } }
-
-        // 3) Score.
+        // 3) Cheap first pass (no AI) to pick a short list worth spending the AI work on.
         let maxCollab = max(collab.values.max() ?? 1, 0.0001)
 
         func allowed(_ m: Media) -> Bool {
+            if onList[m.id] != nil || exclude.contains(m.id) { return false }
             if m.isAdult == true { return false }
             if options.hideChinese && m.countryOfOrigin == "CN" { return false }
             if m.format == "MUSIC" { return false }
             if !options.includeUnreleased && m.status == "NOT_YET_RELEASED" { return false }
             if options.dismissed.contains(m.id) { return false }
+            if let category = options.category, !category.matches(m) { return false }
             return true
         }
 
-        // Cheap first pass (no AI) to pick a short list worth spending the AI work on.
-        struct Scored { let media: Media; let collab: Double; let tagSim: Double; let quality: Double; var score: Double }
+        struct Scored { let media: Media; let collab: Double; let tagSim: Double; let quality: Double; let score: Double }
         var preScored: [Scored] = []
-        for (id, media) in candidates {
-            if let entry = onList[id], entry.status != .PLANNING { continue }
-            guard allowed(media) else { continue }
+        for (id, media) in candidates where allowed(media) {
             let c = (collab[id] ?? 0) / maxCollab
             let sim = max(0, profile.similarity(to: media))
             let quality = Double(media.averageScore ?? media.meanScore ?? 60) / 100
@@ -251,18 +273,17 @@ enum Recommender {
                                     score: 0.5 * c + 0.38 * sim + 0.12 * quality))
         }
         preScored.sort { $0.score > $1.score }
-        let shortList = Array(preScored.filter { !planningIds.contains($0.media.id) }.prefix(120))
-            + Array(preScored.filter { planningIds.contains($0.media.id) }.prefix(120))
+        let shortList = Array(preScored.prefix(80))
 
         // 4) On-device semantic re-rank: embed synopses of your strongest likes/dislikes and the
         //    short list, build a "taste vector", and compare. Embeddings are cached on disk.
         var usedAI = false
-        var scoredCandidates: [(media: Media, score: Double)] = shortList.map { item -> (media: Media, score: Double) in
+        var ranked: [(media: Media, score: Double)] = shortList.map { item -> (media: Media, score: Double) in
             (media: item.media, score: item.score)
         }
-        if options.useOnDeviceAI {
+        if options.useOnDeviceAI && !shortList.isEmpty {
             let anchors = entries
-                .filter { abs(weights[$0.mediaId] ?? 0) >= 0.4 }
+                .filter { $0.status != .PLANNING && abs(weights[$0.mediaId] ?? 0) >= 0.4 }
                 .sorted { abs(weights[$0.mediaId] ?? 0) > abs(weights[$1.mediaId] ?? 0) }
                 .prefix(40)
                 .map(\.media)
@@ -282,45 +303,35 @@ enum Recommender {
             taste = SemanticEngine.normalized(taste)
 
             if !taste.isEmpty {
-                // Re-scale cosine (embeddings of similar-length text cluster tightly) to 0...1 within this batch.
+                // Rescale cosine within this batch (embeddings of similar text cluster tightly).
                 let sims = shortList.map { item -> Float in
                     guard let v = vectors[item.media.id] else { return 0 }
                     return SemanticEngine.cosine(taste, v)
                 }
                 let lo = sims.min() ?? 0, hi = sims.max() ?? 1
                 let span = max(hi - lo, 0.0001)
-                scoredCandidates = zip(shortList, sims).map { item, sim -> (media: Media, score: Double) in
+                ranked = zip(shortList, sims).map { item, sim -> (media: Media, score: Double) in
                     let semantic = Double((sim - lo) / span)
-                    let score = 0.38 * item.collab + 0.24 * item.tagSim + 0.28 * semantic + 0.10 * item.quality
-                    return (item.media, score)
+                    return (media: item.media,
+                            score: 0.38 * item.collab + 0.24 * item.tagSim + 0.28 * semantic + 0.10 * item.quality)
                 }
                 usedAI = true
             }
         }
-        scoredCandidates.sort { $0.score > $1.score }
-        let top = max(scoredCandidates.first?.score ?? 1, 0.0001)
+        ranked.sort { $0.score > $1.score }
 
-        func makeRec(_ item: (media: Media, score: Double)) -> Recommendation {
+        // Match % is relative to the best pick in this round, so later rounds stay comparable.
+        let top = max(ranked.first?.score ?? 1, 0.0001)
+        let roundPenalty = Double(round - 1) * 0.04
+        let picks = ranked.prefix(40).map { item -> Recommendation in
             let ratio = item.score / top
-            let match = Int((min(0.99, 0.55 + 0.44 * ratio) * 100).rounded())
+            let match = Int((max(0.5, min(0.99, 0.55 + 0.44 * ratio - roundPenalty)) * 100).rounded())
             return Recommendation(media: item.media,
                                   score: item.score,
                                   match: match,
                                   because: Array((reasons[item.media.id] ?? []).prefix(3)),
-                                  sharedHighlights: profile.highlights(for: item.media),
-                                  onPlanning: planningIds.contains(item.media.id))
+                                  sharedHighlights: profile.highlights(for: item.media))
         }
-
-        let discover = scoredCandidates
-            .filter { !planningIds.contains($0.media.id) }
-            .prefix(60)
-            .map(makeRec)
-        let planning = scoredCandidates
-            .filter { planningIds.contains($0.media.id) }
-            .map(makeRec)
-
-        return RecommendationResult(discover: Array(discover), planning: planning, generatedAt: Date(),
-                                    fingerprint: fingerprint(entries: entries, options: options),
-                                    usedOnDeviceAI: usedAI)
+        return (Array(picks), usedAI)
     }
 }

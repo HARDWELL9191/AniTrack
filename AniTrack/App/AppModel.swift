@@ -14,10 +14,17 @@ final class AppModel {
     private(set) var didBootstrap = false
     var errorMessage: String?
 
-    // Recommendations ("Hoshi" picks)
-    private(set) var recommendations: RecommendationResult?
-    private(set) var isLoadingRecommendations = false
+    // Recommendations ("Hoshi" picks), one feed per category ("any" = no category).
+    private(set) var feeds: [String: RecommendationResult] = [:]
+    private(set) var loadingFeeds: Set<String> = []
+    private(set) var loadingMore: Set<String> = []
     var recommendationError: String?
+
+    // Categories (AniList genres + tags), loaded once and cached.
+    private(set) var allCategories: [AnimeCategory] = []
+
+    // Lets Home jump to another tab.
+    var selectedTab: AppTab = .home
 
     private let defaults = UserDefaults.standard
     private static let tokenKey = "anilistToken"
@@ -61,7 +68,7 @@ final class AppModel {
         defaults.removeObject(forKey: "readOnlyUsername")
         client.token = trimmed
         mode = .loggedIn
-        recommendations = nil
+        feeds = [:]
         await reloadAll()
     }
 
@@ -70,7 +77,7 @@ final class AppModel {
         guard !trimmed.isEmpty else { return }
         defaults.set(trimmed, forKey: "readOnlyUsername")
         mode = .username(trimmed)
-        recommendations = nil
+        feeds = [:]
         await reloadAll()
         if viewer == nil {
             // Username not found or private profile: go back to welcome screen.
@@ -86,7 +93,7 @@ final class AppModel {
         mode = .none
         viewer = nil
         entries = []
-        recommendations = nil
+        feeds = [:]
         DiskCache.clearAll()
     }
 
@@ -239,10 +246,12 @@ final class AppModel {
                 season: String? = nil,
                 seasonYear: Int? = nil,
                 status: String? = nil,
+                category: AnimeCategory? = nil,
                 page: Int = 1,
                 perPage: Int = 25) async throws -> [Media] {
         var vars: [String: Any] = ["page": page, "perPage": perPage, "sort": sort, "isAdult": false]
         if let search, !search.isEmpty { vars["search"] = search }
+        if let category { vars.merge(category.browseVariables) { a, _ in a } }
         if let season { vars["season"] = season }
         if let seasonYear { vars["seasonYear"] = seasonYear }
         if let status { vars["status"] = status }
@@ -256,50 +265,121 @@ final class AppModel {
 
     // MARK: - Recommendations
 
-    private var recommendationOptions: Recommender.Options {
+    static func feedKey(_ category: AnimeCategory?) -> String { category?.id ?? "any" }
+
+    private func recommendationOptions(_ category: AnimeCategory?) -> Recommender.Options {
         Recommender.Options(hideChinese: settings.hideChinese,
                             includeUnreleased: settings.includeUnreleased,
                             dismissed: settings.dismissedPicks,
                             titleLanguage: settings.titleLanguage,
-                            useOnDeviceAI: settings.useOnDeviceAI)
+                            useOnDeviceAI: settings.useOnDeviceAI,
+                            category: category)
+    }
+
+    func feed(for category: AnimeCategory?) -> RecommendationResult? {
+        feeds[Self.feedKey(category)]
+    }
+
+    func picks(for category: AnimeCategory?) -> [Recommendation] {
+        feed(for: category)?.picks ?? []
+    }
+
+    func isLoadingFeed(_ category: AnimeCategory?) -> Bool {
+        loadingFeeds.contains(Self.feedKey(category))
+    }
+
+    func isLoadingMore(_ category: AnimeCategory?) -> Bool {
+        loadingMore.contains(Self.feedKey(category))
+    }
+
+    private func feedCacheName(_ category: AnimeCategory?) -> String {
+        feedCacheName(key: Self.feedKey(category))
+    }
+
+    private func feedCacheName(key: String) -> String {
+        let safe = key.replacingOccurrences(of: "[^A-Za-z0-9]", with: "_", options: .regularExpression)
+        return cacheName("feed-\(safe)")
     }
 
     /// Battery-friendly: reuses saved picks unless your list changed or they're over 3 days old.
-    func generateRecommendations(force: Bool = false) async {
-        guard !isLoadingRecommendations else { return }
+    func generateRecommendations(category: AnimeCategory? = nil, force: Bool = false) async {
+        let key = Self.feedKey(category)
+        guard !loadingFeeds.contains(key) else { return }
         guard !entries.isEmpty else {
             recommendationError = "Your list is empty. Add and rate a few shows first."
             return
         }
-        let fingerprint = Recommender.fingerprint(entries: entries, options: recommendationOptions)
+        let options = recommendationOptions(category)
+        let fingerprint = Recommender.fingerprint(entries: entries, options: options)
         if !force {
-            if recommendations == nil { recommendations = DiskCache.load(RecommendationResult.self, name: cacheName("picks")) }
-            if let current = recommendations,
+            if feeds[key] == nil { feeds[key] = DiskCache.load(RecommendationResult.self, name: feedCacheName(category)) }
+            if let current = feeds[key],
                current.fingerprint == fingerprint,
-               Date().timeIntervalSince(current.generatedAt) < 3 * 86_400 {
+               Date().timeIntervalSince(current.generatedAt) < 3 * 86_400,
+               !current.picks.isEmpty {
                 return
             }
         }
-        isLoadingRecommendations = true
+        loadingFeeds.insert(key)
         recommendationError = nil
-        defer { isLoadingRecommendations = false }
+        defer { loadingFeeds.remove(key) }
         do {
-            let result = try await Recommender.run(entries: entries, client: client, options: recommendationOptions)
-            recommendations = result
-            DiskCache.save(result, name: cacheName("picks"))
+            let (picks, usedAI) = try await Recommender.run(entries: entries, client: client, options: options)
+            let result = RecommendationResult(picks: picks, generatedAt: Date(), fingerprint: fingerprint,
+                                              usedOnDeviceAI: usedAI, round: 1, exhausted: false)
+            feeds[key] = result
+            DiskCache.save(result, name: feedCacheName(category))
+            if picks.count < 10 { await loadMorePicks(category: category) }
         } catch {
             recommendationError = error.localizedDescription
         }
     }
 
+    /// Called when you get near the end of the feed: digs one round deeper and appends.
+    func loadMorePicks(category: AnimeCategory? = nil) async {
+        let key = Self.feedKey(category)
+        guard var current = feeds[key], !current.exhausted,
+              !loadingMore.contains(key), !loadingFeeds.contains(key) else { return }
+        loadingMore.insert(key)
+        defer { loadingMore.remove(key) }
+
+        let options = recommendationOptions(category)
+        var shown = Set(current.picks.map(\.id))
+        var emptyRounds = 0
+        // Try up to 3 deeper rounds to find something new before calling it the end.
+        while emptyRounds < 3 {
+            let round = current.round + 1
+            current.round = round
+            do {
+                let (more, usedAI) = try await Recommender.run(entries: entries, client: client, options: options,
+                                                               round: round, exclude: shown)
+                let fresh = more.filter { !shown.contains($0.id) }
+                if fresh.isEmpty {
+                    emptyRounds += 1
+                    continue
+                }
+                current.picks += fresh
+                current.usedOnDeviceAI = current.usedOnDeviceAI || usedAI
+                shown.formUnion(fresh.map(\.id))
+                break
+            } catch {
+                recommendationError = error.localizedDescription
+                feeds[key] = current
+                return
+            }
+        }
+        if emptyRounds >= 3 { current.exhausted = true }
+        feeds[key] = current
+        DiskCache.save(current, name: feedCacheName(category))
+    }
+
     func dismissPick(_ mediaId: Int) {
         settings.dismissedPicks.insert(mediaId)
-        recommendations?.remove(mediaId)
-        if var saved = recommendations {
-            // Keep the cached picks valid after a dismissal instead of forcing a full rebuild.
-            saved.fingerprint = Recommender.fingerprint(entries: entries, options: recommendationOptions)
-            recommendations = saved
-            DiskCache.save(saved, name: cacheName("picks"))
+        for key in feeds.keys {
+            feeds[key]?.remove(mediaId)
+        }
+        for (key, value) in feeds {
+            DiskCache.save(value, name: feedCacheName(key: key))
         }
     }
 
@@ -309,7 +389,45 @@ final class AppModel {
 
     func resetDismissedPicks() {
         settings.dismissedPicks = []
-        recommendations = nil
+        feeds = [:]
+    }
+
+    // MARK: - Categories
+
+    /// Loads AniList's genres and tags once (cached for a week). Featured chips come first.
+    func loadCategories() async {
+        if !allCategories.isEmpty { return }
+        struct Cached: Codable { let categories: [AnimeCategory]; let savedAt: Date }
+        if let cached = DiskCache.load(Cached.self, name: "categories"),
+           Date().timeIntervalSince(cached.savedAt) < 7 * 86_400, !cached.categories.isEmpty {
+            allCategories = cached.categories
+            return
+        }
+        do {
+            let data = try await client.run(Queries.categories, as: CategoryCollectionData.self)
+            let genres = (data.genres ?? []).filter { $0 != "Hentai" }.map(AnimeCategory.genre)
+            let tags = (data.tags ?? [])
+                .filter { $0.isAdult != true && $0.isGeneralSpoiler != true }
+                .map { AnimeCategory.tag($0.name) }
+            let known = Set((genres + tags).map(\.id))
+            let featured = AnimeCategory.featured.filter { known.contains($0.id) }
+            let rest = (genres + tags)
+                .filter { !featured.contains($0) }
+                .sorted { $0.name.localizedCompare($1.name) == .orderedAscending }
+            allCategories = featured + rest
+            DiskCache.save(Cached(categories: allCategories, savedAt: Date()), name: "categories")
+        } catch {
+            // Offline: fall back to the built-in featured list.
+            allCategories = AnimeCategory.featured
+        }
+    }
+
+    /// The quick-pick chips (featured categories AniList confirmed exist).
+    var featuredCategories: [AnimeCategory] {
+        let featured = AnimeCategory.featured
+        guard !allCategories.isEmpty else { return featured }
+        let known = Set(allCategories.map(\.id))
+        return featured.filter { known.contains($0.id) }
     }
 
     // MARK: - Seasons

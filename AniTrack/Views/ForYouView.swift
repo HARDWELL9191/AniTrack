@@ -1,34 +1,22 @@
 import SwiftUI
 
 /// "Ask Hoshi": one personal pick at a time, like a friend recommending a show.
+/// The feed never stops: near the end it quietly digs one round deeper and appends more.
 struct ForYouView: View {
     @Environment(AppModel.self) private var model
     @Namespace private var zoom
 
-    enum Source: String, CaseIterable, Identifiable {
-        case new = "New for me"
-        case planning = "From my Planning"
-        var id: String { rawValue }
-    }
-
-    @State private var source: Source = .new
+    @State private var category: AnimeCategory?
     @State private var index = 0
 
-    private var picks: [Recommendation] {
-        guard let result = model.recommendations else { return [] }
-        return source == .new ? result.discover : result.planning
-    }
+    private var feed: RecommendationResult? { model.feed(for: category) }
+    private var picks: [Recommendation] { model.picks(for: category) }
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 20) {
-                    Picker("Source", selection: $source) {
-                        ForEach(Source.allCases) { Text($0.rawValue).tag($0) }
-                    }
-                    .pickerStyle(.segmented)
-                    .padding(.horizontal)
-
+                VStack(spacing: 18) {
+                    CategoryChipsBar(selected: $category)
                     content
                 }
                 .padding(.vertical)
@@ -40,27 +28,34 @@ struct ForYouView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         index = 0
-                        Task { await model.generateRecommendations(force: true) }
+                        Task { await model.generateRecommendations(category: category, force: true) }
                     } label: {
                         Image(systemName: "arrow.clockwise")
                     }
-                    .disabled(model.isLoadingRecommendations)
+                    .disabled(model.isLoadingFeed(category))
                 }
             }
-            .task {
+            .task(id: category?.id ?? "any") {
+                index = 0
                 if model.entries.isEmpty { await model.refreshList() }
-                await model.generateRecommendations()
+                await model.generateRecommendations(category: category)
             }
-            .onChange(of: source) { _, _ in index = 0 }
+            .onChange(of: index) { _, newValue in preloadIfNeeded(at: newValue) }
         }
+    }
+
+    /// Start loading the next round a few picks before the end, so "Another pick" never stalls.
+    private func preloadIfNeeded(at position: Int) {
+        guard let feed, !feed.exhausted, position >= picks.count - 5 else { return }
+        Task { await model.loadMorePicks(category: category) }
     }
 
     @ViewBuilder
     private var content: some View {
-        if model.isLoadingRecommendations && model.recommendations == nil {
+        if model.isLoadingFeed(category) && picks.isEmpty {
             VStack(spacing: 14) {
                 ProgressView()
-                Text("Hoshi is reading your list…")
+                Text(category == nil ? "Hoshi is reading your list…" : "Finding \(category!.name) picks for you…")
                     .font(.headline)
                 Text(model.settings.useOnDeviceAI
                      ? "Comparing your favorites with on-device AI. This only runs when your list changes."
@@ -70,23 +65,25 @@ struct ForYouView: View {
                     .multilineTextAlignment(.center)
             }
             .padding(40)
-        } else if let error = model.recommendationError, model.recommendations == nil {
+        } else if let error = model.recommendationError, picks.isEmpty {
             ContentUnavailableView("Couldn't build picks", systemImage: "exclamationmark.triangle",
                                    description: Text(error))
         } else if picks.isEmpty {
-            ContentUnavailableView(source == .new ? "No new picks" : "Nothing on Planning",
+            ContentUnavailableView("No picks yet",
                                    systemImage: "wand.and.stars",
-                                   description: Text(source == .new
-                                                     ? "Rate more shows on your list, then refresh."
-                                                     : "Add shows to Planning and Hoshi will choose which one to start next."))
+                                   description: Text(category == nil
+                                                     ? "Rate a few shows on your list, then refresh."
+                                                     : "Nothing new in \(category!.name) right now. Try another category."))
         } else {
             let safeIndex = min(index, picks.count - 1)
             PickCard(rec: picks[safeIndex],
                      position: safeIndex + 1,
                      total: picks.count,
-                     onNext: { withAnimation(.snappy) { index = (safeIndex + 1) % picks.count } },
+                     moreComing: !(feed?.exhausted ?? true),
+                     onNext: { next(from: safeIndex) },
                      onDismiss: {
                          withAnimation(.snappy) { model.dismissPick(picks[safeIndex].id) }
+                         preloadIfNeeded(at: safeIndex)
                      })
                 .id(picks[safeIndex].id)
                 .transition(.asymmetric(insertion: .move(edge: .trailing).combined(with: .opacity),
@@ -98,7 +95,7 @@ struct ForYouView: View {
                     Text("More picks").font(.title3.bold()).padding(.horizontal)
                     ScrollView(.horizontal, showsIndicators: false) {
                         LazyHStack(alignment: .top, spacing: 12) {
-                            ForEach(Array(picks.prefix(30).enumerated()), id: \.element.id) { offset, rec in
+                            ForEach(Array(picks.enumerated()), id: \.element.id) { offset, rec in
                                 Button {
                                     withAnimation(.snappy) { index = offset }
                                 } label: {
@@ -110,6 +107,10 @@ struct ForYouView: View {
                                     }
                                 }
                                 .buttonStyle(.plain)
+                                .onAppear { if offset >= picks.count - 3 { preloadIfNeeded(at: offset) } }
+                            }
+                            if model.isLoadingMore(category) {
+                                ProgressView().frame(width: 96, height: 140)
                             }
                         }
                         .padding(.horizontal)
@@ -117,8 +118,8 @@ struct ForYouView: View {
                 }
             }
 
-            if let result = model.recommendations {
-                Text(footer(result))
+            if let feed {
+                Text(footer(feed))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -127,11 +128,27 @@ struct ForYouView: View {
         }
     }
 
-    private func footer(_ result: RecommendationResult) -> String {
-        let when = result.generatedAt.formatted(.relative(presentation: .named))
-        let engine = result.usedOnDeviceAI ? "fan recommendations, your tags and on-device AI"
-                                           : "fan recommendations and your tags"
-        return "Built \(when) from \(engine). Picks refresh automatically when your list changes."
+    private func next(from current: Int) {
+        let isLast = current >= picks.count - 1
+        if isLast && model.isLoadingMore(category) { return }   // the next round is about to arrive
+        withAnimation(.snappy) {
+            if isLast && (feed?.exhausted ?? true) {
+                index = 0   // truly the end: wrap around
+            } else {
+                index = min(current + 1, picks.count - 1)
+            }
+        }
+        preloadIfNeeded(at: index)
+    }
+
+    private func footer(_ feed: RecommendationResult) -> String {
+        let when = feed.generatedAt.formatted(.relative(presentation: .named))
+        let engine = feed.usedOnDeviceAI ? "fan recommendations, your tags and on-device AI"
+                                         : "fan recommendations and your tags"
+        var text = "Built \(when) from \(engine)."
+        text += feed.exhausted ? " You've seen everything for now. Rate more shows for new picks."
+                               : " More picks load automatically as you go."
+        return text
     }
 }
 
@@ -141,6 +158,7 @@ struct PickCard: View {
     let rec: Recommendation
     let position: Int
     let total: Int
+    let moreComing: Bool
     let onNext: () -> Void
     let onDismiss: () -> Void
 
@@ -158,7 +176,7 @@ struct PickCard: View {
                     .zoomSource(id: rec.media.id, in: zoom)
                     .shadow(color: .black.opacity(0.2), radius: 8, y: 4)
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Pick \(position) of \(total)")
+                    Text(moreComing ? "Pick \(position)" : "Pick \(position) of \(total)")
                         .font(.caption).foregroundStyle(.secondary)
                     Text(rec.media.displayTitle(model.settings.titleLanguage))
                         .font(.title3.bold())
@@ -196,7 +214,7 @@ struct PickCard: View {
             GlassEffectContainer(spacing: 10) {
                 VStack(spacing: 10) {
                     HStack(spacing: 10) {
-                        if model.canEdit && !rec.onPlanning {
+                        if model.canEdit && model.entry(for: rec.id) == nil {
                             Button {
                                 Task { await addToPlanning() }
                             } label: {

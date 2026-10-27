@@ -27,17 +27,25 @@ struct RootView: View {
     }
 }
 
+enum AppTab: Hashable {
+    case home, forYou, lists, profile, discover
+}
+
 struct MainTabView: View {
+    @Environment(AppModel.self) private var model
+
     var body: some View {
-        TabView {
-            Tab("Home", systemImage: "house.fill") { HomeView() }
-            Tab("For You", systemImage: "wand.and.stars") { ForYouView() }
-            Tab("Lists", systemImage: "list.bullet.rectangle.portrait.fill") { LibraryView() }
-            Tab("Profile", systemImage: "person.crop.circle.fill") { SettingsView() }
+        @Bindable var model = model
+        TabView(selection: $model.selectedTab) {
+            Tab("Home", systemImage: "house.fill", value: AppTab.home) { HomeView() }
+            Tab("For You", systemImage: "wand.and.stars", value: AppTab.forYou) { ForYouView() }
+            Tab("Lists", systemImage: "list.bullet.rectangle.portrait.fill", value: AppTab.lists) { LibraryView() }
+            Tab("Profile", systemImage: "person.crop.circle.fill", value: AppTab.profile) { SettingsView() }
             // Search role: iOS shows this as the separate floating glass search button.
-            Tab("Discover", systemImage: "magnifyingglass", role: .search) { DiscoverView() }
+            Tab("Discover", systemImage: "magnifyingglass", value: AppTab.discover, role: .search) { DiscoverView() }
         }
         .tabBarMinimizeBehavior(.onScrollDown)
+        .task { await model.loadCategories() }
     }
 }
 
@@ -54,11 +62,12 @@ struct WelcomeView: View {
         ScrollView {
             VStack(spacing: 28) {
                 VStack(spacing: 12) {
-                    Image(systemName: "sparkles.tv.fill")
-                        .font(.system(size: 56))
-                        .foregroundStyle(.white)
-                        .frame(width: 112, height: 112)
-                        .glassEffect(.regular.tint(Theme.accent.opacity(0.35)), in: .circle)
+                    Image("Logo")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 104, height: 104)
+                        .padding(14)
+                        .glassEffect(.regular.tint(Theme.accent.opacity(0.25)), in: .circle)
                     Text("AniTrack").font(.largeTitle.bold())
                     Text("Track, discover and get personal picks from your AniList.")
                         .multilineTextAlignment(.center)

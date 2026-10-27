@@ -37,7 +37,7 @@ struct SettingsView: View {
                     Button("Rebuild picks now") {
                         Task { await model.generateRecommendations(force: true) }
                     }
-                    .disabled(model.isLoadingRecommendations)
+                    .disabled(model.isLoadingFeed(nil))
                     Button("Reset \"Not for me\" (\(settings.dismissedPicks.count))") {
                         model.resetDismissedPicks()
                     }
