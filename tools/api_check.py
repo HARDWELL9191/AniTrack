@@ -22,10 +22,14 @@ def note(title, msg, level="notice"):
     print(f"::{level} title={title}::{msg[:3500]}", flush=True)
 
 
+UA = os.environ.get("TEST_UA", "AniTrack/1 CFNetwork/3860.100.1 Darwin/27.0.0")
+
+
 def run(q, variables):
     body = json.dumps({"query": q, "variables": variables}).encode()
     req = urllib.request.Request("https://graphql.anilist.co", data=body,
-                                 headers={"Content-Type": "application/json", "Accept": "application/json"})
+                                 headers={"Content-Type": "application/json", "Accept": "application/json",
+                                          "User-Agent": UA})
     t = time.time()
     try:
         with urllib.request.urlopen(req, timeout=60) as r:
@@ -34,6 +38,18 @@ def run(q, variables):
     except urllib.error.HTTPError as e:
         return e.code, e.read(), time.time() - t
 
+
+# Raw probe: show exactly what AniList answers, headers included.
+for ua in ["Python-urllib/3.12", UA]:
+    body = json.dumps({"query": "query { Media(id: 1) { id } }"}).encode()
+    req = urllib.request.Request("https://graphql.anilist.co", data=body,
+                                 headers={"Content-Type": "application/json", "Accept": "application/json", "User-Agent": ua})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            note("probe " + ua, f"HTTP {r.status} {r.read()[:300]!r}")
+    except urllib.error.HTTPError as e:
+        hdrs = {k: v for k, v in e.headers.items() if k.lower() in ("server", "cf-ray", "content-type", "retry-after", "x-ratelimit-remaining")}
+        note("probe " + ua, f"HTTP {e.code} headers={hdrs} body={e.read()[:600]!r}", "warning")
 
 user = os.environ.get("ANILIST_USER", "Josh")
 status, raw, dt = run(query("userByName"), {"name": user})
