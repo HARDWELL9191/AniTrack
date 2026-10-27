@@ -20,6 +20,8 @@ def query(name):
 
 
 def note(title, msg, level="notice"):
+    if os.environ.get("ANILIST_USER", "") == "seasons" and not title.startswith(("season", "browseWithRelations", "seedRecommendations", "mediaByIds")):
+        return
     msg = str(msg).replace("%", "%25").replace("\r", "").replace("\n", "%0A")
     print(f"::{level} title={title}::{msg[:3500]}", flush=True)
 
@@ -41,8 +43,10 @@ def run(q, variables):
         return e.code, e.read(), time.time() - t
 
 
+SEASONS_ONLY = os.environ.get("ANILIST_USER", "") == "seasons"   # GitHub shows max 10 notices per step
+
 # Raw probe: show exactly what AniList answers, headers included.
-for ua in ["Python-urllib/3.12", UA]:
+for ua in ([] if SEASONS_ONLY else ["Python-urllib/3.12", UA]):
     body = json.dumps({"query": "query { Media(id: 1) { id } }"}).encode()
     req = urllib.request.Request("https://graphql.anilist.co", data=body,
                                  headers={"Content-Type": "application/json", "Accept": "application/json", "User-Agent": ua})
@@ -102,6 +106,7 @@ def safe_json(raw, label):
 
 targets = []
 user = os.environ.get("ANILIST_USER", "")
+if SEASONS_ONLY: user = ""
 if user == "Josh":
     user = ""
 if user:
