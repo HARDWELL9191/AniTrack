@@ -84,7 +84,7 @@ enum BackgroundPrefetch {
             try? await Task.sleep(nanoseconds: 700_000_000)
         }
         let favorites = entries
-            .filter { $0.status != .PLANNING && ($0.scoreValue >= 70 || ($0.scoreValue == 0 && $0.status == .COMPLETED)) }
+            .filter { $0.status != .DROPPED && $0.status != .PAUSED && ($0.scoreValue >= 70 || $0.scoreValue == 0) }
             .sorted { $0.scoreValue > $1.scoreValue }
             .prefix(12)
             .map(\.mediaId)

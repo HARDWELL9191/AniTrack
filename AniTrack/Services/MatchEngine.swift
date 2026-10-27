@@ -103,7 +103,7 @@ final class MatchEngine {
         tasteTask?.cancel()
         guard aiEnabled() else { return }
         let anchors = entries
-            .filter { $0.status != .PLANNING && abs(weights[$0.mediaId] ?? 0) >= 0.4 }
+            .filter { abs(weights[$0.mediaId] ?? 0) >= 0.4 }
             .sorted { abs(weights[$0.mediaId] ?? 0) > abs(weights[$1.mediaId] ?? 0) }
             .prefix(40)
             .map(\.media)

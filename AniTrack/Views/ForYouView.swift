@@ -84,6 +84,10 @@ struct ForYouView: View {
                      onDismiss: {
                          withAnimation(.snappy) { model.dismissPick(picks[safeIndex].id) }
                          preloadIfNeeded(at: safeIndex)
+                     },
+                     onWatched: {
+                         // markCompleted already took it out of the feed; the next pick slides in.
+                         preloadIfNeeded(at: safeIndex)
                      })
                 .id(picks[safeIndex].id)
                 .transition(.asymmetric(insertion: .move(edge: .trailing).combined(with: .opacity),
@@ -156,6 +160,7 @@ struct PickCard: View {
     let moreComing: Bool
     let onNext: () -> Void
     let onDismiss: () -> Void
+    let onWatched: () -> Void
 
     @State private var isAdding = false
     @State private var added = false
@@ -231,11 +236,25 @@ struct PickCard: View {
                             Label("Not for me", systemImage: "hand.thumbsdown").frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.glass)
-                        Button(action: onNext) {
-                            Label("Another pick", systemImage: "shuffle").frame(maxWidth: .infinity)
+                        if model.canEdit {
+                            Button {
+                                Task {
+                                    await model.markCompleted(rec.media)
+                                    onWatched()
+                                }
+                            } label: {
+                                Label("Already watched", systemImage: "eye.fill")
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.8)
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.glass)
                         }
-                        .buttonStyle(.glass)
                     }
+                    Button(action: onNext) {
+                        Label("Another pick", systemImage: "shuffle").frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.glass)
                 }
                 .controlSize(.large)
             }

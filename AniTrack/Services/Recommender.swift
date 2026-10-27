@@ -121,15 +121,21 @@ enum Recommender {
         let score = entry.scoreValue
         if score > 0 {
             var w = (score - mean) / max(spread, 8) + 0.6
-            if entry.status == .DROPPED { w = min(w, -0.5) }
+            switch entry.status {
+            case .DROPPED: w = min(w, -0.5)
+            // Finished, rewatching or planned means you liked it enough: never counts against.
+            // Your score still decides how strongly it pulls.
+            case .COMPLETED, .REPEATING, .PLANNING: w = max(w, 0.3)
+            default: break
+            }
             return min(2.0, max(-1.5, w))
         }
         switch entry.status {
-        case .COMPLETED, .REPEATING: return 0.6
+        case .COMPLETED, .REPEATING: return 0.7
         case .CURRENT: return 0.5
+        case .PLANNING: return 0.5   // you liked it enough to plan it
         case .PAUSED: return 0.1
         case .DROPPED: return -1.0
-        case .PLANNING: return 0.2   // you were interested enough to plan it
         }
     }
 
@@ -157,9 +163,9 @@ enum Recommender {
 
         let onList = Dictionary(entries.map { ($0.mediaId, $0) }, uniquingKeysWith: { a, _ in a })
 
-        // Seeds: your strongest likes (never Planning), newest first among equals.
+        // Seeds: your strongest likes (Planning included), newest first among equals.
         let seeds = entries
-            .filter { $0.status != .PLANNING && (weights[$0.mediaId] ?? 0) > 0.3 }
+            .filter { (weights[$0.mediaId] ?? 0) > 0.3 }
             .sorted {
                 let a = weights[$0.mediaId] ?? 0, b = weights[$1.mediaId] ?? 0
                 return a == b ? ($0.updatedAt ?? 0) > ($1.updatedAt ?? 0) : a > b
@@ -286,7 +292,7 @@ enum Recommender {
         }
         if options.useOnDeviceAI && options.aiAllowedNow && !shortList.isEmpty {
             let anchors = entries
-                .filter { $0.status != .PLANNING && abs(weights[$0.mediaId] ?? 0) >= 0.4 }
+                .filter { abs(weights[$0.mediaId] ?? 0) >= 0.4 }
                 .sorted { abs(weights[$0.mediaId] ?? 0) > abs(weights[$1.mediaId] ?? 0) }
                 .prefix(40)
                 .map(\.media)

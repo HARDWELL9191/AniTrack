@@ -251,6 +251,21 @@ final class AppModel {
         }
     }
 
+    /// Marks a show as fully watched and moves it to Completed (keeps your score if you have one).
+    func markCompleted(_ media: Media) async {
+        let existing = entry(for: media.id)
+        let progress = media.episodes ?? media.availableEpisodes ?? existing?.progress
+        do {
+            // scoreRaw nil = AniList keeps whatever score you already gave it.
+            try await save(media: media, status: .COMPLETED, progress: progress, scoreRaw: nil)
+            // It's on your list now, so it no longer belongs in any picks feed (not a dislike).
+            for key in feeds.keys { feeds[key]?.remove(media.id) }
+            for (key, value) in feeds { DiskCache.saveInBackground(value, name: feedCacheName(key: key)) }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     func delete(entryId: Int) async throws {
         _ = try await client.run(Queries.deleteEntry, variables: ["id": entryId], as: DeleteEntryData.self)
         entries.removeAll { $0.id == entryId }

@@ -93,7 +93,8 @@ struct BannerImageView: View {
     }
 }
 
-/// Swipe left on a row to remove the show from your AniList list (asks first).
+/// Swipe left on a row to remove the show from your AniList list (asks first);
+/// swipe right to mark it as fully watched and move it to Completed.
 struct RemoveFromListSwipe: ViewModifier {
     @Environment(AppModel.self) private var model
     let entry: ListEntry
@@ -108,6 +109,16 @@ struct RemoveFromListSwipe: ViewModifier {
                         confirm = true
                     } label: {
                         Label("Remove", systemImage: "trash")
+                    }
+                }
+                .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                    if entry.status != .COMPLETED {
+                        Button {
+                            Task { await model.markCompleted(entry.media) }
+                        } label: {
+                            Label("Completed", systemImage: "checkmark.circle.fill")
+                        }
+                        .tint(.green)
                     }
                 }
                 .confirmationDialog("Remove \(entry.media.displayTitle(model.settings.titleLanguage)) from your list?",
