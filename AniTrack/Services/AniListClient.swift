@@ -57,7 +57,7 @@ final class AniListClient {
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
 
             if status == 429 {
-                guard attempt < 3 else { throw APIError.rateLimited }
+                guard attempt < 4 else { throw APIError.rateLimited }
                 let retryAfter = (response as? HTTPURLResponse)?
                     .value(forHTTPHeaderField: "Retry-After")
                     .flatMap(Double.init) ?? 5

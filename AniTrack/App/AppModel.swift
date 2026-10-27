@@ -147,7 +147,7 @@ final class AppModel {
                 // Offline: fall back to the last known profile so the cached list still shows,
                 // and only bother you with an error if there's nothing to show.
                 if viewer == nil { viewer = DiskCache.load(Viewer.self, name: "viewer") }
-                if viewer == nil { errorMessage = error.localizedDescription }
+                if viewer == nil && !Self.isCancellation(error) { errorMessage = error.localizedDescription }
             }
         }
     }
@@ -171,7 +171,7 @@ final class AppModel {
             entries = result
             DiskCache.saveInBackground(result, name: cacheName("list"))
         } catch {
-            if entries.isEmpty { errorMessage = error.localizedDescription }
+            if entries.isEmpty && !Self.isCancellation(error) { errorMessage = error.localizedDescription }
         }
     }
 
@@ -382,7 +382,48 @@ final class AppModel {
     }
 
     /// Battery-friendly: reuses saved picks unless your list changed or they're over 3 days old.
+    /// In-flight builds, owned by the model: leaving a tab (which cancels that screen's tasks)
+    /// never cancels a build, and a second screen asking for the same feed just waits for it.
+    @ObservationIgnored private var generationTasks: [String: Task<Void, Never>] = [:]
+    @ObservationIgnored private var moreTasks: [String: Task<Void, Never>] = [:]
+
     func generateRecommendations(category: AnimeCategory? = nil, force: Bool = false) async {
+        let key = Self.feedKey(category)
+        if let running = generationTasks[key] {
+            await running.value
+            guard force else { return }   // a refresh asked for while building: rebuild after it
+            if generationTasks[key] != nil { return }
+        }
+        let task = Task {
+            await self.performGenerate(category: category, force: force)
+            self.generationTasks[key] = nil
+        }
+        generationTasks[key] = task
+        await task.value
+    }
+
+    func loadMorePicks(category: AnimeCategory? = nil) async {
+        let key = Self.feedKey(category)
+        if let running = moreTasks[key] {
+            await running.value
+            return
+        }
+        let task = Task {
+            await self.performLoadMore(category: category)
+            self.moreTasks[key] = nil
+        }
+        moreTasks[key] = task
+        await task.value
+    }
+
+    /// A cancelled request is not something to show you.
+    private static func isCancellation(_ error: Error) -> Bool {
+        if error is CancellationError { return true }
+        if let url = error as? URLError, url.code == .cancelled { return true }
+        return false
+    }
+
+    private func performGenerate(category: AnimeCategory?, force: Bool) async {
         let key = Self.feedKey(category)
         guard !loadingFeeds.contains(key) else { return }
         guard !entries.isEmpty else {
@@ -432,7 +473,7 @@ final class AppModel {
             DiskCache.saveInBackground(result, name: feedCacheName(category))
         } catch {
             loadingFeeds.remove(key)
-            recommendationError = error.localizedDescription
+            if !Self.isCancellation(error) { recommendationError = error.localizedDescription }
             return
         }
         loadingFeeds.remove(key)
@@ -441,7 +482,7 @@ final class AppModel {
     }
 
     /// Called when you get near the end of the feed: digs one round deeper and appends.
-    func loadMorePicks(category: AnimeCategory? = nil) async {
+    private func performLoadMore(category: AnimeCategory?) async {
         let key = Self.feedKey(category)
         guard var current = feeds[key], !current.exhausted,
               !loadingMore.contains(key), !loadingFeeds.contains(key) else { return }
@@ -468,7 +509,7 @@ final class AppModel {
                 shown.formUnion(fresh.map(\.id))
                 break
             } catch {
-                recommendationError = error.localizedDescription
+                if !Self.isCancellation(error) { recommendationError = error.localizedDescription }
                 feeds[key] = current
                 return
             }
