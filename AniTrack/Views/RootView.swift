@@ -40,9 +40,9 @@ struct MainTabView: View {
             Tab("Home", systemImage: "house.fill", value: AppTab.home) { HomeView() }
             Tab("For You", systemImage: "wand.and.stars", value: AppTab.forYou) { ForYouView() }
             Tab("Lists", systemImage: "list.bullet.rectangle.portrait.fill", value: AppTab.lists) { LibraryView() }
+            // A regular tab (not the .search role, which iOS always pins to the far right).
+            Tab("Discover", systemImage: "magnifyingglass", value: AppTab.discover) { DiscoverView() }
             Tab("Profile", systemImage: "person.crop.circle.fill", value: AppTab.profile) { SettingsView() }
-            // Search role: iOS shows this as the separate floating glass search button.
-            Tab("Discover", systemImage: "magnifyingglass", value: AppTab.discover, role: .search) { DiscoverView() }
         }
         .tabBarMinimizeBehavior(.onScrollDown)
         .task { await model.loadCategories() }
