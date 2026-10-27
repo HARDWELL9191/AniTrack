@@ -186,5 +186,10 @@ for search in ["Tensei shitara Slime Datta Ken 2nd Season", "Mushoku Tensei II",
         if not items: chain.append(f"{pid} (fetch failed HTTP {st})"); break
         cur = items[0]
         chain.append(f"{cur['id']} {cur.get('format')} {(cur.get('title') or {}).get('romaji')}")
+    if len(chain) == 1:
+        rels = [(e.get("relationType"), (e.get("node") or {}).get("id"), (e.get("node") or {}).get("format"),
+                 ((e.get("node") or {}).get("title") or {}).get("romaji"), ((e.get("node") or {}).get("title") or {}).get("english"))
+                for e in ((m.get("relations") or {}).get("edges") or [])]
+        chain.append(f"title={m.get('title')} rels={rels}")
     note("season " + search, " -> ".join(chain))
     time.sleep(1)
