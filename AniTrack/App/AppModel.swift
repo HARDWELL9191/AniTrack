@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import SwiftUI
 
 @Observable
 @MainActor
@@ -246,7 +247,20 @@ final class AppModel {
                                      updatedAt: saved.updatedAt ?? Int(Date().timeIntervalSince1970),
                                      media: media))
         }
+        // Planned/added from anywhere (detail page, Home, search): it, and other seasons of
+        // the same show, leave your saved picks right away.
+        removeKnownFromFeeds()
         return saved
+    }
+
+    /// Removes picks that are on your list, or another season of a show on your list.
+    func removeKnownFromFeeds() {
+        for (key, value) in feeds {
+            let known = value.picks.filter { entry(for: $0.id) != nil || franchises.contains($0.media) }.map(\.id)
+            guard !known.isEmpty else { continue }
+            withAnimation(.snappy) { for id in known { feeds[key]?.remove(id) } }   // next card slides in
+            if let updated = feeds[key] { DiskCache.saveInBackground(updated, name: feedCacheName(key: key)) }
+        }
     }
 
     func incrementProgress(_ entry: ListEntry) async {
@@ -393,6 +407,7 @@ final class AppModel {
                     // Drop anything now on your list or excluded by your current settings.
                     let onList = current.picks.filter { pick in
                         entry(for: pick.id) != nil
+                            || franchises.contains(pick.media)
                             || settings.dismissedPicks.contains(pick.id)
                             || (settings.hideChinese && pick.media.countryOfOrigin == "CN")
                             || (!settings.includeUnreleased && pick.media.status == "NOT_YET_RELEASED")
