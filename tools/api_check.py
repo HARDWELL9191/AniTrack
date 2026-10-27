@@ -157,12 +157,11 @@ def same(a, b):
         if common >= min(shorter, max(8, shorter * 6 // 10)): return True
     return False
 def prev_season(m):
-    if m.get("format") not in SERIES: return None
-    for e in ((m.get("relations") or {}).get("edges") or []):
-        n = e.get("node") or {}
-        if e.get("relationType") == "PREQUEL" and n.get("type") in (None, "ANIME") and n.get("format") in SERIES and same(m.get("title"), n.get("title")):
-            return n["id"]
-    return None
+    edges = [e for e in ((m.get("relations") or {}).get("edges") or [])
+             if e.get("relationType") == "PREQUEL" and (e.get("node") or {}).get("type") in (None, "ANIME")
+             and same(m.get("title"), (e.get("node") or {}).get("title"))]
+    pick = next((e for e in edges if e["node"].get("format") in SERIES), edges[0] if edges else None)
+    return pick["node"]["id"] if pick else None
 
 for name, variables in [("browseWithRelations", {"page": 1, "perPage": 50, "sort": ["POPULARITY_DESC"], "isAdult": False}),
                         ("seedRecommendations", {"ids": [101280], "recsPage": 1})]:
@@ -172,12 +171,14 @@ for name, variables in [("browseWithRelations", {"page": 1, "perPage": 50, "sort
          "notice" if status == 200 and not data.get("errors") else "error")
     time.sleep(1)
 
-for search in ["Tensei shitara Slime Datta Ken 2nd Season", "Mushoku Tensei II", "Bleach Sennen Kessen", "Shingeki no Kyojin Season 3", "Kimetsu no Yaiba Mugen Ressha", "Spy x Family Season 2"]:
+season_lines, season_batch = [], 1
+for search in ["Tensei shitara Slime Datta Ken 3rd Season", "Kimetsu no Yaiba Yuukaku-hen", "Re:Zero 3rd Season", "Kaguya-sama Ultra Romantic", "Monogatari Second Season", "Tensei shitara Slime Datta Ken 2nd Season", "Mushoku Tensei II", "Bleach Sennen Kessen", "Shingeki no Kyojin Season 3", "Kimetsu no Yaiba Mugen Ressha", "Spy x Family Season 2"]:
     status, raw, dt = run("query($s:String){ Media(search:$s, type: ANIME){ id format title { romaji english } relations { edges { relationType node { id type format title { romaji english } } } } } }", {"s": search})
     m = (safe_json(raw, search).get("data") or {}).get("Media") or {}
     chain = [f"{m.get('id')} {m.get('format')} {(m.get('title') or {}).get('romaji')}"]
     cur = m
-    for _ in range(6):
+    root = m
+    for _ in range(8 if m.get("format") in SERIES else 0):
         pid = prev_season(cur)
         if not pid: break
         time.sleep(1)
@@ -185,11 +186,16 @@ for search in ["Tensei shitara Slime Datta Ken 2nd Season", "Mushoku Tensei II",
         items = ((safe_json(r2, "mediaByIds").get("data") or {}).get("Page") or {}).get("media") or []
         if not items: chain.append(f"{pid} (fetch failed HTTP {st})"); break
         cur = items[0]
+        if cur.get("format") in SERIES: root = cur
         chain.append(f"{cur['id']} {cur.get('format')} {(cur.get('title') or {}).get('romaji')}")
-    if len(chain) == 1:
+    chain.append(f"RECOMMEND: {root['id']} {(root.get('title') or {}).get('romaji')}")
+    if len(chain) == 2:
         rels = [(e.get("relationType"), (e.get("node") or {}).get("id"), (e.get("node") or {}).get("format"),
                  ((e.get("node") or {}).get("title") or {}).get("romaji"), ((e.get("node") or {}).get("title") or {}).get("english"))
                 for e in ((m.get("relations") or {}).get("edges") or [])]
         chain.append(f"title={m.get('title')} rels={rels}")
-    note("season " + search, " -> ".join(chain))
+    season_lines.append(" -> ".join(chain))
+    if len(season_lines) == 4:
+        note(f"season batch {season_batch}", "\n".join(season_lines)); season_lines.clear(); season_batch += 1
     time.sleep(1)
+if season_lines: note(f"season batch {season_batch}", "\n".join(season_lines))

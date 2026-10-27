@@ -104,7 +104,7 @@ struct MoreLikeThisSheet: View {
             items = (detail.recommendations?.nodes ?? [])
                 .compactMap(\.mediaRecommendation)
                 .filter { model.entry(for: $0.id) == nil && $0.isAdult != true && !$0.isLaterSeason }
-                .filter { !$0.nextSeasonIds.contains { model.entry(for: $0) != nil } }
+                .filter { !$0.nextSeasonIds.contains { model.entry(for: $0) != nil } && !model.franchises.contains($0) }
                 .filter { !(model.settings.hideChinese && $0.countryOfOrigin == "CN") }
                 .sorted { (model.matcher.match(for: $0) ?? 0) > (model.matcher.match(for: $1) ?? 0) }
         } catch {

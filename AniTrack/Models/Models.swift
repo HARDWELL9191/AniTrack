@@ -157,19 +157,56 @@ enum Seasons {
     }
 
     static func isSeries(_ format: String?) -> Bool { format.map(seriesFormats.contains) ?? false }
+
+    static func words(_ s: String?) -> [String] {
+        (s ?? "").lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init)
+    }
+}
+
+/// Shows (TV/ONA series) already on your list, indexed by the first word of their titles, so
+/// "Slime" Season 1 is recognised as known when Season 2 is on your list. Purely local and fast.
+/// A title only matches when one is a whole-word prefix of the other and at least two words
+/// long ("Shingeki no Kyojin" ↔ "Shingeki no Kyojin Season 3", but not "Monster" ↔ "Monster Musume").
+struct ListFranchises {
+    private var byFirstWord: [String: [[String]]] = [:]
+
+    init(_ media: [Media] = []) {
+        for m in media where Seasons.isSeries(m.format) {
+            for title in [m.title.romaji, m.title.english] {
+                let w = Seasons.words(title)
+                guard w.count >= 2 else { continue }
+                byFirstWord[w[0], default: []].append(w)
+            }
+        }
+    }
+
+    func contains(_ media: Media) -> Bool {
+        guard Seasons.isSeries(media.format) else { return false }   // movies/OVAs are fine to suggest
+        for title in [media.title.romaji, media.title.english] {
+            let w = Seasons.words(title)
+            guard w.count >= 2, let group = byFirstWord[w[0]] else { continue }
+            for other in group {
+                let n = min(w.count, other.count)
+                if n >= 2 && w.prefix(n) == other.prefix(n) { return true }
+            }
+        }
+        return false
+    }
 }
 
 extension Media {
-    /// The previous TV season of this same show, if this is Season 2+ (not a movie/OVA/renamed sequel).
-    var previousSeasonId: Int? {
-        guard Seasons.isSeries(format) else { return nil }
-        for edge in relations?.edges ?? [] where edge.relationType == "PREQUEL" {
-            guard let node = edge.node, node.type == nil || node.type == "ANIME",
-                  Seasons.isSeries(node.format), Seasons.sameShow(title, node.title) else { continue }
-            return node.id
+    /// The entry right before this one in the same show (any format: AniList sometimes puts an
+    /// OVA between seasons, e.g. Slime S1 → Coleus OVA → S2). Series formats are preferred.
+    var prequelId: Int? {
+        let edges = (relations?.edges ?? []).filter { edge in
+            guard edge.relationType == "PREQUEL", let node = edge.node else { return false }
+            return (node.type == nil || node.type == "ANIME") && Seasons.sameShow(title, node.title)
         }
-        return nil
+        return (edges.first { Seasons.isSeries($0.node?.format) } ?? edges.first)?.node?.id
     }
+
+    /// Set when this is Season 2+ of a TV/ONA show (movies, OVAs and renamed sequels: nil).
+    var previousSeasonId: Int? { Seasons.isSeries(format) ? prequelId : nil }
 
     /// Later TV seasons of this same show.
     var nextSeasonIds: [Int] {

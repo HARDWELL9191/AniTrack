@@ -15,10 +15,13 @@ final class AppModel {
         didSet {
             entryIndex = Dictionary(entries.indices.map { (entries[$0].mediaId, $0) }, uniquingKeysWith: { a, _ in a })
             matcher.update(entries: entries)
+            franchises = ListFranchises(entries.map(\.media))
         }
     }
     /// mediaId → position in `entries`, so every cover/badge lookup is O(1) instead of a scan.
     @ObservationIgnored private var entryIndex: [Int: Int] = [:]
+    /// Shows on your list by title, so other seasons of them aren't suggested.
+    @ObservationIgnored private(set) var franchises = ListFranchises()
     private(set) var isLoadingList = false
     private(set) var didBootstrap = false
     var errorMessage: String?
@@ -316,6 +319,7 @@ final class AppModel {
                 // Season 2+ of a show, or a show where you already have another season: skip.
                 if media.isLaterSeason { return false }
                 if media.nextSeasonIds.contains(where: { entry(for: $0) != nil }) { return false }
+                if franchises.contains(media) { return false }
             }
             return true
         }

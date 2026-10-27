@@ -150,12 +150,30 @@ enum Recommender {
                                 reasons: inout [Int: [String]],
                                 onList: [Int: ListEntry],
                                 client: AniListClient) async {
+        let franchises = ListFranchises(onList.values.map(\.media))
         var known = await SeasonCache.shared.merged(with: candidates)
-        // Fetch earlier seasons we don't have yet (a few hops covers Season 4 → 1).
-        // Already-fetched seasons are remembered, so later rounds cost no extra requests.
-        for _ in 0..<4 {
-            let missing = Array(Set(known.values.compactMap(\.previousSeasonId))
-                .filter { known[$0] == nil && onList[$0] == nil })
+        let later = candidates.values.filter(\.isLaterSeason)
+
+        /// Follows prequels as far as the loaded data goes. Returns the visited ids, the earliest
+        /// TV/ONA season reached, and the next id to load (nil when the chain is complete).
+        func walk(_ media: Media) -> (chain: [Int], root: Media, next: Int?) {
+            var chain = [media.id]
+            var current = media
+            var root = media
+            while let previous = current.prequelId, chain.count < 15, !chain.contains(previous) {
+                chain.append(previous)
+                if onList[previous] != nil { return (chain, root, nil) }
+                guard let earlier = known[previous] else { return (chain, root, previous) }
+                current = earlier
+                if Seasons.isSeries(earlier.format) { root = earlier }
+            }
+            return (chain, root, nil)
+        }
+
+        // Load missing links (a few hops covers Season 5 → OVA → Season 1). Fetched seasons are
+        // remembered for the session, so endless-feed rounds don't request them again.
+        for _ in 0..<5 {
+            let missing = Array(Set(later.compactMap { walk($0).next }))
             guard !missing.isEmpty else { break }
             var fetched: [Media] = []
             var start = 0
@@ -175,21 +193,14 @@ enum Recommender {
 
         var result: [Int: Media] = [:]
         for (id, media) in candidates {
-            // Walk back to the first season.
-            var chain = [id]
-            var current = media
-            while let previous = current.previousSeasonId, chain.count < 12 {
-                chain.append(previous)
-                guard let earlier = known[previous] else { break }
-                current = earlier
-            }
-            // You already know this show if any season of it is on your list.
+            let (chain, root, _) = walk(media)
+            // You already know this show if any part of it is on your list.
             if chain.contains(where: { onList[$0] != nil }) { continue }
             if media.nextSeasonIds.contains(where: { onList[$0] != nil }) { continue }
-            if current.nextSeasonIds.contains(where: { onList[$0] != nil }) { continue }
-            // If Season 1 couldn't be loaded (offline), keep the earliest season we have
-            // instead of silently dropping the show.
-            let root = current
+            if root.nextSeasonIds.contains(where: { onList[$0] != nil }) { continue }
+            if franchises.contains(root) || franchises.contains(media) { continue }
+            // If Season 1 couldn't be loaded (offline), the earliest season we have is used,
+            // so a show is never dropped just because a request failed.
             if root.id != id {
                 collab[root.id, default: 0] += collab[id] ?? 0
                 for reason in reasons[id] ?? [] where !(reasons[root.id] ?? []).contains(reason) {
