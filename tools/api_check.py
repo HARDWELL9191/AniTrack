@@ -49,7 +49,7 @@ if os.environ.get("ANILIST_USER", "") == "twins":
     # Only the taste-twins check (keeps AniList's rate limit for it).
     import traceback
     try:
-        code = open(__file__).read().split("# Taste twins (collaborative filtering): mirrors")[1].split("\n", 1)[1]
+        code = open(__file__).read().split("# Taste twins (collaborative filtering): mirrors")[-1].split("\n", 1)[1]
         exec(code, globals())
     except SystemExit:
         pass
