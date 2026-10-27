@@ -1,0 +1,19 @@
+name: AniList API check
+
+on:
+  workflow_dispatch:
+    inputs:
+      username:
+        description: AniList username to test with (public profile)
+        required: true
+        default: Josh
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Run the app's queries against AniList
+        env:
+          ANILIST_USER: ${{ inputs.username }}
+        run: python3 tools/api_check.py

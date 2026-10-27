@@ -3,6 +3,10 @@ name: Build IPA
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "tools/**"
+      - ".github/workflows/api-check.yml"
+      - "README.md"
   workflow_dispatch:
 
 jobs:
