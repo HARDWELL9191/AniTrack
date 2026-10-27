@@ -173,6 +173,7 @@ for name, variables in [("browseWithRelations", {"page": 1, "perPage": 50, "sort
 
 season_lines, season_batch = [], 1
 for search in ["Tensei shitara Slime Datta Ken 3rd Season", "Kimetsu no Yaiba Yuukaku-hen", "Re:Zero 3rd Season", "Kaguya-sama Ultra Romantic", "Monogatari Second Season", "Tensei shitara Slime Datta Ken 2nd Season", "Mushoku Tensei II", "Bleach Sennen Kessen", "Shingeki no Kyojin Season 3", "Kimetsu no Yaiba Mugen Ressha", "Spy x Family Season 2"]:
+    time.sleep(1)
     status, raw, dt = run("query($s:String){ Media(search:$s, type: ANIME){ id format title { romaji english } relations { edges { relationType node { id type format title { romaji english } } } } } }", {"s": search})
     m = (safe_json(raw, search).get("data") or {}).get("Media") or {}
     chain = [f"{m.get('id')} {m.get('format')} {(m.get('title') or {}).get('romaji')}"]
@@ -188,7 +189,7 @@ for search in ["Tensei shitara Slime Datta Ken 3rd Season", "Kimetsu no Yaiba Yu
         cur = items[0]
         if cur.get("format") in SERIES: root = cur
         chain.append(f"{cur['id']} {cur.get('format')} {(cur.get('title') or {}).get('romaji')}")
-    chain.append(f"RECOMMEND: {root['id']} {(root.get('title') or {}).get('romaji')}")
+    chain.append(f"RECOMMEND: {root.get('id')} {(root.get('title') or {}).get('romaji')}")
     if len(chain) == 2:
         rels = [(e.get("relationType"), (e.get("node") or {}).get("id"), (e.get("node") or {}).get("format"),
                  ((e.get("node") or {}).get("title") or {}).get("romaji"), ((e.get("node") or {}).get("title") or {}).get("english"))
