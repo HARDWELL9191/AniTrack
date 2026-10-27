@@ -1,0 +1,301 @@
+import SwiftUI
+
+struct MediaDetailView: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.openURL) private var openURL
+    let mediaId: Int
+
+    @State private var detail: MediaDetail?
+    @State private var loadError: String?
+    @State private var showEditor = false
+    @State private var expanded = false
+    @State private var showSpoilers = false
+
+    var body: some View {
+        Group {
+            if let detail {
+                content(detail)
+            } else if let loadError {
+                ContentUnavailableView("Couldn't load", systemImage: "wifi.exclamationmark",
+                                       description: Text(loadError))
+            } else {
+                ProgressView()
+            }
+        }
+        .navigationBarTitleDisplayMode(.inline)
+        .task(id: mediaId) { await load() }
+        .sheet(isPresented: $showEditor) {
+            if let media = detail?.media {
+                EntryEditorView(media: media, existing: model.entry(for: mediaId), lite: detail?.mediaListEntry)
+                    .presentationDetents([.medium, .large])
+            }
+        }
+    }
+
+    private func load() async {
+        do {
+            detail = try await model.detail(id: mediaId)
+            loadError = nil
+        } catch {
+            loadError = error.localizedDescription
+        }
+    }
+
+    @ViewBuilder
+    private func content(_ d: MediaDetail) -> some View {
+        let media = d.media
+        let entry = model.entry(for: media.id)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                ZStack(alignment: .bottomLeading) {
+                    BannerImageView(url: media.bannerImage, fallbackColor: media.coverImage?.color, height: 180)
+                    LinearGradient(colors: [.clear, Color(.systemBackground)], startPoint: .center, endPoint: .bottom)
+                        .frame(height: 180)
+                }
+
+                HStack(alignment: .bottom, spacing: 14) {
+                    CoverImageView(url: media.coverURL, color: media.coverImage?.color,
+                                   width: 110, height: 160, cornerRadius: 10)
+                        .shadow(color: .black.opacity(0.25), radius: 8, y: 4)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(media.displayTitle(model.settings.titleLanguage))
+                            .font(.title3.bold())
+                            .lineLimit(4)
+                        if let native = media.title.native, model.settings.titleLanguage != .native {
+                            Text(native).font(.caption).foregroundStyle(.secondary)
+                        }
+                        ScoreBadge(score: media.averageScore)
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.top, -80)
+
+                listControls(media: media, entry: entry, lite: d.mediaListEntry)
+                    .padding(.horizontal)
+
+                infoGrid(media: media, studios: d.studios?.nodes?.map(\.name) ?? [])
+                    .padding(.horizontal)
+
+                if let genres = media.genres, !genres.isEmpty {
+                    FlowLayout { ForEach(genres, id: \.self) { Chip(text: $0) } }
+                        .padding(.horizontal)
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Synopsis").font(.headline)
+                    Text(media.plainDescription)
+                        .font(.subheadline)
+                        .lineLimit(expanded ? nil : 6)
+                    Button(expanded ? "Show less" : "Read more") { withAnimation { expanded.toggle() } }
+                        .font(.subheadline)
+                }
+                .padding(.horizontal)
+
+                tags(media)
+
+                if let edges = d.relations?.edges?.filter({ $0.node?.type == "ANIME" }), !edges.isEmpty {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Related").font(.headline).padding(.horizontal)
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            LazyHStack(alignment: .top, spacing: 12) {
+                                ForEach(edges, id: \.node?.id) { edge in
+                                    if let node = edge.node {
+                                        NavigationLink(value: MediaLink(id: node.id)) {
+                                            VStack(alignment: .leading, spacing: 4) {
+                                                CoverImageView(url: node.coverImage?.large, color: node.coverImage?.color,
+                                                               width: 96, height: 138)
+                                                Text(edge.relationLabel).font(.caption2.weight(.bold)).foregroundStyle(Theme.accent)
+                                                Text(node.title.english ?? node.title.romaji ?? node.title.userPreferred ?? "")
+                                                    .font(.caption).lineLimit(2).frame(width: 96, alignment: .leading)
+                                            }
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                }
+                            }
+                            .padding(.horizontal)
+                        }
+                    }
+                }
+
+                let recs = (d.recommendations?.nodes ?? []).compactMap(\.mediaRecommendation)
+                    .filter { !(model.settings.hideChinese && $0.countryOfOrigin == "CN") }
+                if !recs.isEmpty {
+                    HorizontalMediaSection(title: "Fans also recommend", items: recs)
+                }
+
+                if let site = media.siteUrl, let url = URL(string: site) {
+                    Button { openURL(url) } label: {
+                        Label("Open on AniList", systemImage: "safari")
+                    }
+                    .buttonStyle(.glass)
+                    .padding(.horizontal)
+                }
+            }
+            .padding(.bottom, 30)
+        }
+        .ignoresSafeArea(edges: .top)
+    }
+
+    @ViewBuilder
+    private func listControls(media: Media, entry: ListEntry?, lite: EntryLite?) -> some View {
+        let status = entry?.status ?? lite?.status
+        let progress = entry?.progressValue ?? lite?.progress ?? 0
+        VStack(spacing: 10) {
+            if model.canEdit {
+                Button { showEditor = true } label: {
+                    Label(status?.label ?? "Add to list", systemImage: status?.symbol ?? "plus.circle.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.glassProminent)
+                .controlSize(.large)
+            } else if let status {
+                Label(status.label, systemImage: status.symbol)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if status != nil {
+                HStack {
+                    Text("Progress \(progress)/\(media.episodes.map(String.init) ?? "?")")
+                    Spacer()
+                    let score = entry?.score ?? lite?.score
+                    if let score, score > 0 { Text("My score ★ \(Fmt.score(score))") }
+                }
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            }
+            if let airing = Fmt.airing(media.nextAiringEpisode) {
+                Label(airing, systemImage: "clock")
+                    .font(.subheadline)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    private func infoGrid(media: Media, studios: [String]) -> some View {
+        let rows: [(String, String)] = [
+            ("Format", media.formatLabel),
+            ("Episodes", media.episodes.map(String.init) ?? "?"),
+            ("Length", media.duration.map { "\($0) min" } ?? "?"),
+            ("Status", media.statusLabel),
+            ("Season", media.seasonLabel ?? "?"),
+            ("Studio", studios.first ?? "?"),
+            ("Popularity", media.popularity.map { $0.formatted() } ?? "?"),
+            ("Mean score", media.meanScore.map { "\($0)%" } ?? "?")
+        ]
+        return LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 10) {
+            ForEach(rows, id: \.0) { row in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(row.0).font(.caption).foregroundStyle(.secondary)
+                    Text(row.1).font(.subheadline.weight(.medium)).lineLimit(1)
+                }
+            }
+        }
+        .padding()
+        .background(.background.secondary, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    @ViewBuilder
+    private func tags(_ media: Media) -> some View {
+        let all = (media.tags ?? []).sorted { ($0.rank ?? 0) > ($1.rank ?? 0) }
+        let visible = all.filter { showSpoilers || $0.isMediaSpoiler != true }.prefix(14)
+        if !all.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Tags").font(.headline)
+                    Spacer()
+                    if all.contains(where: { $0.isMediaSpoiler == true }) {
+                        Button(showSpoilers ? "Hide spoilers" : "Show spoilers") { showSpoilers.toggle() }
+                            .font(.caption)
+                    }
+                }
+                FlowLayout {
+                    ForEach(Array(visible), id: \.name) { tag in
+                        Chip(text: "\(tag.name) \(tag.rank ?? 0)%",
+                             tint: tag.isMediaSpoiler == true ? .red : .secondary)
+                    }
+                }
+            }
+            .padding(.horizontal)
+        }
+    }
+}
+
+struct EntryEditorView: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    let media: Media
+    let existing: ListEntry?
+    let lite: EntryLite?
+
+    @State private var status: ListStatus = .PLANNING
+    @State private var progress = 0
+    @State private var score: Double = 0
+    @State private var isSaving = false
+    @State private var confirmDelete = false
+
+    private var entryId: Int? { existing?.id ?? lite?.id }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Picker("Status", selection: $status) {
+                    ForEach(ListStatus.allCases) { s in
+                        Label(s.label, systemImage: s.symbol).tag(s)
+                    }
+                }
+                Stepper(value: $progress, in: 0...(media.episodes ?? 9999)) {
+                    Text("Episodes \(progress)/\(media.episodes.map(String.init) ?? "?")")
+                }
+                VStack(alignment: .leading) {
+                    Text(score > 0 ? "Score ★ \(Fmt.score(score * 10))" : "Score: not rated")
+                    Slider(value: $score, in: 0...10, step: 0.5)
+                }
+                if entryId != nil {
+                    Button("Remove from list", role: .destructive) { confirmDelete = true }
+                }
+            }
+            .navigationTitle(media.displayTitle(model.settings.titleLanguage))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") { Task { await save() } }.disabled(isSaving)
+                }
+            }
+            .confirmationDialog("Remove from your list?", isPresented: $confirmDelete, titleVisibility: .visible) {
+                Button("Remove", role: .destructive) { Task { await remove() } }
+            }
+            .onChange(of: progress) { _, newValue in
+                if let total = media.episodes, newValue >= total, total > 0 { status = .COMPLETED }
+                else if newValue > 0 && status == .PLANNING { status = .CURRENT }
+            }
+        }
+        .onAppear {
+            status = existing?.status ?? lite?.status ?? .PLANNING
+            progress = existing?.progressValue ?? lite?.progress ?? 0
+            score = (existing?.score ?? lite?.score ?? 0) / 10
+        }
+    }
+
+    private func save() async {
+        isSaving = true
+        defer { isSaving = false }
+        do {
+            try await model.save(media: media, status: status, progress: progress,
+                                 scoreRaw: Int((score * 10).rounded()))
+            dismiss()
+        } catch {
+            model.errorMessage = error.localizedDescription
+        }
+    }
+
+    private func remove() async {
+        guard let entryId else { return }
+        do {
+            try await model.delete(entryId: entryId)
+            dismiss()
+        } catch {
+            model.errorMessage = error.localizedDescription
+        }
+    }
+}
