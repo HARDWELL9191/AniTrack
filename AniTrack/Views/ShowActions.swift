@@ -38,7 +38,16 @@ struct ShowActionsMenu: ViewModifier {
         // otherwise lift the whole row of covers).
         content
             .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .contextMenu { menuItems } preview: { ShowMenuPreview(media: media, match: match) }
+            .contextMenu { menuItems } preview: {
+                // iOS renders the preview outside the app's view tree, so it gets plain values
+                // only (reading the app model inside it would crash).
+                ShowMenuPreview(coverURL: media.coverURL,
+                                coverColor: media.coverImage?.color,
+                                title: media.displayTitle(model.settings.titleLanguage),
+                                score: media.averageScore,
+                                match: match ?? model.matcher.match(for: media),
+                                age: model.ages.rating(for: media.id)?.label)
+            }
     }
 
     @ViewBuilder
@@ -78,23 +87,28 @@ struct ShowActionsMenu: ViewModifier {
 
 /// What lifts out when you long-press a show: just that show's cover, title and bubbles.
 struct ShowMenuPreview: View {
-    @Environment(AppModel.self) private var model
-    let media: Media
-    var match: Int? = nil
+    let coverURL: String?
+    let coverColor: String?
+    let title: String
+    let score: Int?
+    let match: Int?
+    let age: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            CoverImageView(url: media.coverURL, color: media.coverImage?.color,
-                           width: 200, height: 290, cornerRadius: 12)
-                .overlay(alignment: .topLeading) { AgeBadge(media: media).padding(6) }
-                .overlay(alignment: .bottomLeading) {
-                    if let value = match ?? model.matcher.match(for: media) { MatchBubble(value: value).padding(6) }
+            CoverImageView(url: coverURL, color: coverColor, width: 200, height: 290, cornerRadius: 12)
+                .overlay(alignment: .topLeading) {
+                    if let age { AgeBubble(label: age).padding(6) }
                 }
-            Text(media.displayTitle(model.settings.titleLanguage))
+                .overlay(alignment: .bottomLeading) {
+                    if let match { MatchBubble(value: match).padding(6) }
+                }
+            Text(title)
                 .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
                 .lineLimit(2)
                 .frame(width: 200, alignment: .leading)
-            ScoreBadge(score: media.averageScore)
+            ScoreBadge(score: score)
         }
         .padding(12)
     }
