@@ -57,6 +57,14 @@ if os.environ.get("ANILIST_USER", "") == "thumbs":
         note("thumbs crash", traceback.format_exc()[-1500:], "error")
     raise SystemExit(0)
 
+if os.environ.get("ANILIST_USER", "") == "align":
+    import traceback
+    try:
+        exec(open("tools/align_check.py").read(), globals())
+    except Exception:
+        note("align crash", traceback.format_exc()[-1500:], "error")
+    raise SystemExit(0)
+
 if os.environ.get("ANILIST_USER", "") == "episodes":
     import traceback
     try:
