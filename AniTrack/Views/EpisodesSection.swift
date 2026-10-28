@@ -138,6 +138,11 @@ struct EpisodesSection: View {
         shownCount = 20
         expanded = []
         let season = selected
+        // Show what's saved right away; refresh only if it's due (new descriptions/thumbnails).
+        if let saved = await EpisodeService.shared.saved(for: season.id), season.id == selectedId {
+            page = saved
+            guard await EpisodeService.shared.isStale(saved) else { return }
+        }
         let result = await EpisodeService.shared.firstPage(for: season, client: model.client)
         guard season.id == selectedId else { return }   // switched season meanwhile
         page = result

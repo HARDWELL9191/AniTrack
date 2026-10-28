@@ -315,8 +315,10 @@ actor SeasonChain {
 // MARK: - Episode lists
 
 /// Episodes of one show: AniList's streaming episodes (titles + thumbnails) first, Kitsu for
-/// descriptions and any missing thumbnails/titles. Saved on the phone (finished shows for a
-/// month, airing shows for half a day).
+/// descriptions and any missing thumbnails/titles. Saved on the phone and refreshed so
+/// details added later show up: airing shows every 12 hours, finished shows with missing
+/// descriptions or thumbnails daily, complete finished shows monthly. A saved list is shown
+/// instantly while the refresh happens.
 actor EpisodeService {
     static let shared = EpisodeService()
 
@@ -328,11 +330,26 @@ actor EpisodeService {
         var kitsuTotal: Int?
         var savedAt: Date
         var finished: Bool
+
+        /// Every episode has a description and a thumbnail (nothing left to fill in).
+        var complete: Bool {
+            episodes.allSatisfy { $0.description != nil && $0.thumbnail != nil }
+        }
     }
 
     private var memory: [Int: Page] = [:]
 
     private func cacheName(_ id: Int) -> String { "episodes-\(id)" }
+
+    /// Whatever is saved for this show, however old (shown instantly while refreshing).
+    func saved(for mediaId: Int) async -> Page? {
+        if let page = memory[mediaId] { return page }
+        let page = await DiskCache.loadInBackground(Page.self, name: cacheName(mediaId))
+        if let page { memory[mediaId] = page }
+        return page
+    }
+
+    func isStale(_ page: Page) -> Bool { !isFresh(page) }
 
     func firstPage(for media: Media, client: AniListClient) async -> Page {
         if let page = memory[media.id], isFresh(page) { return page }
@@ -348,7 +365,22 @@ actor EpisodeService {
         if let kid { kitsu = await KitsuClient.shared.episodes(kitsuId: kid, offset: 0) }
 
         let total = Self.episodeCount(media: media, anilist: fromAniList.count, kitsu: kitsu?.total)
-        let merged = Self.merge(count: total, anilist: fromAniList, kitsu: kitsu?.episodes ?? [])
+        var merged = Self.merge(count: total, anilist: fromAniList, kitsu: kitsu?.episodes ?? [])
+        // A refresh only ever adds: anything saved before (e.g. a refresh while offline, or
+        // descriptions loaded with "Show more") is kept where the new data has nothing.
+        var old = memory[media.id]
+        if old == nil { old = await DiskCache.loadInBackground(Page.self, name: cacheName(media.id)) }
+        if let old {
+            let previous = Dictionary(old.episodes.map { ($0.number, $0) }, uniquingKeysWith: { a, _ in a })
+            merged = merged.map { fresh in
+                guard let p = previous[fresh.number] else { return fresh }
+                var e = fresh
+                if e.title == nil { e.title = p.title }
+                if e.description == nil { e.description = p.description }
+                if e.thumbnail == nil { e.thumbnail = p.thumbnail }
+                return e
+            }
+        }
         let page = Page(episodes: merged, total: total, kitsuId: kid,
                         kitsuLoaded: kitsu?.episodes.count ?? 0, kitsuTotal: kitsu?.total,
                         savedAt: Date(), finished: media.status == "FINISHED")
@@ -379,7 +411,8 @@ actor EpisodeService {
 
     private func isFresh(_ page: Page) -> Bool {
         let age = Date().timeIntervalSince(page.savedAt)
-        return page.finished ? age < 30 * 86_400 : age < 12 * 3_600
+        if !page.finished { return age < 12 * 3_600 }
+        return page.complete ? age < 30 * 86_400 : age < 86_400
     }
 
     /// Aired episodes only for airing shows; never more than what anyone knows about.
