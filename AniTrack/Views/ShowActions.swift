@@ -195,7 +195,7 @@ struct WhyThisSheet: View {
 /// Match % bubble: pink-tinted Liquid Glass, white text (covers and list rows).
 struct MatchBubble: View {
     /// Both bubbles share this, so "PG" and "97%" come out the same size.
-    static let minTextWidth: CGFloat = 24
+    static let minTextWidth: CGFloat = 26
     let value: Int
     var body: some View {
         Text("\(value)%")
