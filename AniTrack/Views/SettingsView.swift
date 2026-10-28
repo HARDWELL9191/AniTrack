@@ -43,7 +43,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Your lists")
                 } footer: {
-                    Text("Choose which lists to include; each one becomes a sheet in a single .xlsx file you can save to Files or share.")
+                    Text("Choose which lists to include; each one becomes a sheet in a single .xlsx file saved to Files.")
                 }
 
                 Section {

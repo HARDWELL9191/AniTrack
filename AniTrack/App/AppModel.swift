@@ -419,7 +419,8 @@ final class AppModel {
         if let minScore { vars["scoreGreater"] = minScore }
         if let maxPopularity { vars["popularityLesser"] = maxPopularity }
         if let minPopularity { vars["popularityGreater"] = minPopularity }
-        if let search, !search.isEmpty { vars["search"] = search }
+        let searching = !(search ?? "").isEmpty
+        if searching { vars["search"] = search } else { vars["formatNot"] = ["MOVIE"] }
         if let category { vars.merge(category.browseVariables) { a, _ in a } }
         if let season { vars["season"] = season }
         if let seasonYear { vars["seasonYear"] = seasonYear }
@@ -428,6 +429,7 @@ final class AppModel {
                                         variables: vars, as: PageData.self)
         let hasNext = data.page.pageInfo?.hasNextPage ?? (data.page.media.count >= perPage)
         let shown = data.page.media.filter { media in
+            if media.isMovie && !searching { return false }
             if settings.hideChinese && media.countryOfOrigin == "CN" { return false }
             if firstSeasonsOnly {
                 // Season 2+ of a show, or a show where you already have another season: skip.
@@ -551,6 +553,7 @@ final class AppModel {
                             || franchises.contains(pick.media)
                             || settings.dismissedPicks.contains(pick.id)
                             || (settings.hideChinese && pick.media.countryOfOrigin == "CN")
+                            || pick.media.isMovie
                             || (!settings.includeUnreleased && pick.media.status == "NOT_YET_RELEASED")
                     }.map(\.id)
                     if !onList.isEmpty {

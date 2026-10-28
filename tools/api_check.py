@@ -57,6 +57,14 @@ if os.environ.get("ANILIST_USER", "") == "thumbs":
         note("thumbs crash", traceback.format_exc()[-1500:], "error")
     raise SystemExit(0)
 
+if os.environ.get("ANILIST_USER", "") == "movies":
+    import traceback
+    try:
+        exec(open("tools/movies_check.py").read(), globals())
+    except Exception:
+        note("movies crash", traceback.format_exc()[-1500:], "error")
+    raise SystemExit(0)
+
 if os.environ.get("ANILIST_USER", "") == "adult":
     import traceback
     try:

@@ -316,7 +316,8 @@ enum Recommender {
         let topGenres = profile.top(prefix: "g:", count: 2)
         var explorations: [[String: Any]] = []
         let adultOnly = options.category?.isAdultOnly == true
-        let base: [String: Any] = ["page": round, "perPage": 40, "isAdult": adultOnly, "excludeIds": excludeIds]
+        let base: [String: Any] = ["page": round, "perPage": 40, "isAdult": adultOnly, "excludeIds": excludeIds,
+                                   "formatNot": ["MOVIE"]]
 
         if let category = options.category {
             // Category mode: the category is the main source, ranked by your taste below.
@@ -370,7 +371,7 @@ enum Recommender {
             // Adult shows only when the Hentai category is picked.
             if m.isAdult == true && !adultOnly { return false }
             if options.hideChinese && m.countryOfOrigin == "CN" { return false }
-            if m.format == "MUSIC" { return false }
+            if m.format == "MUSIC" || m.isMovie { return false }   // movies only via search
             if !options.includeUnreleased && m.status == "NOT_YET_RELEASED" { return false }
             if options.dismissed.contains(m.id) { return false }
             if let category = options.category, !category.matches(m) { return false }

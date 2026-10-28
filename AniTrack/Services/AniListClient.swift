@@ -136,13 +136,14 @@ enum Queries {
     query ($page: Int, $perPage: Int, $search: String, $sort: [MediaSort], $season: MediaSeason,
            $seasonYear: Int, $status: MediaStatus, $genres: [String], $tags: [String],
            $excludeIds: [Int], $isAdult: Boolean, $genresNot: [String],
-           $popularityLesser: Int, $popularityGreater: Int, $scoreGreater: Int) {
+           $popularityLesser: Int, $popularityGreater: Int, $scoreGreater: Int, $formatNot: [MediaFormat]) {
       Page(page: $page, perPage: $perPage) {
         pageInfo { hasNextPage }
         media(type: ANIME, search: $search, sort: $sort, season: $season, seasonYear: $seasonYear,
               status: $status, genre_in: $genres, tag_in: $tags, id_not_in: $excludeIds,
               isAdult: $isAdult, genre_not_in: $genresNot, popularity_lesser: $popularityLesser,
-              popularity_greater: $popularityGreater, averageScore_greater: $scoreGreater) {
+              popularity_greater: $popularityGreater, averageScore_greater: $scoreGreater,
+              format_not_in: $formatNot) {
           ...media
           ...rel
         }
@@ -214,13 +215,14 @@ enum Queries {
     query ($page: Int, $perPage: Int, $search: String, $sort: [MediaSort], $season: MediaSeason,
            $seasonYear: Int, $status: MediaStatus, $genres: [String], $tags: [String],
            $excludeIds: [Int], $isAdult: Boolean, $genresNot: [String],
-           $popularityLesser: Int, $popularityGreater: Int, $scoreGreater: Int) {
+           $popularityLesser: Int, $popularityGreater: Int, $scoreGreater: Int, $formatNot: [MediaFormat]) {
       Page(page: $page, perPage: $perPage) {
         pageInfo { hasNextPage }
         media(type: ANIME, search: $search, sort: $sort, season: $season, seasonYear: $seasonYear,
               status: $status, genre_in: $genres, tag_in: $tags, id_not_in: $excludeIds,
               isAdult: $isAdult, genre_not_in: $genresNot, popularity_lesser: $popularityLesser,
-              popularity_greater: $popularityGreater, averageScore_greater: $scoreGreater) {
+              popularity_greater: $popularityGreater, averageScore_greater: $scoreGreater,
+              format_not_in: $formatNot) {
           ...media
         }
       }

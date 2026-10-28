@@ -1,7 +1,8 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
-/// Profile → "Export lists to Excel": pick any of your lists, get one .xlsx with a sheet per list,
-/// then save it to Files or share it.
+/// Profile → "Export lists to Excel": pick any of your lists, get one .xlsx with a sheet per list
+/// and save it to Files.
 struct ListExportSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -21,9 +22,11 @@ struct ListExportSheet: View {
 
     @State private var selected: Set<String> = []
     @State private var didSetDefaults = false
-    @State private var file: URL?
+    @State private var document: XLSXDocument?
+    @State private var isExporting = false
     @State private var isBuilding = false
     @State private var failure: String?
+    @State private var saved: String?
 
     var body: some View {
         NavigationStack {
@@ -50,30 +53,29 @@ struct ListExportSheet: View {
                 }
 
                 Section {
-                    if let file {
-                        ShareLink(item: file,
-                                  preview: SharePreview(file.lastPathComponent, image: Image(systemName: "tablecells"))) {
-                            Label("Save or share Excel file", systemImage: "square.and.arrow.up")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.glassProminent)
-                    } else {
-                        Button {
-                            Task { await build() }
-                        } label: {
-                            if isBuilding {
-                                ProgressView().frame(maxWidth: .infinity)
-                            } else {
-                                Label("Create Excel file", systemImage: "tablecells")
-                                    .frame(maxWidth: .infinity)
-                            }
-                        }
-                        .buttonStyle(.glassProminent)
-                        .disabled(selected.isEmpty || isBuilding)
+                    // One button: builds the file and opens the Save dialog (Files, iCloud Drive…).
+                    Button {
+                        Task { await build() }
+                    } label: {
+                        Text("Save Excel file")
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .opacity(isBuilding ? 0 : 1)
+                            .overlay { if isBuilding { ProgressView().tint(.white) } }
+                            .padding(.horizontal, 22)
+                            .frame(height: 44)   // same height as the Close button
+                            .glassEffect(.regular.tint(.accentColor).interactive(), in: .capsule)
+                            .contentShape(.capsule)
                     }
+                    .buttonStyle(.plain)
+                    .disabled(selected.isEmpty || isBuilding)
+                    .opacity(selected.isEmpty ? 0.45 : 1)
+                    .frame(maxWidth: .infinity)   // centered, width follows the text
                 } footer: {
                     if let failure {
                         Text(failure).foregroundStyle(.red)
+                    } else if let saved {
+                        Text(saved)
                     }
                 }
                 .listRowBackground(Color.clear)
@@ -84,7 +86,17 @@ struct ListExportSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
             }
-            .onChange(of: selected) { _, _ in file = nil }   // a different choice needs a new file
+            .fileExporter(isPresented: $isExporting, document: document,
+                          contentType: XLSXDocument.contentType, defaultFilename: fileName()) { result in
+                switch result {
+                case .success(let url): saved = "Saved \(url.lastPathComponent)."
+                case .failure(let error):
+                    // Closing the Save dialog isn't an error.
+                    if (error as? CocoaError)?.code != .userCancelled {
+                        failure = "Couldn't save the file: \(error.localizedDescription)"
+                    }
+                }
+            }
             .task {
                 if !didSetDefaults {
                     didSetDefaults = true
@@ -113,26 +125,13 @@ struct ListExportSheet: View {
     private func build() async {
         isBuilding = true
         failure = nil
+        saved = nil
         defer { isBuilding = false }
         let sheets = Self.choices.filter { selected.contains($0.id) }.map(sheet(for:))
-        let name = fileName()
         // XML + ZIP work happens off the main thread (a big list is a few MB of text).
-        let result = await Task.detached(priority: .userInitiated) { () -> Result<URL, Error> in
-            do {
-                let folder = FileManager.default.temporaryDirectory.appendingPathComponent("Export", isDirectory: true)
-                try? FileManager.default.removeItem(at: folder)   // old exports
-                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-                let url = folder.appendingPathComponent(name)
-                try XLSXWriter.data(sheets: sheets).write(to: url, options: .atomic)
-                return .success(url)
-            } catch {
-                return .failure(error)
-            }
-        }.value
-        switch result {
-        case .success(let url): file = url
-        case .failure(let error): failure = "Couldn't create the file: \(error.localizedDescription)"
-        }
+        let data = await Task.detached(priority: .userInitiated) { XLSXWriter.data(sheets: sheets) }.value
+        document = XLSXDocument(data: data)
+        isExporting = true
     }
 
     private func fileName() -> String {
@@ -142,7 +141,7 @@ struct ListExportSheet: View {
         let user = (model.viewer?.name ?? "")
             .filter { $0.isLetter || $0.isNumber || $0 == "_" || $0 == "-" }
         let who = user.isEmpty ? "" : " \(user)"
-        return "AniTrack\(who) lists \(formatter.string(from: Date())).xlsx"
+        return "AniTrack\(who) lists \(formatter.string(from: Date()))"   // ".xlsx" is added by the Save dialog
     }
 
     private func sheet(for choice: Choice) -> XLSXWriter.Sheet {
@@ -222,5 +221,24 @@ struct ListExportSheet: View {
         let other = lang == .romaji ? (m.title.english ?? m.title.native) : (m.title.romaji ?? m.title.native)
         guard let other, other != main else { return "" }
         return other
+    }
+}
+
+/// The workbook handed to the Save dialog.
+struct XLSXDocument: FileDocument {
+    static let contentType = UTType("org.openxmlformats.spreadsheetml.sheet")
+        ?? UTType(filenameExtension: "xlsx") ?? .data
+    static var readableContentTypes: [UTType] { [contentType] }
+
+    var data: Data
+
+    init(data: Data) { self.data = data }
+
+    init(configuration: ReadConfiguration) throws {
+        data = configuration.file.regularFileContents ?? Data()
+    }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: data)
     }
 }

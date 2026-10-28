@@ -72,9 +72,9 @@ enum BackgroundPrefetch {
         // 2) A few cheap requests for shows you're likely to browse soon.
         let season = currentSeason()
         let browses: [[String: Any]] = [
-            ["page": 1, "perPage": 50, "sort": ["TRENDING_DESC"], "season": season.0, "seasonYear": season.1, "isAdult": false],
-            ["page": 1, "perPage": 50, "sort": ["TRENDING_DESC", "POPULARITY_DESC"], "isAdult": false],
-            ["page": 1, "perPage": 50, "sort": ["POPULARITY_DESC"], "isAdult": false]
+            ["page": 1, "perPage": 50, "sort": ["TRENDING_DESC"], "season": season.0, "seasonYear": season.1, "isAdult": false, "formatNot": ["MOVIE"]],
+            ["page": 1, "perPage": 50, "sort": ["TRENDING_DESC", "POPULARITY_DESC"], "isAdult": false, "formatNot": ["MOVIE"]],
+            ["page": 1, "perPage": 50, "sort": ["POPULARITY_DESC"], "isAdult": false, "formatNot": ["MOVIE"]]
         ]
         for vars in browses {
             guard shouldContinue() else { return false }
@@ -103,7 +103,7 @@ enum BackgroundPrefetch {
         // 3) Embed only what's new, capped per charge, in small chunks.
         let known = await SemanticEngine.shared.cachedVectors(for: Array(pool.keys))
         let missing = pool.values
-            .filter { known[$0.id] == nil && $0.isAdult != true }
+            .filter { known[$0.id] == nil && $0.isAdult != true && !$0.isMovie }
             .sorted { ($0.popularity ?? 0) > ($1.popularity ?? 0) }
             .prefix(maxNewPerRun)
         var index = missing.startIndex

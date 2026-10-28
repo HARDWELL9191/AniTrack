@@ -119,6 +119,10 @@ struct Media: Codable, Identifiable, Hashable {
         return "\(season.capitalized) \(seasonYear)"
     }
 
+    /// Movies are left out of every suggestion, shelf and category page; they only appear
+    /// when you search for one (and on your own lists).
+    var isMovie: Bool { format == "MOVIE" }
+
     var visibleTags: [MediaTag] {
         (tags ?? []).filter { $0.isMediaSpoiler != true }
     }
