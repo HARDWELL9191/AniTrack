@@ -16,9 +16,17 @@ struct HomeView: View {
 
     var body: some View {
         NavigationStack(path: $path) {
-            List {
+            // A plain scrolling page (not a List): inside a List each row of covers is one cell,
+            // so a long-press lifted the whole row and used the first cover's menu.
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 26) {
                 if let viewer = model.viewer {
-                    Section { ProfileHeader(viewer: viewer) }
+                    ProfileHeader(viewer: viewer)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(16)
+                        .background(Color(.secondarySystemGroupedBackground),
+                                    in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+                        .padding(.horizontal, 16)
                 }
 
                 pickedForYou
@@ -26,7 +34,7 @@ struct HomeView: View {
                 let bestThisSeason = seasonBestMatches
                 if !bestThisSeason.isEmpty {
                     let s = AppModel.currentSeason()
-                    Section {
+                    HomeSection {
                         cardRow(bestThisSeason)
                     } header: {
                         Label("Best matches · \(s.season.capitalized) \(String(s.year))", systemImage: "sparkles")
@@ -35,7 +43,7 @@ struct HomeView: View {
 
                 let planning = planningByMatch
                 if !planning.isEmpty {
-                    Section {
+                    HomeSection {
                         cardRow(planning, suggestions: false)
                     } header: {
                         sectionHeader("Start next · best fit from Planning", action: "All") { model.selectedTab = .lists }
@@ -43,7 +51,7 @@ struct HomeView: View {
                 }
 
                 if !trending.isEmpty {
-                    Section {
+                    HomeSection {
                         cardRow(trending)
                     } header: {
                         Label("Trending now", systemImage: "flame")
@@ -52,7 +60,7 @@ struct HomeView: View {
 
                 // Beyond your usual: these aren't sorted by match on purpose.
                 if !gems.isEmpty {
-                    Section {
+                    HomeSection {
                         cardRow(gems)
                     } header: {
                         Label("Hidden gems", systemImage: "diamond")
@@ -60,7 +68,7 @@ struct HomeView: View {
                 }
 
                 if !outside.isEmpty {
-                    Section {
+                    HomeSection {
                         cardRow(outside)
                     } header: {
                         Label("Outside your usual · \(outsideGenres.joined(separator: " & "))", systemImage: "safari")
@@ -68,7 +76,7 @@ struct HomeView: View {
                 }
 
                 if !surprise.isEmpty {
-                    Section {
+                    HomeSection {
                         cardRow(surprise)
                     } header: {
                         sectionHeader("Surprise me", systemImage: "dice", action: "Shuffle") {
@@ -79,7 +87,7 @@ struct HomeView: View {
 
                 let watching = model.entries(in: [.CURRENT, .REPEATING])
                 if !watching.isEmpty {
-                    Section {
+                    HomeSection {
                         cardRow(watching.map(\.media), suggestions: false)
                     } header: {
                         Text("Currently watching")
@@ -87,12 +95,15 @@ struct HomeView: View {
                 }
 
                 if model.entries.isEmpty && !model.isLoadingList {
-                    Section {
-                        Text("Add a few shows you liked (Discover → search), and Home fills up with suggestions.")
-                            .foregroundStyle(.secondary)
-                    }
+                    Text("Add a few shows you liked (Discover → search), and Home fills up with suggestions.")
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 20)
                 }
+                }
+                .padding(.top, 8)
+                .padding(.bottom, 24)
             }
+            .background(Color(.systemGroupedBackground))
             .navigationTitle("Home")
             // Large title on the same row as the toolbar buttons (no empty row above it).
             .toolbarTitleDisplayMode(.inlineLarge)
@@ -140,12 +151,13 @@ extension HomeView {
     var pickedForYou: some View {
         let picks = model.picks(for: nil)
         if !picks.isEmpty || model.isLoadingFeed(nil) {
-            Section {
+            HomeSection {
                 if picks.isEmpty {
                     HStack(spacing: 10) {
                         ProgressView()
                         Text("Hoshi is picking shows for you…").foregroundStyle(.secondary)
                     }
+                    .padding(.horizontal, 20)
                 } else {
                     let matches = Dictionary(picks.prefix(20).map { ($0.id, $0.match) }, uniquingKeysWith: { a, _ in a })
                     cardRow(Array(picks.prefix(20).map(\.media)), matches: matches, width: 140)
@@ -168,11 +180,11 @@ extension HomeView {
             Spacer()
             Button(action, action: perform)
                 .font(.subheadline.weight(.semibold))
-                .textCase(nil)
+                .foregroundStyle(.tint)   // stays blue inside the grey header
         }
     }
 
-    /// Horizontal row of cover cards inside a List section. Suggestion rows drop a show as soon
+    /// Horizontal row of cover cards under a Home shelf header. Suggestion rows drop a show as soon
     /// as you plan it, watch it or say "Not for me" (the next one slides into its place);
     /// rows of your own list (Planning, Currently watching) pass `suggestions: false`.
     func cardRow(_ items: [Media], matches: [Int: Int] = [:], width: CGFloat = 104,
@@ -190,11 +202,9 @@ extension HomeView {
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 8)
+            .padding(.vertical, 4)
             .animation(.snappy, value: shown.map(\.id))
         }
-        .listRowInsets(EdgeInsets())
-        .listRowBackground(Color.clear)
     }
 
     /// Two light requests, once per launch (or on pull to refresh).
@@ -250,6 +260,27 @@ extension HomeView {
             for g in e.media.genres ?? [] { counts[g, default: 0] += 1 }
         }
         return counts.sorted { $0.value > $1.value }.prefix(4).map(\.key)
+    }
+}
+
+/// One Home shelf: a grey header (with an optional action like "See all") above its row.
+struct HomeSection<Content: View, Header: View>: View {
+    @ViewBuilder var content: Content
+    @ViewBuilder var header: Header
+
+    init(@ViewBuilder content: () -> Content, @ViewBuilder header: () -> Header) {
+        self.content = content()
+        self.header = header()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            header
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 20)
+            content
+        }
     }
 }
 
