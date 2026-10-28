@@ -72,11 +72,15 @@ struct ListExportSheet: View {
                     .opacity(selected.isEmpty ? 0.45 : 1)
                     .frame(maxWidth: .infinity)   // centered, width follows the text
                 } footer: {
-                    if let failure {
-                        Text(failure).foregroundStyle(.red)
-                    } else if let saved {
-                        Text(saved)
+                    Group {
+                        if let failure {
+                            Text(failure).foregroundStyle(.red)
+                        } else if let saved {
+                            Text(saved)
+                        }
                     }
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)   // centered under the button
                 }
                 .listRowBackground(Color.clear)
                 .listRowInsets(EdgeInsets())
