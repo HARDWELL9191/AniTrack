@@ -12,6 +12,7 @@ struct LibraryView: View {
         case title = "Title"
         case score = "My score"
         case average = "Average score"
+        case age = "Age rating"
         var id: String { rawValue }
     }
 
@@ -48,6 +49,22 @@ struct LibraryView: View {
         case .title: list.sort { $0.media.displayTitle(lang).localizedCompare($1.media.displayTitle(lang)) == .orderedAscending }
         case .score: list.sort { $0.scoreValue > $1.scoreValue }
         case .average: list.sort { ($0.media.averageScore ?? 0) > ($1.media.averageScore ?? 0) }
+        case .age:
+            // 18+ first, down to PG; shows Kitsu hasn't rated go last. Ties: title.
+            let rank: (ListEntry) -> Int = { e in
+                switch model.ages.rating(for: e.mediaId)?.label {
+                case "18+": return 4
+                case "17+": return 3
+                case "13+": return 2
+                case "PG": return 1
+                default: return 0
+                }
+            }
+            list.sort {
+                let a = rank($0), b = rank($1)
+                return a != b ? a > b
+                    : $0.media.displayTitle(lang).localizedCompare($1.media.displayTitle(lang)) == .orderedAscending
+            }
         case .match:
             // Rated/finished shows have no match; fall back to your score for those.
             let key: (ListEntry) -> Int = { model.matcher.match(for: $0.media) ?? Int($0.scoreValue) }
@@ -105,7 +122,9 @@ struct LibraryView: View {
             .toolbarTitleDisplayMode(.inlineLarge)
             .mediaDestination(zoom: zoom)
             .environment(\.zoomNamespace, zoom)
-            .searchable(text: $filter, prompt: "Filter this list")
+            // Always shown (like Discover), so the pull-to-refresh spinner sits under it.
+            .searchable(text: $filter, placement: .navigationBarDrawer(displayMode: .always),
+                        prompt: "Filter this list")
             .refreshable {
                 await model.refreshList()
                 if showingNotForMe {
@@ -121,6 +140,12 @@ struct LibraryView: View {
                 }
             }
             .onChange(of: model.entries.count) { _, _ in pickDefaultStatus() }
+            // Sorting by age: make sure every show in this list has its rating (saved on the
+            // phone for good, so this costs nothing after the first time).
+            .task(id: "\(sort.rawValue)|\(status.rawValue)") {
+                guard sort == .age else { return }
+                for row in model.shows(in: [status]) { model.ages.request(row.entry.media) }
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
