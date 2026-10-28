@@ -2,8 +2,15 @@
 import json, re, time
 SERIES = {"TV", "TV_SHORT", "ONA"}
 def media_by_ids(ids):
-    st, raw, _ = run(query("mediaByIds"), {"ids": ids, "perPage": len(ids)})
-    return {m["id"]: m for m in ((json.loads(raw).get("data") or {}).get("Page") or {}).get("media", [])}
+    for attempt in range(3):
+        st, raw, _ = run(query("mediaByIds"), {"ids": ids, "perPage": len(ids)})
+        try:
+            got = {m["id"]: m for m in ((json.loads(raw).get("data") or {}).get("Page") or {}).get("media", [])}
+        except Exception:
+            got = {}
+        if got: return got
+        time.sleep(20)   # rate limited
+    return {}
 def link(m, t):
     edges = [e for e in ((m.get("relations") or {}).get("edges") or []) if e.get("relationType") == t and (e.get("node") or {}).get("type") in (None, "ANIME")]
     e = next((e for e in edges if e["node"].get("format") in SERIES), edges[0] if edges else None)
@@ -54,7 +61,9 @@ note("episodes seasons", "\n".join(lines))
 lines = []
 for mid in [127720, 108511, 101280, 101922, 142329, 146065, 21355, 108632]:
     time.sleep(1.5)
-    m = media_by_ids([mid])[mid]
+    m = media_by_ids([mid]).get(mid)
+    if not m:
+        lines.append(f"{mid}: couldn't load (rate limit)"); continue
     later = any(e.get("relationType") == "PREQUEL" and (e.get("node") or {}).get("type") in (None, "ANIME") for e in ((m.get("relations") or {}).get("edges") or []))
     time.sleep(1.0)
     s = streaming(mid, later, m.get("episodes"))
