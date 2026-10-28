@@ -15,26 +15,27 @@ def similar(a, b):
     if not x or not y: return a.lower() == b.lower()
     return len(x & y) / min(len(x), len(y)) >= 0.5
 
-def titles(eps):
-    return {n: t for n, t in eps if t and not generic.match(t.strip())}
+placeholder = re.compile(r"(?i)(?:episode|ep\.?)\s*\d+|untitled|tba|tbd|n/a")
+def real(t):
+    t = (t or "").strip()
+    return None if not t or placeholder.fullmatch(t) else t
 
-def score(a, k, shift):
-    shared = sorted(n for n in a if (n + shift) in k)[:8]
-    return len(shared), sum(1 for n in shared if similar(a[n], k[n + shift]))
+def titles(eps):
+    out = {}
+    for n, t in eps:
+        if n not in out and real(t): out[n] = real(t)
+    return out
 
 def alignment(anilist, kitsu, later, expected, ktotal):
+    too_long = bool(later and expected and ktotal and ktotal > expected * 1.5 + 2)
     a, k = titles(anilist), titles(kitsu)
-    s0, m0 = score(a, k, 0)
-    if s0 < 2:
-        if later and expected and ktotal and ktotal > expected * 1.5 + 2: return ("mismatch-size", 0, s0, m0)
-        return ("same-unchecked", 0, s0, m0)
-    if m0 * 2 >= s0: return ("same", 0, s0, m0)
-    best = None
-    for s in range(1, max(k) if k else 1):
-        sh, mt = score(a, k, s)
-        if sh >= 2 and mt * 4 >= sh * 3 and mt > (best[2] if best else 0): best = (s, sh, mt)
-    if best: return ("shifted", best[0], best[1], best[2])
-    return ("mismatch", 0, s0, m0)
+    shared = sorted(n for n in a if n in k)[:8]
+    if len(shared) < 2:
+        kind = "A-titles-only" if a and not k else ("K-titles-only" if k and not a else ("none" if not a and not k else "no-overlap"))
+        return ("anilistOnly-size" if too_long else "same-unchecked:" + kind), len(shared), 0
+    m = sum(1 for n in shared if similar(a[n], k[n]))
+    if m * 2 >= len(shared): return "same", len(shared), m
+    return ("anilistOnly-size" if too_long else "kitsuOnly"), len(shared), m
 
 def streaming(mid, later, expected):
     for attempt in range(3):
@@ -88,7 +89,7 @@ st, raw, _ = run(query("mediaByIds"), {"ids": mine[:45], "perPage": 45})   # wit
 for m in (json.loads(raw).get("data") or {}).get("Page", {}).get("media", []): pool[m["id"]] = m
 ids = mine[:45] + [i for i in pool if i not in mine][:75]
 
-stats, problems, shifted, same = {}, [], [], []
+stats, kitsu_only, other, same = {}, [], [], []
 for mid in ids:
     m = pool[mid]
     if m.get("format") in ("MOVIE", "MUSIC") or m.get("episodes") == 1: continue
@@ -100,19 +101,19 @@ for mid in ids:
     title = (m["title"].get("english") or m["title"].get("romaji") or "")[:30]
     if k is None:
         stats["no kitsu"] = stats.get("no kitsu", 0) + 1; continue
-    verdict, shift, sh, mt = alignment(a, k, later, m.get("episodes"), ktotal)
+    verdict, sh, mt = alignment(a, k, later, m.get("episodes"), ktotal)
     stats[verdict] = stats.get(verdict, 0) + 1
     at, kt = titles(a), titles(k)
-    pair = lambda n: f"{n}: A='{(at.get(n) or '')[:26]}' K='{(kt.get(n + shift) or '')[:26]}'"
-    line = f"{title} ({'later' if later else 'S1'}, eps {m.get('episodes')}, kitsu {ktotal}) {verdict} {mt}/{sh}"
-    if verdict.startswith("mismatch"):
-        problems.append(line + " | " + " ; ".join(pair(n) for n in sorted(at)[:3]))
-    elif verdict == "shifted":
-        shifted.append(line + f" shift {shift} | " + " ; ".join(pair(n) for n in sorted(at)[:2]))
-    elif verdict == "same" and mt < sh:
-        same.append(line + " | " + " ; ".join(pair(n) for n in sorted(at)[:2]))
+    pair = lambda n: f"{n}: A='{(at.get(n) or '')[:24]}' K='{(kt.get(n) or '')[:24]}'"
+    line = f"{title} ({'later' if later else 'S1'}, eps {m.get('episodes')}, kitsu {ktotal}) {mt}/{sh}"
+    if verdict == "kitsuOnly":
+        kitsu_only.append(line + " | " + pair(sorted(at)[0]))
+    elif verdict == "same":
+        if mt < sh: same.append(line + " | " + " ; ".join(pair(n) for n in sorted(at)[:2]))
+    else:
+        other.append(f"{verdict}: {line} A{len(at)} K{len(kt)} | " + "; ".join(f"{n}:{(t or '')[:20]}" for n, t in sorted(a)[:2]))
 
-note("align stats", json.dumps(stats))
-note("align mismatches", "\n".join(problems) or "none")
-note("align shifted", "\n".join(shifted) or "none")
-note("align same but some titles differ", "\n".join(same[:25]) or "none")
+note("align2 stats", json.dumps(stats))
+note("align2 kitsuOnly", "\n".join(kitsu_only) or "none")
+note("align2 unchecked or size", "\n".join(other[:40]) or "none")
+note("align2 same but some differ", "\n".join(same[:25]) or "none")
