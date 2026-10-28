@@ -300,11 +300,43 @@ actor SeasonChain {
             } else { forward = nil }
             if !moved { break }
         }
-        let result = before + [media] + after
+        var result = before + [media] + after
+        // Every season that's shown as this show anywhere in the app is in its dropdown, even
+        // when the franchise splits into two sequels the walk above doesn't both follow
+        // (Dragon Ball → Z → GT, and Super).
+        let extras = await Self.foldedSeasons(for: result)
+        let present = Set(result.map(\.id))
+        let added = extras.filter { !present.contains($0.id) && Seasons.isSeries($0.format) }
+        if !added.isEmpty {
+            var seen: Set<Int> = []
+            result = (result + added).filter { seen.insert($0.id).inserted }.sorted(by: Self.airedBefore)
+        }
         // A failed request (offline, page left mid-load) gives a partial chain: show it,
         // but don't keep it, so the next visit finds every season.
         if !failed { for m in result { cache[m.id] = result } }
         return result
+    }
+
+    /// First seasons and later seasons tied together by the app's "first season" lookups.
+    private static func foldedSeasons(for chain: [Media]) async -> [Media] {
+        var rootIds: [Int] = chain.first.map { [$0.id] } ?? []
+        var extras: [Media] = []
+        for m in chain {
+            if let saved = await SeasonCache.shared.root(for: m.id), !rootIds.contains(saved.root.id) {
+                rootIds.append(saved.root.id)
+                extras.append(saved.root)
+            }
+        }
+        for id in rootIds { extras += await SeasonCache.shared.laterSeasons(ofRoot: id) }
+        return extras
+    }
+
+    /// Air order: year, then season of the year; unknown dates go last.
+    private static func airedBefore(_ a: Media, _ b: Media) -> Bool {
+        let order = ["WINTER": 0, "SPRING": 1, "SUMMER": 2, "FALL": 3]
+        let ka = (a.seasonYear ?? Int.max, order[a.season ?? ""] ?? 4, a.id)
+        let kb = (b.seasonYear ?? Int.max, order[b.season ?? ""] ?? 4, b.id)
+        return ka < kb
     }
 
     /// Next/previous entry: a TV/ONA season if there is one, otherwise any anime in between.

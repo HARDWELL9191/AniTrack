@@ -35,9 +35,12 @@ final class AniListClient {
         return URLSession(configuration: config)
     }()
 
+    /// `waitOnRateLimit: false`: when AniList says "too many requests", fail right away
+    /// instead of waiting (for optional lookups that mustn't hold a screen up).
     func run<T: Decodable>(_ query: String,
                            variables: [String: Any] = [:],
-                           as type: T.Type) async throws -> T {
+                           as type: T.Type,
+                           waitOnRateLimit: Bool = true) async throws -> T {
         var attempt = 0
         while true {
             attempt += 1
@@ -68,7 +71,7 @@ final class AniListClient {
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
 
             if status == 429 {
-                guard attempt < 4 else { throw APIError.rateLimited }
+                guard waitOnRateLimit, attempt < 4 else { throw APIError.rateLimited }
                 let retryAfter = (response as? HTTPURLResponse)?
                     .value(forHTTPHeaderField: "Retry-After")
                     .flatMap(Double.init) ?? 5

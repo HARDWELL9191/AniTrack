@@ -17,6 +17,7 @@ struct DiscoverView: View {
     @State private var nextSeason: [Media] = []
     @State private var topRated: [Media] = []
     @State private var loadedSections = false
+    @State private var isLoadingSections = false
     @State private var browseCategory: AnimeCategory?
     @State private var sectionError: String?
 
@@ -71,7 +72,9 @@ struct DiscoverView: View {
                                            items: nextSeason)
                 }
                 if !topRated.isEmpty { HorizontalMediaSection(title: "All-time top rated", items: topRated) }
-                if !loadedSections {
+                // Only while shelves are actually loading (one failed shelf used to leave it
+                // spinning forever under the ones that did load).
+                if isLoadingSections {
                     ProgressView().frame(maxWidth: .infinity).padding(.top, 60)
                 }
             }
@@ -175,7 +178,9 @@ struct DiscoverView: View {
     }
 
     private func loadSections() async {
-        guard !loadedSections else { return }
+        guard !loadedSections, !isLoadingSections else { return }
+        isLoadingSections = true
+        defer { isLoadingSections = false }
         let current = AppModel.currentSeason()
         let upcoming = AppModel.currentSeason(offset: 1)
         // Each shelf loads on its own: one failing doesn't blank the others.
@@ -183,16 +188,19 @@ struct DiscoverView: View {
         async let s = shelf(sort: ["POPULARITY_DESC"], season: current.season, year: current.year)
         async let n = shelf(sort: ["POPULARITY_DESC"], season: upcoming.season, year: upcoming.year)
         async let r = shelf(sort: ["SCORE_DESC"])
+        // Shelves that already loaded are kept (only the missing ones matter on a retry).
         let results = [await t, await s, await n, await r]
         var failures: [Error] = []
         for (index, result) in results.enumerated() {
             switch result {
             case .success(let items):
-                switch index {
-                case 0: trending = items
-                case 1: thisSeason = items
-                case 2: nextSeason = items
-                default: topRated = items
+                withAnimation(.snappy) {
+                    switch index {
+                    case 0: trending = items
+                    case 1: thisSeason = items
+                    case 2: nextSeason = items
+                    default: topRated = items
+                    }
                 }
             case .failure(let error):
                 failures.append(error)
