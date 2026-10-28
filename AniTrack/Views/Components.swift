@@ -237,15 +237,7 @@ struct MediaCard: View {
                     .zoomSource(id: media.id, in: zoom)
                     .overlay(alignment: .bottomLeading) {
                         if let value = matchOverride ?? model.matcher.match(for: media) {
-                            Text("\(value)%")
-                                .font(.caption2.weight(.bold))
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 7)
-                                .padding(.vertical, 4)
-                                .glassEffect(.regular.tint(Theme.pinkGlass.opacity(0.55)), in: .capsule)
-                                .contentTransition(.numericText())
-                                .animation(.snappy, value: value)
-                                .padding(5)
+                            MatchBubble(value: value).padding(5)
                         }
                     }
                     .overlay(alignment: .topLeading) {
@@ -269,7 +261,7 @@ struct MediaCard: View {
         }
         .foregroundStyle(.primary)
         .contentShape(Rectangle())
-        .showActions(media)
+        .showActions(media, match: matchOverride)
     }
 }
 
@@ -293,7 +285,15 @@ struct MediaRow: View {
                     .lineLimit(1)
                 HStack(spacing: 10) {
                     ScoreBadge(score: media.averageScore)
-                    MatchBadge(media: media)
+                    // Wand outside, % in the same pink glass bubble as on covers.
+                    if let value = model.matcher.match(for: media) {
+                        HStack(spacing: 5) {
+                            Image(systemName: "wand.and.stars")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(Theme.pink)
+                            MatchBubble(value: value)
+                        }
+                    }
                     AgeBadge(mediaId: media.id)
                 }
             }

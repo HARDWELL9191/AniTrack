@@ -30,9 +30,19 @@ struct ShowActionsMenu: ViewModifier {
     @Environment(\.pushDetail) private var pushDetail
     @Environment(\.cardSheetsAllowed) private var sheetsAllowed
     let media: Media
+    /// For You's own % for a pick, so the preview shows the same number as the card.
+    var match: Int? = nil
 
     func body(content: Content) -> some View {
-        content.contextMenu {
+        // A custom preview, so only the pressed show lifts out (inside a List the system would
+        // otherwise lift the whole row of covers).
+        content
+            .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .contextMenu { menuItems } preview: { ShowMenuPreview(media: media, match: match) }
+    }
+
+    @ViewBuilder
+    private var menuItems: some View {
             let entry = model.entry(for: media.id)
             if model.canEdit && entry?.status != .PLANNING {
                 Button("Plan to watch", systemImage: "bookmark.fill") {
@@ -63,13 +73,36 @@ struct ShowActionsMenu: ViewModifier {
                     model.cardSheet = .why(media)
                 }
             }
+    }
+}
+
+/// What lifts out when you long-press a show: just that show's cover, title and bubbles.
+struct ShowMenuPreview: View {
+    @Environment(AppModel.self) private var model
+    let media: Media
+    var match: Int? = nil
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            CoverImageView(url: media.coverURL, color: media.coverImage?.color,
+                           width: 200, height: 290, cornerRadius: 12)
+                .overlay(alignment: .topLeading) { AgeBadge(mediaId: media.id).padding(6) }
+                .overlay(alignment: .bottomLeading) {
+                    if let value = match ?? model.matcher.match(for: media) { MatchBubble(value: value).padding(6) }
+                }
+            Text(media.displayTitle(model.settings.titleLanguage))
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(2)
+                .frame(width: 200, alignment: .leading)
+            ScoreBadge(score: media.averageScore)
         }
+        .padding(12)
     }
 }
 
 extension View {
-    func showActions(_ media: Media) -> some View {
-        modifier(ShowActionsMenu(media: media))
+    func showActions(_ media: Media, match: Int? = nil) -> some View {
+        modifier(ShowActionsMenu(media: media, match: match))
     }
 
     /// Gives a NavigationStack's content the "open details" action used by long-press menus.
@@ -144,6 +177,21 @@ struct WhyThisSheet: View {
 }
 
 // MARK: - Bubbles
+
+/// Match % bubble: pink-tinted Liquid Glass, white text (covers and list rows).
+struct MatchBubble: View {
+    let value: Int
+    var body: some View {
+        Text("\(value)%")
+            .font(.caption2.weight(.bold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 4)
+            .glassEffect(.regular.tint(Theme.pinkGlass.opacity(0.55)), in: .capsule)
+            .contentTransition(.numericText())
+            .animation(.snappy, value: value)
+    }
+}
 
 /// Age rating bubble: black-tinted Liquid Glass, white text (top-left of covers).
 struct AgeBubble: View {
