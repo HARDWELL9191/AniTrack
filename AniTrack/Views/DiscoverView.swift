@@ -237,13 +237,16 @@ struct DiscoverView: View {
         defer { isLoadingSections = false }
         let current = AppModel.currentSeason()
         let upcoming = AppModel.currentSeason(offset: 1)
-        // All four at once, with one shared first-season lookup.
+        // All four at once, with one shared first-season lookup. Behind shelves that are
+        // already showing, a busy AniList is skipped instead of waited for.
+        let refreshingBehind = !(trending.isEmpty && thisSeason.isEmpty && nextSeason.isEmpty && topRated.isEmpty)
+            && !showWhenDone
         let results = await model.browseShelves([
             .init(sort: ["TRENDING_DESC", "POPULARITY_DESC"]),
             .init(sort: ["POPULARITY_DESC"], season: current.season, seasonYear: current.year),
             .init(sort: ["POPULARITY_DESC"], season: upcoming.season, seasonYear: upcoming.year),
             .init(sort: ["SCORE_DESC"])
-        ])
+        ], waitOnRateLimit: !refreshingBehind)
         let failures = results.compactMap { result -> Error? in
             if case .failure(let error) = result { return error }
             return nil
@@ -255,9 +258,13 @@ struct DiscoverView: View {
                                  savedAt: Date(), seasonKey: Self.currentSeasonKey)
         // Cancelled (you left the tab mid-load) isn't an error: just try again next time.
         let realFailures = failures.filter { !AppModel.isCancellation($0) }
-        if failures.isEmpty {
+        // Saved whenever every shelf has something (a shelf that failed keeps its previous
+        // shows), so one hiccup never sends the next launch back to a spinner.
+        let complete = !fresh.trending.isEmpty && !fresh.thisSeason.isEmpty
+            && !fresh.nextSeason.isEmpty && !fresh.topRated.isEmpty
+        if complete && failures.count < results.count {
             DiskCache.saveInBackground(fresh, name: Self.shelvesFile)
-            shelvesSavedAt = fresh.savedAt
+            if failures.isEmpty { shelvesSavedAt = fresh.savedAt }   // partial: refreshed again later
         }
         if showWhenDone || !isVisible || !query.trimmingCharacters(in: .whitespaces).isEmpty {
             show(fresh)   // asked for, or not on screen right now

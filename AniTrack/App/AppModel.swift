@@ -535,14 +535,17 @@ final class AppModel {
     /// Several shelves at once, with one shared first-season lookup: a show that's in two
     /// shelves is looked up once, and every shelf is ready at the same moment. Each result is
     /// that shelf's shows, or its error (one failing shelf never blanks the others).
-    func browseShelves(_ specs: [ShelfSpec]) async -> [Result<[Media], Error>] {
+    /// `waitOnRateLimit: false` for a refresh behind shelves that are already showing: if
+    /// AniList is busy it gives up at once (the saved shelves stay) instead of waiting.
+    func browseShelves(_ specs: [ShelfSpec], waitOnRateLimit: Bool = true) async -> [Result<[Media], Error>] {
         var raw: [Result<[Media], Error>] = Array(repeating: .success([]), count: specs.count)
         await withTaskGroup(of: (Int, Result<[Media], Error>).self) { group in
             for (index, spec) in specs.enumerated() {
                 group.addTask {
                     do {
                         let page = try await self.rawPage(sort: spec.sort, season: spec.season,
-                                                          seasonYear: spec.seasonYear)
+                                                          seasonYear: spec.seasonYear,
+                                                          waitOnRateLimit: waitOnRateLimit)
                         return (index, .success(page.media))
                     } catch {
                         return (index, .failure(error))
@@ -591,7 +594,8 @@ final class AppModel {
                          maxPopularity: Int? = nil,
                          minPopularity: Int? = nil,
                          page: Int = 1,
-                         perPage: Int = 25) async throws -> (media: [Media], hasNextPage: Bool) {
+                         perPage: Int = 25,
+                         waitOnRateLimit: Bool = true) async throws -> (media: [Media], hasNextPage: Bool) {
         var vars: [String: Any] = ["page": page, "perPage": perPage, "sort": sort,
                                    "isAdult": category?.isAdultOnly == true]
         if let genres, !genres.isEmpty { vars["genres"] = genres }
@@ -606,7 +610,8 @@ final class AppModel {
         if let seasonYear { vars["seasonYear"] = seasonYear }
         if let status { vars["status"] = status }
         // With relations, so later seasons can be told apart and shown as their first season.
-        let data = try await client.run(Queries.browseWithRelations, variables: vars, as: PageData.self)
+        let data = try await client.run(Queries.browseWithRelations, variables: vars, as: PageData.self,
+                                        waitOnRateLimit: waitOnRateLimit)
         let hasNext = data.page.pageInfo?.hasNextPage ?? (data.page.media.count >= perPage)
         return (data.page.media, hasNext)
     }
