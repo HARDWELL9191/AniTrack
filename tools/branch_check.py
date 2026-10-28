@@ -1,7 +1,8 @@
 # Is every later season reachable from its first season's dropdown? (username "branches")
 exec(open("tools/seasons2_check.py").read().split("newly, both, nf")[0], globals())
-def link(m, t):
-    edges = [e for e in ((m.get("relations") or {}).get("edges") or []) if e.get("relationType") == t and (e.get("node") or {}).get("type") in (None, "ANIME")]
+t = lambda m: ((m.get("title") or {}).get("english") or (m.get("title") or {}).get("romaji") or "")[:34]
+def link(m, kind):
+    edges = [e for e in ((m.get("relations") or {}).get("edges") or []) if e.get("relationType") == kind and (e.get("node") or {}).get("type") in (None, "ANIME")]
     e = next((e for e in edges if e["node"].get("format") in SERIES), edges[0] if edges else None)
     return e["node"]["id"] if e else None
 def chain(r):
