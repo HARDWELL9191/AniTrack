@@ -97,3 +97,13 @@ if kitsu_ids:
     if d.get("data"):
         a = d["data"][0]["attributes"]
         note("kitsu episode sample", json.dumps({k: a.get(k) for k in ["number","seasonNumber","canonicalTitle","titles","synopsis","description","airdate","length","thumbnail"]})[:2500])
+
+# Shapes the Swift code depends on.
+st, d, dt, _ = kget(f"{base}/mappings?filter%5BexternalSite%5D=anilist/anime&filter%5BexternalId%5D=11617,108465&include=item&page%5Blimit%5D=20&fields%5Banime%5D=ageRating,ageRatingGuide")
+rows = d.get("data", [])
+note("kitsu shape mapping", f"HTTP {st}; rows={len(rows)}; first row attributes={json.dumps((rows[0].get('attributes') if rows else {}))[:300]}; relationships.item={json.dumps(((rows[0].get('relationships') or {}).get('item') if rows else {}))[:300]}; included={[ (x.get('type'), x.get('id'), x.get('attributes')) for x in d.get('included', [])][:3]}")
+st, raw, _ = run("query($id:Int){ Media(id:$id){ streamingEpisodes { title thumbnail site } } }", {"id": 108465})
+se = ((json.loads(raw).get("data") or {}).get("Media") or {}).get("streamingEpisodes") or []
+note("anilist streaming titles", "\n".join(f"{e.get('title')} | thumb={bool(e.get('thumbnail'))}" for e in se[:6]) + f"\n(total {len(se)}, last: {se[-1].get('title') if se else None})")
+st, d, dt, _ = kget(f"{base}/anime/{kitsu_ids.get(picked[0]['id'])}/episodes?page%5Blimit%5D=20&page%5Boffset%5D=0&sort=number&fields%5Bepisodes%5D=number,canonicalTitle,description,synopsis,thumbnail")
+note("kitsu shape episodes", f"HTTP {st}; count={(d.get('meta') or {}).get('count')}; first={json.dumps((d.get('data') or [{}])[0].get('attributes'))[:400]}")
