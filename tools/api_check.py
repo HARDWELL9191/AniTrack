@@ -45,6 +45,18 @@ def run(q, variables):
         return e.code, e.read(), time.time() - t
 
 
+if os.environ.get("ANILIST_USER", "") == "kitsu-missing":
+    import traceback
+    try:
+        _src = open("tools/kitsu_check.py").read()
+        exec(_src.split("# Shows: Tim's list")[0], globals())   # helpers + base
+        exec(open("tools/kitsu_missing.py").read(), globals())
+    except SystemExit:
+        pass
+    except Exception:
+        note("kitsu crash", traceback.format_exc()[-1500:], "error")
+    raise SystemExit(0)
+
 if os.environ.get("ANILIST_USER", "") == "kitsu":
     import traceback
     try:
