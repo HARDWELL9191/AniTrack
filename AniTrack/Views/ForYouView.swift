@@ -9,6 +9,9 @@ struct ForYouView: View {
 
     @State private var category: AnimeCategory?
     @State private var index = 0
+    /// Picks you've dealt with (planned, watched, "Not for me"): they leave the list, so the
+    /// next one takes their place, but the "Pick N" counter should still move on.
+    @State private var handled = 0
 
     private var feed: RecommendationResult? { model.feed(for: category) }
     private var picks: [Recommendation] { model.picks(for: category) }
@@ -32,6 +35,7 @@ struct ForYouView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         index = 0
+                        handled = 0
                         Task { await model.generateRecommendations(category: category, force: true) }
                     } label: {
                         Image(systemName: "arrow.clockwise")
@@ -43,7 +47,7 @@ struct ForYouView: View {
                 if model.entries.isEmpty { await model.refreshList() }
                 await model.generateRecommendations(category: category)
             }
-            .onChange(of: category) { _, _ in index = 0 }
+            .onChange(of: category) { _, _ in index = 0; handled = 0 }
             .onChange(of: index) { _, newValue in preloadIfNeeded(at: newValue) }
         }
         .pushDetailAction($path)
@@ -82,15 +86,17 @@ struct ForYouView: View {
         } else {
             let safeIndex = min(index, picks.count - 1)
             PickCard(rec: picks[safeIndex],
-                     position: safeIndex + 1,
-                     total: picks.count,
+                     position: safeIndex + 1 + handled,
+                     total: picks.count + handled,
                      moreComing: !(feed?.exhausted ?? true),
                      onNext: { next(from: safeIndex) },
                      onDismiss: {
+                         handled += 1
                          withAnimation(.snappy) { model.dismissPick(picks[safeIndex].id) }
                          preloadIfNeeded(at: safeIndex)
                      },
                      onWatched: {
+                         handled += 1
                          // markCompleted already took it out of the feed; the next pick slides in.
                          preloadIfNeeded(at: safeIndex)
                      })
@@ -138,6 +144,7 @@ struct ForYouView: View {
         withAnimation(.snappy) {
             if isLast && (feed?.exhausted ?? true) {
                 index = 0   // truly the end: wrap around
+                handled = 0
             } else {
                 index = min(current + 1, picks.count - 1)
             }
