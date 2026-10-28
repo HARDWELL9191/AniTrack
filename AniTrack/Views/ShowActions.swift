@@ -194,11 +194,15 @@ struct WhyThisSheet: View {
 
 /// Match % bubble: pink-tinted Liquid Glass, white text (covers and list rows).
 struct MatchBubble: View {
+    /// Both bubbles share this, so "PG" and "97%" come out the same size.
+    static let minTextWidth: CGFloat = 24
     let value: Int
     var body: some View {
         Text("\(value)%")
             .font(.caption2.weight(.bold))
+            .monospacedDigit()
             .foregroundStyle(.white)
+            .frame(minWidth: Self.minTextWidth)
             .padding(.horizontal, 7)
             .padding(.vertical, 4)
             .glassEffect(.regular.tint(Theme.pinkGlass.opacity(0.55)), in: .capsule)
@@ -215,7 +219,9 @@ struct AgeBubble: View {
     var body: some View {
         Text(label)
             .font(.caption2.weight(.bold))
+            .monospacedDigit()
             .foregroundStyle(.white)
+            .frame(minWidth: MatchBubble.minTextWidth)
             .padding(.horizontal, 7)
             .padding(.vertical, 4)
             .glassEffect(.regular.tint(.black.opacity(0.55)), in: .capsule)
