@@ -57,6 +57,14 @@ if os.environ.get("ANILIST_USER", "") == "thumbs":
         note("thumbs crash", traceback.format_exc()[-1500:], "error")
     raise SystemExit(0)
 
+if os.environ.get("ANILIST_USER", "") == "branches":
+    import traceback
+    try:
+        exec(open("tools/branch_check.py").read(), globals())
+    except Exception:
+        note("branches crash", traceback.format_exc()[-1500:], "error")
+    raise SystemExit(0)
+
 if os.environ.get("ANILIST_USER", "") == "seasons2":
     import traceback
     try:
