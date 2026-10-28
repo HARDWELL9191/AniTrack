@@ -34,11 +34,16 @@ def prequels(m):
     return [e for e in ((m.get("relations") or {}).get("edges") or [])
             if e.get("relationType") == "PREQUEL" and (e.get("node") or {}).get("type") in (None, "ANIME")
             and same_show(m.get("title"), e["node"].get("title"))]
+def ends_number(t):
+    for k in ("romaji", "english"):
+        w = words((t or {}).get(k))
+        if len(w) > 1 and w[-1].isdigit() and 2 <= int(w[-1]) <= 20: return True
+    return False
 def later_new(m):
     if m.get("format") not in SERIES: return False
     p = prequels(m)
     if any(e["node"].get("format") in SERIES for e in p): return True
-    return bool(p) and has_marker(m.get("title"))
+    return bool(p) and (has_marker(m.get("title")) or ends_number(m.get("title")))
 def later_old(m): return m.get("format") in SERIES and has_marker(m.get("title")) and bool(prequels(m))
 def prequel_id(m):
     p = prequels(m)
@@ -88,6 +93,8 @@ newly, both, nf = [], [], []
 t = lambda m: ((m.get("title") or {}).get("english") or (m.get("title") or {}).get("romaji") or "")[:34]
 for m in pool.values():
     n, o = later_new(m), later_old(m)
+    if n and not (any(e["node"].get("format") in SERIES for e in prequels(m)) or has_marker(m.get("title"))):
+        nf.append("NUMBER RULE: " + t(m) + " -> " + (t(root(m)[0]) if root(m)[0] else "no root"))
     if n:
         r = root(m)[0]
         line = f"{t(m)} ({m['format']}) -> {t(r) + ' (' + r['format'] + ')' if r else 'NO ROOT (kept)'}"
