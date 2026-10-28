@@ -25,6 +25,14 @@ extension View {
                 .navigationTransition(.zoom(sourceID: link.id, in: namespace))
         }
     }
+
+    /// Detail destination inside a sheet: the normal slide-in. (The zoom inside a sheet
+    /// makes the page jump to full screen and the sheet vanish and come back on the way out.)
+    func plainMediaDestination() -> some View {
+        navigationDestination(for: MediaLink.self) { link in
+            MediaDetailView(mediaId: link.id)
+        }
+    }
 }
 
 extension Color {

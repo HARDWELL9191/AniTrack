@@ -66,7 +66,6 @@ struct MoreLikeThisSheet: View {
     @State private var path = NavigationPath()
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
-    @Namespace private var zoom
     let media: Media
 
     @State private var items: [Media] = []
@@ -90,8 +89,9 @@ struct MoreLikeThisSheet: View {
             .listStyle(.plain)
             .navigationTitle("Like \(media.displayTitle(model.settings.titleLanguage))")
             .navigationBarTitleDisplayMode(.inline)
-            .mediaDestination(zoom: zoom)
-            .environment(\.zoomNamespace, zoom)
+            .plainMediaDestination()
+            // No zoom namespace in here: covers aren't zoom sources inside a sheet.
+            .environment(\.zoomNamespace, nil)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
             }
