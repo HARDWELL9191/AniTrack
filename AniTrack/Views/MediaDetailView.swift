@@ -110,7 +110,7 @@ struct MediaDetailView: View {
 
                 tags(media)
 
-                if let edges = d.relations?.edges?.filter({ $0.node?.type == "ANIME" && $0.node?.format != "MOVIE" }), !edges.isEmpty {
+                if let edges = d.relations?.edges?.filter({ $0.node?.type == "ANIME" }), !edges.isEmpty {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Related").font(.headline).padding(.horizontal)
                         ScrollView(.horizontal, showsIndicators: false) {
