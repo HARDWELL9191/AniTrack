@@ -45,6 +45,16 @@ def run(q, variables):
         return e.code, e.read(), time.time() - t
 
 
+if os.environ.get("ANILIST_USER", "") == "kitsu":
+    import traceback
+    try:
+        exec(open("tools/kitsu_check.py").read(), globals())
+    except SystemExit:
+        pass
+    except Exception:
+        note("kitsu crash", traceback.format_exc()[-1500:], "error")
+    raise SystemExit(0)
+
 if os.environ.get("ANILIST_USER", "") == "twins":
     # Only the taste-twins check (keeps AniList's rate limit for it).
     import traceback
