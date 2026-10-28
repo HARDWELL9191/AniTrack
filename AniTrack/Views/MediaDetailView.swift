@@ -38,6 +38,8 @@ struct MediaDetailView: View {
             detail = try await model.detail(id: mediaId)
             loadError = nil
         } catch {
+            // Cancelled (page left mid-load): keep loading, it retries when it reappears.
+            if AppModel.isCancellation(error) { return }
             loadError = error.localizedDescription
         }
     }

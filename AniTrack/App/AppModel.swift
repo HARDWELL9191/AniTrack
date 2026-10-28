@@ -470,7 +470,7 @@ final class AppModel {
     }
 
     /// A cancelled request is not something to show you.
-    private static func isCancellation(_ error: Error) -> Bool {
+    static func isCancellation(_ error: Error) -> Bool {
         if error is CancellationError { return true }
         if let url = error as? URLError, url.code == .cancelled { return true }
         return false
@@ -836,6 +836,8 @@ final class AppModel {
             allCategories = featured + rest
             DiskCache.save(Cached(categories: allCategories, savedAt: Date()), name: "categories")
         } catch {
+            // Cancelled (screen left mid-load): leave it empty so it loads properly next time.
+            if Self.isCancellation(error) { return }
             // Offline: fall back to the built-in featured list.
             allCategories = AnimeCategory.featured
         }

@@ -201,6 +201,8 @@ struct CategoryBrowseView: View {
             page += 1
             error = nil
         } catch {
+            // Cancelled (screen left mid-load): not an error, the next appearance loads it.
+            if AppModel.isCancellation(error) { return }
             self.error = error.localizedDescription
             canLoadMore = false
         }

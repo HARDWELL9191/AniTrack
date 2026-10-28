@@ -178,19 +178,38 @@ struct DiscoverView: View {
         guard !loadedSections else { return }
         let current = AppModel.currentSeason()
         let upcoming = AppModel.currentSeason(offset: 1)
-        do {
-            async let t = model.browse(sort: ["TRENDING_DESC", "POPULARITY_DESC"])
-            async let s = model.browse(sort: ["POPULARITY_DESC"], season: current.season, seasonYear: current.year)
-            async let n = model.browse(sort: ["POPULARITY_DESC"], season: upcoming.season, seasonYear: upcoming.year)
-            async let r = model.browse(sort: ["SCORE_DESC"])
-            trending = try await t
-            thisSeason = try await s
-            nextSeason = try await n
-            topRated = try await r
-            sectionError = nil
-        } catch {
-            sectionError = error.localizedDescription
+        // Each shelf loads on its own: one failing doesn't blank the others.
+        async let t = shelf(sort: ["TRENDING_DESC", "POPULARITY_DESC"])
+        async let s = shelf(sort: ["POPULARITY_DESC"], season: current.season, year: current.year)
+        async let n = shelf(sort: ["POPULARITY_DESC"], season: upcoming.season, year: upcoming.year)
+        async let r = shelf(sort: ["SCORE_DESC"])
+        let results = [await t, await s, await n, await r]
+        var failures: [Error] = []
+        for (index, result) in results.enumerated() {
+            switch result {
+            case .success(let items):
+                switch index {
+                case 0: trending = items
+                case 1: thisSeason = items
+                case 2: nextSeason = items
+                default: topRated = items
+                }
+            case .failure(let error):
+                failures.append(error)
+            }
         }
-        loadedSections = true
+        // Cancelled (you left the tab mid-load) isn't an error: just try again next time.
+        let realFailures = failures.filter { !AppModel.isCancellation($0) }
+        sectionError = realFailures.count == results.count ? realFailures.first?.localizedDescription : nil
+        // Anything missing is fetched again the next time Discover appears.
+        loadedSections = failures.isEmpty
+    }
+
+    private func shelf(sort: [String], season: String? = nil, year: Int? = nil) async -> Result<[Media], Error> {
+        do {
+            return .success(try await model.browse(sort: sort, season: season, seasonYear: year))
+        } catch {
+            return .failure(error)
+        }
     }
 }

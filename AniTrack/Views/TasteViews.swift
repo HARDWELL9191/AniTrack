@@ -101,7 +101,6 @@ struct MoreLikeThisSheet: View {
 
     private func load() async {
         guard items.isEmpty else { return }
-        defer { isLoading = false }
         do {
             let detail = try await model.detail(id: media.id)
             items = (detail.recommendations?.nodes ?? [])
@@ -110,8 +109,12 @@ struct MoreLikeThisSheet: View {
                 .filter { !model.franchises.contains($0) }
                 .filter { !(model.settings.hideChinese && $0.countryOfOrigin == "CN") }
                 .sorted { (model.matcher.match(for: $0) ?? 0) > (model.matcher.match(for: $1) ?? 0) }
+            isLoading = false
         } catch {
+            // Cancelled: keep the spinner; it loads again when the sheet reappears.
+            if AppModel.isCancellation(error) { return }
             self.error = error.localizedDescription
+            isLoading = false
         }
     }
 }
