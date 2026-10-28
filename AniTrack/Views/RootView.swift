@@ -50,6 +50,16 @@ struct MainTabView: View {
             RatePromptView(media: media)
                 .presentationDetents([.height(360)])
         }
+        // Opened from a show card's long-press menu.
+        .sheet(item: $model.cardSheet) { sheet in
+            switch sheet {
+            case .moreLikeThis(let media):
+                MoreLikeThisSheet(media: media)
+            case .why(let media):
+                WhyThisSheet(media: media)
+                    .presentationDetents([.medium])
+            }
+        }
     }
 }
 

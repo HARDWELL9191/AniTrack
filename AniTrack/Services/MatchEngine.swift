@@ -140,6 +140,21 @@ final class MatchEngine {
 
     // MARK: AI layer
 
+    /// AI became available again (toggle turned on, Low Power Mode or heat ended).
+    /// Rebuilds the taste vector from saved analysis if it's missing and lets badges that were
+    /// computed without AI pick it up. When AI is off, nothing is touched.
+    func aiAvailabilityChanged() {
+        guard aiEnabled() else { return }
+        rebuildIfNeeded()
+        var changed = false
+        for id in Array(memo.keys) where semantic[id] == nil {
+            memo[id] = nil
+            changed = true
+        }
+        if tasteVector == nil { refreshTasteVector() }
+        if changed { version &+= 1 }
+    }
+
     private func refreshTasteVector() {
         tasteTask?.cancel()
         guard aiEnabled() else { return }

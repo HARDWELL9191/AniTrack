@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct LibraryView: View {
+    @State private var path = NavigationPath()
     @Environment(AppModel.self) private var model
     @Namespace private var zoom
 
@@ -60,7 +61,7 @@ struct LibraryView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             List {
                 // Status picker lives inside the list (a top safe-area inset was hidden
                 // behind the large navigation title on iOS 27).
@@ -110,6 +111,7 @@ struct LibraryView: View {
                 }
             }
         }
+        .pushDetailAction($path)
     }
 
     /// Status dropdown: one glass button showing the current list and its count.

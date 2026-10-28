@@ -29,4 +29,7 @@ struct AniTrackApp: App {
 enum Theme {
     static let accent = Color(red: 0.24, green: 0.60, blue: 1.0)
     static let pink = Color(red: 0.98, green: 0.45, blue: 0.62)
+    /// Tint of the match % glass bubble: the same pink, a little darker so it stands out on
+    /// bright covers (used at the same glass opacity as before).
+    static let pinkGlass = Color(red: 0.86, green: 0.33, blue: 0.50)
 }

@@ -557,3 +557,11 @@ struct CategoryCollectionData: Decodable {
 struct MediaLink: Hashable {
     let id: Int
 }
+
+
+struct StreamingEpisodesData: Decodable {
+    struct Episode: Decodable { let title: String?; let thumbnail: String?; let url: String?; let site: String? }
+    struct M: Decodable { let id: Int; let streamingEpisodes: [Episode]? }
+    let media: M?
+    enum CodingKeys: String, CodingKey { case media = "Media" }
+}

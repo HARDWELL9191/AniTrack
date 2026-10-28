@@ -36,7 +36,10 @@ struct SettingsView: View {
 
                 Section {
                     Toggle("On-device AI ranking", isOn: $settings.useOnDeviceAI)
-                        .onChange(of: settings.useOnDeviceAI) { _, _ in model.invalidatePicks() }
+                        .onChange(of: settings.useOnDeviceAI) { _, _ in
+                            model.invalidatePicks()
+                            model.aiAvailabilityChanged()
+                        }
                     Toggle("Include unreleased shows", isOn: $settings.includeUnreleased)
                         .onChange(of: settings.includeUnreleased) { _, _ in model.invalidatePicks() }
                     Button("Rebuild picks now") {

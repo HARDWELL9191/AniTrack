@@ -242,11 +242,14 @@ struct MediaCard: View {
                                 .foregroundStyle(.white)
                                 .padding(.horizontal, 7)
                                 .padding(.vertical, 4)
-                                .glassEffect(.regular.tint(Theme.pink.opacity(0.55)), in: .capsule)
+                                .glassEffect(.regular.tint(Theme.pinkGlass.opacity(0.55)), in: .capsule)
                                 .contentTransition(.numericText())
                                 .animation(.snappy, value: value)
                                 .padding(5)
                         }
+                    }
+                    .overlay(alignment: .topLeading) {
+                        AgeBadge(mediaId: media.id).padding(5)
                     }
                 if let entry = model.entry(for: media.id) {
                     Image(systemName: entry.status.symbol)
@@ -265,6 +268,8 @@ struct MediaCard: View {
             ScoreBadge(score: media.averageScore)
         }
         .foregroundStyle(.primary)
+        .contentShape(Rectangle())
+        .showActions(media)
     }
 }
 
@@ -289,11 +294,14 @@ struct MediaRow: View {
                 HStack(spacing: 10) {
                     ScoreBadge(score: media.averageScore)
                     MatchBadge(media: media)
+                    AgeBadge(mediaId: media.id)
                 }
             }
             Spacer(minLength: 0)
         }
         .padding(.vertical, 2)
+        .contentShape(Rectangle())
+        .showActions(media)
     }
 
     private var defaultSubtitle: String {

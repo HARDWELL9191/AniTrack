@@ -282,6 +282,16 @@ enum Queries {
     }
     """
 
+    /// Episode titles and thumbnails from official streaming sites (mostly Crunchyroll).
+    static let streamingEpisodes = """
+    query ($id: Int) {
+      Media(id: $id) {
+        id
+        streamingEpisodes { title thumbnail url site }
+      }
+    }
+    """
+
     /// Your anime custom list names (needed before adding "Not for me", so none are lost).
     static let listOptions = """
     query {

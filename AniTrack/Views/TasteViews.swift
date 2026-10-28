@@ -62,6 +62,7 @@ struct RatePromptView: View {
 
 /// Fan recommendations for one show, re-ordered by *your* match.
 struct MoreLikeThisSheet: View {
+    @State private var path = NavigationPath()
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Namespace private var zoom
@@ -72,7 +73,7 @@ struct MoreLikeThisSheet: View {
     @State private var error: String?
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             List {
                 if isLoading {
                     HStack { Spacer(); ProgressView(); Spacer() }
@@ -94,6 +95,8 @@ struct MoreLikeThisSheet: View {
             }
             .task { await load() }
         }
+        .pushDetailAction($path)
+        .environment(\.cardSheetsAllowed, false)
     }
 
     private func load() async {

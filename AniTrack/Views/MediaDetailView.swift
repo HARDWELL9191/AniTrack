@@ -57,6 +57,7 @@ struct MediaDetailView: View {
                 HStack(alignment: .bottom, spacing: 14) {
                     CoverImageView(url: media.coverURL, color: media.coverImage?.color,
                                    width: 110, height: 160, cornerRadius: 10)
+                        .overlay(alignment: .topLeading) { AgeBadge(mediaId: media.id).padding(5) }
                         .shadow(color: .black.opacity(0.25), radius: 8, y: 4)
                     VStack(alignment: .leading, spacing: 6) {
                         Text(media.displayTitle(model.settings.titleLanguage))
@@ -68,6 +69,12 @@ struct MediaDetailView: View {
                         HStack(spacing: 12) {
                             ScoreBadge(score: media.averageScore)
                             MatchBadge(media: media, showWord: true)
+                        }
+                        // "13+ · Teens 13 or older" (from Kitsu, when it knows the show).
+                        if let age = model.ages.rating(for: media.id)?.explanation {
+                            Label(age, systemImage: "checkmark.shield")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -96,6 +103,8 @@ struct MediaDetailView: View {
                         .font(.subheadline)
                 }
                 .padding(.horizontal)
+
+                EpisodesSection(media: media)
 
                 tags(media)
 

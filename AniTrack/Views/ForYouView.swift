@@ -3,6 +3,7 @@ import SwiftUI
 /// "Ask Hoshi": one personal pick at a time, like a friend recommending a show.
 /// The feed never stops: near the end it quietly digs one round deeper and appends more.
 struct ForYouView: View {
+    @State private var path = NavigationPath()
     @Environment(AppModel.self) private var model
     @Namespace private var zoom
 
@@ -13,7 +14,7 @@ struct ForYouView: View {
     private var picks: [Recommendation] { model.picks(for: category) }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             ScrollView {
                 VStack(spacing: 12) {
                     CategoryChipsBar(selected: $category)
@@ -45,6 +46,7 @@ struct ForYouView: View {
             .onChange(of: category) { _, _ in index = 0 }
             .onChange(of: index) { _, newValue in preloadIfNeeded(at: newValue) }
         }
+        .pushDetailAction($path)
     }
 
     /// Start loading the next round a few picks before the end, so "Another pick" never stalls.
@@ -177,6 +179,7 @@ struct PickCard: View {
             HStack(alignment: .top, spacing: 14) {
                 CoverImageView(url: rec.media.coverURL, color: rec.media.coverImage?.color,
                                width: 120, height: 174, cornerRadius: 12)
+                    .overlay(alignment: .topLeading) { AgeBadge(mediaId: rec.media.id).padding(6) }
                     .zoomSource(id: rec.media.id, in: zoom)
                     .shadow(color: .black.opacity(0.2), radius: 8, y: 4)
                 VStack(alignment: .leading, spacing: 8) {

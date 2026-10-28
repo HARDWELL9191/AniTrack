@@ -3,6 +3,7 @@ import SwiftUI
 /// Suggestion-first Home: your picks, the best matches airing this season, which planned
 /// show fits you best right now, and what's trending, all with personal match %.
 struct HomeView: View {
+    @State private var path = NavigationPath()
     @Environment(AppModel.self) private var model
     @Namespace private var zoom
     @State private var trending: [Media] = []
@@ -14,7 +15,7 @@ struct HomeView: View {
     @State private var surprise: [Media] = []
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             List {
                 if let viewer = model.viewer {
                     Section { ProfileHeader(viewer: viewer) }
@@ -35,7 +36,7 @@ struct HomeView: View {
                 let planning = planningByMatch
                 if !planning.isEmpty {
                     Section {
-                        cardRow(planning)
+                        cardRow(planning, suggestions: false)
                     } header: {
                         sectionHeader("Start next · best fit from Planning", action: "All") { model.selectedTab = .lists }
                     }
@@ -79,7 +80,7 @@ struct HomeView: View {
                 let watching = model.entries(in: [.CURRENT, .REPEATING])
                 if !watching.isEmpty {
                     Section {
-                        cardRow(watching.map(\.media))
+                        cardRow(watching.map(\.media), suggestions: false)
                     } header: {
                         Text("Currently watching")
                     }
@@ -110,6 +111,7 @@ struct HomeView: View {
                 if model.isLoadingList && model.entries.isEmpty { ProgressView("Loading your list…") }
             }
         }
+        .pushDetailAction($path)
     }
 
     /// This season's shows you haven't added, ordered by your match (cheap: memoized per show).
@@ -170,11 +172,17 @@ extension HomeView {
         }
     }
 
-    /// Horizontal row of cover cards inside a List section.
-    func cardRow(_ items: [Media], matches: [Int: Int] = [:], width: CGFloat = 104) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+    /// Horizontal row of cover cards inside a List section. Suggestion rows drop a show as soon
+    /// as you plan it, watch it or say "Not for me" (the next one slides into its place);
+    /// rows of your own list (Planning, Currently watching) pass `suggestions: false`.
+    func cardRow(_ items: [Media], matches: [Int: Int] = [:], width: CGFloat = 104,
+                 suggestions: Bool = true) -> some View {
+        let shown = suggestions
+            ? items.filter { model.entry(for: $0.id) == nil && !model.settings.dismissedPicks.contains($0.id) }
+            : items
+        return ScrollView(.horizontal, showsIndicators: false) {
             LazyHStack(alignment: .top, spacing: 12) {
-                ForEach(items) { media in
+                ForEach(shown) { media in
                     NavigationLink(value: MediaLink(id: media.id)) {
                         MediaCard(media: media, width: width, matchOverride: matches[media.id])
                     }
@@ -183,6 +191,7 @@ extension HomeView {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
+            .animation(.snappy, value: shown.map(\.id))
         }
         .listRowInsets(EdgeInsets())
         .listRowBackground(Color.clear)

@@ -44,6 +44,10 @@ final class AppModel {
 
     /// When set, a quick "how did you like it?" sheet appears (scores sharpen picks the most).
     var ratePrompt: Media?
+    /// "More like this" / "Why would I like this?" opened from a card's long-press menu.
+    var cardSheet: CardSheet?
+    /// Age ratings for covers (Kitsu), saved on the phone for good.
+    let ages = AgeRatings()
 
     private let defaults = UserDefaults.standard
     private static let tokenKey = "anilistToken"
@@ -53,6 +57,15 @@ final class AppModel {
     init() {
         let settings = self.settings
         matcher.aiEnabled = { settings.useOnDeviceAI && SemanticEngine.shouldRunNow }
+        // Low Power Mode off / phone cooled down: let the AI part of match % catch up.
+        for name in [Notification.Name.NSProcessInfoPowerStateDidChange,
+                     ProcessInfo.thermalStateDidChangeNotification] {
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    if SemanticEngine.shouldRunNow { self?.aiAvailabilityChanged() }
+                }
+            }
+        }
     }
 
     // MARK: - Lifecycle
@@ -319,13 +332,13 @@ final class AppModel {
     }
 
     /// Marks a show as fully watched and moves it to Completed (keeps your score if you have one).
-    func markCompleted(_ media: Media) async {
+    func markCompleted(_ media: Media, askRating: Bool = true) async {
         let existing = entry(for: media.id)
         let progress = media.episodes ?? media.availableEpisodes ?? existing?.progress
         do {
             // scoreRaw nil = AniList keeps whatever score you already gave it.
             try await save(media: media, status: .COMPLETED, progress: progress, scoreRaw: nil)
-            if (existing?.scoreValue ?? 0) == 0 { ratePrompt = media }
+            if askRating && (existing?.scoreValue ?? 0) == 0 { ratePrompt = media }
             // It's on your list now, so it no longer belongs in any picks feed (not a dislike).
             removeFromFeeds(media.id)
         } catch {
@@ -569,7 +582,24 @@ final class AppModel {
         for (key, value) in feeds { DiskCache.saveInBackground(value, name: feedCacheName(key: key)) }
     }
 
-    func dismissPick(_ mediaId: Int) {
+    /// Long-press "Plan to watch": adds it to Planning (it then leaves Home rows and picks).
+    func planToWatch(_ media: Media) async {
+        do {
+            try await save(media: media, status: .PLANNING, progress: nil, scoreRaw: nil)
+            removeFromFeeds(media.id)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// The on-device AI setting changed, or Low Power Mode / heat ended: bring the AI part of
+    /// match % back right away (saved analysis is reused). Turning AI off changes nothing.
+    func aiAvailabilityChanged() {
+        matcher.aiAvailabilityChanged()
+    }
+
+    func dismissPick(_ mediaId: Int, media: Media? = nil) {
+        if let media, notForMeMedia[mediaId] == nil { notForMeMedia[mediaId] = media }
         settings.dismissedPicks.insert(mediaId)
         ensureNotForMeLoaded()
         if case .loggedIn = mode, notForMeEntries[mediaId] == nil {

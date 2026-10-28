@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct DiscoverView: View {
+    @State private var path = NavigationPath()
     @Environment(AppModel.self) private var model
     @Namespace private var zoom
 
@@ -20,7 +21,7 @@ struct DiscoverView: View {
     @State private var sectionError: String?
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             Group {
                 if query.trimmingCharacters(in: .whitespaces).isEmpty {
                     browseSections
@@ -48,6 +49,7 @@ struct DiscoverView: View {
             .navigationDestination(item: $browseCategory) { CategoryBrowseView(category: $0) }
             .task { await loadSections() }
         }
+        .pushDetailAction($path)
     }
 
     private var browseSections: some View {
