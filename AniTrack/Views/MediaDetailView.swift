@@ -10,6 +10,8 @@ struct MediaDetailView: View {
     @State private var showEditor = false
     @State private var expanded = false
     @State private var showSpoilers = false
+    /// Fan recommendations with later seasons swapped for their first season.
+    @State private var recommendations: [Media] = []
 
     var body: some View {
         Group {
@@ -35,8 +37,12 @@ struct MediaDetailView: View {
 
     private func load() async {
         do {
-            detail = try await model.detail(id: mediaId)
+            let loaded = try await model.detail(id: mediaId)
+            detail = loaded
             loadError = nil
+            let raw = (loaded.recommendations?.nodes ?? []).compactMap(\.mediaRecommendation)
+            recommendations = raw   // shown right away; first seasons swapped in below
+            recommendations = await SeasonRoots.collapse(raw, client: model.client)
         } catch {
             // Cancelled (page left mid-load): keep loading, it retries when it reappears.
             if AppModel.isCancellation(error) { return }
@@ -110,11 +116,13 @@ struct MediaDetailView: View {
 
                 tags(media)
 
-                // Other seasons of this show are in the Episodes season dropdown, not here; movies,
-                // OVAs, spin-offs and side stories stay.
+                // Other seasons of this show (its TV/ONA prequels and sequels) are in the Episodes
+                // season dropdown, not here; movies, OVAs, spin-offs and side stories stay.
                 if let edges = d.relations?.edges?.filter({ edge in
                     guard let node = edge.node, node.type == "ANIME" else { return false }
-                    return !(Seasons.isSeries(node.format) && Seasons.sameShow(media.title, node.title))
+                    let isSeason = (edge.relationType == "PREQUEL" || edge.relationType == "SEQUEL")
+                        && Seasons.isSeries(node.format) && Seasons.sameShow(media.title, node.title)
+                    return !isSeason
                 }), !edges.isEmpty {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Related").font(.headline).padding(.horizontal)
@@ -141,7 +149,8 @@ struct MediaDetailView: View {
                 }
 
                 // Season 2+ of other shows is left out (their Season 1 shows up instead, elsewhere).
-                let recs = (d.recommendations?.nodes ?? []).compactMap(\.mediaRecommendation)
+                let recs = recommendations
+                    .filter { $0.id != media.id }
                     .filter { $0.isAdult != true && !$0.isMovie && !(model.settings.hideChinese && $0.countryOfOrigin == "CN") && !$0.isLaterSeason }
                     .filter { model.entry(for: $0.id) == nil && !model.franchises.contains($0) }   // planned/watched stay out
                     .filter { !model.settings.dismissedPicks.contains($0.id) }

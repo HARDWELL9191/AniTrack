@@ -211,7 +211,8 @@ extension HomeView {
         guard season.isEmpty || force else { return }
         let current = AppModel.currentSeason()
         async let seasonal = model.browse(sort: ["POPULARITY_DESC"], season: current.season,
-                                          seasonYear: current.year, firstSeasonsOnly: true, perPage: 50)
+                                          seasonYear: current.year, firstSeasonsOnly: true,
+                                          dropLaterSeasons: true, perPage: 50)
         async let hot = model.browse(sort: ["TRENDING_DESC", "POPULARITY_DESC"], firstSeasonsOnly: true, perPage: 20)
         if let items = try? await seasonal { season = items }
         if let items = try? await hot { trending = items.filter { model.entry(for: $0.id) == nil } }
