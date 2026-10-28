@@ -29,7 +29,7 @@ def chain(start_id):
         if not moved: break
     return before + [m0] + after
 rx = re.compile(r"^(?:Episode|Ep\.?)\s*(\d+)(\.\d+)?\s*[-–—:]?\s*(.*)$", re.I)
-def streaming(mid, later):
+def streaming(mid, later, expected):
     st, raw, _ = run(query("streamingEpisodes"), {"id": mid})
     se = (((json.loads(raw).get("data") or {}).get("Media") or {}).get("streamingEpisodes")) or []
     out = []
@@ -42,6 +42,8 @@ def streaming(mid, later):
         if first > 1:
             if not later: return []
             out = [(n - first + 1, t, th) for n, t, th in out]
+        elif later and expected and len(out) > expected + 2:
+            return []
     return out
 lines = []
 for start in [108511, 127720, 101922]:   # Slime S2, Mushoku Part 2, Demon Slayer S1
@@ -50,11 +52,11 @@ for start in [108511, 127720, 101922]:   # Slime S2, Mushoku Part 2, Demon Slaye
     time.sleep(1.5)
 note("episodes seasons", "\n".join(lines))
 lines = []
-for mid in [127720, 108511, 101280, 101922, 142329]:
+for mid in [127720, 108511, 101280, 101922, 142329, 146065, 21355, 108632]:
     time.sleep(1.5)
     m = media_by_ids([mid])[mid]
-    later = any(e.get("relationType") == "PREQUEL" and (e.get("node") or {}).get("format") in SERIES for e in ((m.get("relations") or {}).get("edges") or []))
+    later = any(e.get("relationType") == "PREQUEL" and (e.get("node") or {}).get("type") in (None, "ANIME") for e in ((m.get("relations") or {}).get("edges") or []))
     time.sleep(1.0)
-    s = streaming(mid, later)
+    s = streaming(mid, later, m.get("episodes"))
     lines.append(f"{(m['title'].get('english') or m['title'].get('romaji'))[:30]} (eps {m.get('episodes')}): " + "; ".join(f"{n}:{(t or '')[:22]}{'*' if th else ''}" for n, t, th in sorted(s)[:4]) + f" … total parsed {len(s)} (later part: {later})")
 note("episodes merge", "\n".join(lines))

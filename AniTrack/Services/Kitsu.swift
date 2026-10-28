@@ -357,7 +357,8 @@ actor EpisodeService {
             memory[media.id] = saved
             return saved
         }
-        async let streaming = streamingEpisodes(media.id, laterPart: Self.hasSeriesPrequel(media), client: client)
+        async let streaming = streamingEpisodes(media.id, laterPart: Self.hasPrequel(media),
+                                                expected: media.episodes, client: client)
         async let kitsuId = KitsuClient.shared.kitsuId(for: .init(id: media.id, mal: media.idMal))
         let fromAniList = await streaming
         let kid = await kitsuId
@@ -436,14 +437,15 @@ actor EpisodeService {
         }
     }
 
-    /// Season 2+, or the second cour of a season (has a TV/ONA entry before it).
-    private static func hasSeriesPrequel(_ media: Media) -> Bool {
+    /// Season 2+ or a later cour: anything comes before it (Slime S2's prequel is an OVA).
+    private static func hasPrequel(_ media: Media) -> Bool {
         (media.relations?.edges ?? []).contains {
-            $0.relationType == "PREQUEL" && Seasons.isSeries($0.node?.format)
+            $0.relationType == "PREQUEL" && ($0.node?.type == nil || $0.node?.type == "ANIME")
         }
     }
 
-    private func streamingEpisodes(_ id: Int, laterPart: Bool, client: AniListClient) async -> [EpisodeInfo] {
+    private func streamingEpisodes(_ id: Int, laterPart: Bool, expected: Int?,
+                                   client: AniListClient) async -> [EpisodeInfo] {
         guard let data = try? await client.run(Queries.streamingEpisodes, variables: ["id": id],
                                                as: StreamingEpisodesData.self) else { return [] }
         var result: [EpisodeInfo] = []
@@ -459,6 +461,10 @@ actor EpisodeService {
         if let first = result.map(\.number).min(), first > 1 {
             guard laterPart else { return [] }
             result = result.map { var e = $0; e.number -= first - 1; return e }
+        } else if laterPart, let expected, result.count > expected + 2 {
+            // A later season whose list starts at 1 but is far longer than the season itself
+            // is the earlier season's list (e.g. Demon Slayer arcs), so it isn't used.
+            return []
         }
         return result
     }
