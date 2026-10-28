@@ -218,6 +218,16 @@ enum Seasons {
         split(t?.romaji).marked || split(t?.english).marked
     }
 
+    /// Title ends in a plain season number ("KonoSuba 3", "Sound! Euphonium 3"). Only used
+    /// together with a same-show prequel, since many first seasons end in a number too.
+    static func endsWithSeasonNumber(_ t: MediaTitle?) -> Bool {
+        for title in [t?.romaji, t?.english] {
+            let w = words(title)
+            if w.count > 1, let n = Int(w[w.count - 1]), (2...20).contains(n) { return true }
+        }
+        return false
+    }
+
     /// Same show, ignoring season markers ("X 2nd Season" ↔ "X"). Exact words, not a fuzzy prefix.
     static func sameBase(_ a: MediaTitle?, _ b: MediaTitle?) -> Bool {
         for (x, y) in [(a?.romaji, b?.romaji), (a?.english, b?.english)] {
@@ -282,7 +292,9 @@ extension Media {
             return (node.type == nil || node.type == "ANIME") && Seasons.sameShow(title, node.title)
         }
         if prequels.contains(where: { Seasons.isSeries($0.node?.format) }) { return true }
-        return !prequels.isEmpty && Seasons.hasSeasonMarker(title)
+        // Something of the same show comes before it (KonoSuba 3 ← the movie) and the title
+        // says it's a later season.
+        return !prequels.isEmpty && (Seasons.hasSeasonMarker(title) || Seasons.endsWithSeasonNumber(title))
     }
 }
 
