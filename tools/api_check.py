@@ -57,6 +57,14 @@ if os.environ.get("ANILIST_USER", "") == "thumbs":
         note("thumbs crash", traceback.format_exc()[-1500:], "error")
     raise SystemExit(0)
 
+if os.environ.get("ANILIST_USER", "") == "konosuba":
+    import traceback
+    try:
+        exec(open("tools/konosuba_check.py").read(), globals())
+    except Exception:
+        note("konosuba crash", traceback.format_exc()[-1500:], "error")
+    raise SystemExit(0)
+
 if os.environ.get("ANILIST_USER", "") == "listcheck":
     import traceback
     try:
