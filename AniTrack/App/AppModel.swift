@@ -907,9 +907,16 @@ final class AppModel {
                 let saved = try await self.writeEntry(media: season, status: status, progress: progress, scoreRaw: score)
                 written.append((saved, season, status))
             }
+            var removedEntries: [Int: ListEntry] = [:]   // mediaId → entry taken off the list
+            if change == .removed {
+                // Gone from your list at once; AniList is caught up in the background below.
+                for season in seasons { if let e = entry(for: season.id) { removedEntries[season.id] = e } }
+                let ids = Set(removedEntries.values.map(\.id))
+                if !ids.isEmpty { entries.removeAll { ids.contains($0.id) } }
+            }
             for season in seasons {
                 guard viewer?.id == account, !Task.isCancelled else { break }   // what's written still lands
-                let current = entry(for: season.id)
+                let current = entry(for: season.id) ?? removedEntries[season.id]
                 do {
                     var wrote = true
                     switch change {
@@ -955,6 +962,7 @@ final class AppModel {
                 entries = list
                 removeKnownFromFeeds()
             }
+            if failed && change == .removed && viewer?.id == account { await refreshList() }
             if failed {
                 errorMessage = "Couldn't update every season of \(media.displayTitle(settings.titleLanguage)) on AniList. Try again in a moment."
             }
