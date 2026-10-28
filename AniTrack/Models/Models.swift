@@ -134,6 +134,8 @@ struct MediaRelations: Codable, Hashable {
         let id: Int
         let type: String?
         let format: String?
+        /// Episode count (tells a real season from a one-off prologue or special).
+        let episodes: Int?
         let title: MediaTitle?
     }
     struct Edge: Codable, Hashable { let relationType: String?; let node: Node? }
@@ -163,6 +165,13 @@ enum Seasons {
     }
 
     static func isSeries(_ format: String?) -> Bool { format.map(seriesFormats.contains) ?? false }
+
+    /// A real season: a TV/ONA series with at least 3 episodes (or not known yet, e.g. airing).
+    /// A one-episode "Prologue" ONA (Arifureta) or special is passed through when walking a
+    /// show's seasons, but never stands in for the show or counts as a season itself.
+    static func isSeason(_ format: String?, episodes: Int?) -> Bool {
+        isSeries(format) && (episodes ?? 3) >= 3
+    }
 
     static func words(_ s: String?) -> [String] {
         (s ?? "").lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init)
@@ -285,13 +294,15 @@ extension Media {
     /// its own title says it's another season ("2nd Season", "Part 2", "II"…) and something of
     /// the same show comes before it (Slime S2 ← an OVA). Later seasons appear only in the
     /// details page's season dropdown; everywhere else the first season stands in for them.
+    var isSeason: Bool { Seasons.isSeason(format, episodes: episodes) }
+
     var isLaterSeason: Bool {
-        guard Seasons.isSeries(format) else { return false }
+        guard isSeason else { return false }
         let prequels = (relations?.edges ?? []).filter { edge in
             guard edge.relationType == "PREQUEL", let node = edge.node else { return false }
             return (node.type == nil || node.type == "ANIME") && Seasons.sameShow(title, node.title)
         }
-        if prequels.contains(where: { Seasons.isSeries($0.node?.format) }) { return true }
+        if prequels.contains(where: { Seasons.isSeason($0.node?.format, episodes: $0.node?.episodes) }) { return true }
         // Something of the same show comes before it (KonoSuba 3 ← the movie) and the title
         // says it's a later season.
         return !prequels.isEmpty && (Seasons.hasSeasonMarker(title) || Seasons.endsWithSeasonNumber(title))
@@ -401,6 +412,7 @@ struct RelatedMedia: Codable, Hashable, Identifiable {
     var id: Int
     var type: String?
     var format: String?
+    var episodes: Int?
     var title: MediaTitle
     var coverImage: CoverImage?
 }

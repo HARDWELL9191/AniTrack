@@ -530,7 +530,7 @@ enum SeasonRoots {
                 visited.insert(previous)
                 guard let earlier = known[previous] else { return (root, chain, previous) }
                 chain.append(earlier.id)
-                if Seasons.isSeries(earlier.format) { root = earlier }
+                if earlier.isSeason { root = earlier }   // a one-off prologue never stands in
                 current = earlier
             }
             return (root, chain, nil)

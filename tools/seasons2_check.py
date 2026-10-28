@@ -1,6 +1,7 @@
 # Mirrors Media.isLaterSeason + the first-season lookup (username "seasons2").
 import json, re, time
 SERIES = {"TV", "TV_SHORT", "ONA"}
+def season(fmt, eps): return fmt in SERIES and (eps if eps is not None else 3) >= 3
 def norm(s): return "".join(ch for ch in (s or "").lower() if ch.isalnum())
 def same_show(a, b):
     for k in ("romaji", "english"):
@@ -34,11 +35,16 @@ def prequels(m):
     return [e for e in ((m.get("relations") or {}).get("edges") or [])
             if e.get("relationType") == "PREQUEL" and (e.get("node") or {}).get("type") in (None, "ANIME")
             and same_show(m.get("title"), e["node"].get("title"))]
+def ends_number(t):
+    for k in ("romaji", "english"):
+        w = words((t or {}).get(k))
+        if len(w) > 1 and w[-1].isdigit() and 2 <= int(w[-1]) <= 20: return True
+    return False
 def later_new(m):
-    if m.get("format") not in SERIES: return False
+    if not season(m.get("format"), m.get("episodes")): return False
     p = prequels(m)
-    if any(e["node"].get("format") in SERIES for e in p): return True
-    return bool(p) and has_marker(m.get("title"))
+    if any(season(e["node"].get("format"), e["node"].get("episodes")) for e in p): return True
+    return bool(p) and (has_marker(m.get("title")) or ends_number(m.get("title")))
 def later_old(m): return m.get("format") in SERIES and has_marker(m.get("title")) and bool(prequels(m))
 def prequel_id(m):
     p = prequels(m)
@@ -61,7 +67,7 @@ def root(m):
         seen.add(p)
         if p not in known: return r, p
         cur = known[p]
-        if cur.get("format") in SERIES: r = cur
+        if season(cur.get("format"), cur.get("episodes")): r = cur
 pool = {}
 def add(q, v):
     time.sleep(2)
@@ -76,7 +82,7 @@ for v in [{"sort": ["TRENDING_DESC","POPULARITY_DESC"]}, {"sort": ["POPULARITY_D
           {"sort": ["POPULARITY_DESC"]}, {"sort": ["POPULARITY_DESC"], "page": 2}]:
     vv = {"page": 1, "perPage": 50, "isAdult": False, "formatNot": ["MOVIE"]}; vv.update(v)
     add("browseWithRelations", vv)
-fetch([113415, 20, 1735, 97940, 21, 11061, 136430, 140960])   # JJK, Naruto, Shippuden, Black Clover, One Piece, HxH 2011, Vinland S2, Spy x Family S2
+fetch([113415, 20, 1735, 97940, 21, 11061, 136430, 140960, 100668, 112323, 154473, 136804])   # JJK, Naruto, Shippuden, Black Clover, One Piece, HxH 2011, Vinland S2, Spy x Family S2
 pool.update({k: v for k, v in known.items()})
 for m in pool.values(): known.setdefault(m["id"], m)
 later = [m for m in pool.values() if later_new(m)]
@@ -88,11 +94,13 @@ newly, both, nf = [], [], []
 t = lambda m: ((m.get("title") or {}).get("english") or (m.get("title") or {}).get("romaji") or "")[:34]
 for m in pool.values():
     n, o = later_new(m), later_old(m)
+    if n and not (any(season(e["node"].get("format"), e["node"].get("episodes")) for e in prequels(m)) or has_marker(m.get("title"))):
+        nf.append("NUMBER RULE: " + t(m) + " -> " + (t(root(m)[0]) if root(m)[0] else "no root"))
     if n:
         r = root(m)[0]
         line = f"{t(m)} ({m['format']}) -> {t(r) + ' (' + r['format'] + ')' if r else 'NO ROOT (kept)'}"
         (both if o else newly).append(line)
-    elif m["id"] in (113415, 20, 21, 11061, 97940):
+    elif m["id"] in (113415, 20, 21, 11061, 97940, 100668):
         nf.append(f"{t(m)}: not a later season (correct for a first season)")
 note("seasons2 new detections", "\n".join(sorted(newly)) or "none")
 note("seasons2 already detected", "\n".join(sorted(both))[:3400] or "none")

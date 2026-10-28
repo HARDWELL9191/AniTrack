@@ -288,13 +288,13 @@ actor SeasonChain {
             var moved = false
             if let id = back, !visited.contains(id), let m = known[id] {
                 visited.insert(id)
-                if Seasons.isSeries(m.format) { before.insert(m, at: 0) }
+                if m.isSeason { before.insert(m, at: 0) }
                 back = Self.link(of: m, "PREQUEL")
                 moved = true
             } else { back = nil }
             if let id = forward, !visited.contains(id), let m = known[id] {
                 visited.insert(id)
-                if Seasons.isSeries(m.format) { after.append(m) }
+                if m.isSeason { after.append(m) }
                 forward = Self.link(of: m, "SEQUEL")
                 moved = true
             } else { forward = nil }
@@ -306,7 +306,7 @@ actor SeasonChain {
         // (Dragon Ball → Z → GT, and Super).
         let extras = await Self.foldedSeasons(for: result)
         let present = Set(result.map(\.id))
-        var added = extras.filter { !present.contains($0.id) && Seasons.isSeries($0.format) }
+        var added = extras.filter { !present.contains($0.id) && $0.isSeason }
         var seenAdded: Set<Int> = []
         added = added.filter { seenAdded.insert($0.id).inserted }
         if !added.isEmpty {

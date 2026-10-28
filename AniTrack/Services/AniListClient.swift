@@ -130,7 +130,7 @@ enum Queries {
     /// enough to tell a numbered season apart from a movie, OVA or renamed sequel.
     static let relFragment = """
     fragment rel on Media {
-      relations { edges { relationType node { id type format title { romaji english } } } }
+      relations { edges { relationType node { id type format episodes title { romaji english } } } }
     }
     """
 
@@ -260,6 +260,7 @@ enum Queries {
               id
               type
               format
+              episodes
               title { romaji english native userPreferred }
               coverImage { large extraLarge color }
             }

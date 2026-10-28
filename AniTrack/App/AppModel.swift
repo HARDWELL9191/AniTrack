@@ -329,7 +329,7 @@ final class AppModel {
             while let previous = current.prequelId, visited.count < 15, !visited.contains(previous),
                   let earlier = entry(for: previous) {
                 visited.insert(previous)
-                if wanted.contains(earlier.status) && Seasons.isSeries(earlier.media.format) {
+                if wanted.contains(earlier.status) && earlier.media.isSeason {
                     anchor = earlier.mediaId   // keeps going: the earliest one wins
                 }
                 current = earlier.media
@@ -848,10 +848,10 @@ final class AppModel {
     /// All seasons of the show `media` belongs to: TV/ONA entries with the same title, from the
     /// same chain the season dropdown shows (named spin-off series are left alone).
     private func otherSeasons(of media: Media) async -> [Media] {
-        guard Seasons.isSeries(media.format) else { return [] }
+        guard media.isSeason else { return [] }
         let chain = await SeasonChain.shared.seasons(for: media, client: client)
         return chain.filter {
-            $0.id != media.id && Seasons.isSeries($0.format) && Seasons.sameShow(media.title, $0.title)
+            $0.id != media.id && $0.isSeason && Seasons.sameShow(media.title, $0.title)
         }
     }
 
