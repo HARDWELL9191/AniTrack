@@ -95,7 +95,7 @@ struct HomeView: View {
                     }
                 }
 
-                if model.entries.isEmpty && model.listLoadedOnce && !model.isLoadingList {
+                if model.entries.isEmpty && !model.isLoadingList {
                     Text("Add a few shows you liked (Discover → search), and Home fills up with suggestions.")
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 20)
@@ -120,9 +120,7 @@ struct HomeView: View {
                 if !model.entries.isEmpty { await model.generateRecommendations() }
             }
             .overlay {
-                if model.entries.isEmpty && (model.isLoadingList || !model.listLoadedOnce) {
-                    ProgressView("Loading your list…")
-                }
+                if model.isLoadingList && model.entries.isEmpty { ProgressView("Loading your list…") }
             }
         }
         .pushDetailAction($path)
