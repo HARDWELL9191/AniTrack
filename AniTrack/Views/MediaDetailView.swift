@@ -121,7 +121,7 @@ struct MediaDetailView: View {
                 if let edges = d.relations?.edges?.filter({ edge in
                     guard let node = edge.node, node.type == "ANIME" else { return false }
                     let isSeason = (edge.relationType == "PREQUEL" || edge.relationType == "SEQUEL")
-                        && Seasons.isSeries(node.format) && Seasons.sameShow(media.title, node.title)
+                        && Seasons.isSeason(node.format, episodes: node.episodes) && Seasons.sameShow(media.title, node.title)
                     return !isSeason
                 }), !edges.isEmpty {
                     VStack(alignment: .leading, spacing: 10) {
