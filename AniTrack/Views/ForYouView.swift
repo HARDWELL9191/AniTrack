@@ -37,8 +37,10 @@ struct ForYouView: View {
                 handled = 0
                 await model.generateRecommendations(category: category, force: true)
             }
-            .task(id: category?.id ?? "any") {
-                if model.entries.isEmpty { await model.refreshList() }
+            // Also re-runs when your list arrives, so picks build as soon as it's here.
+            .task(id: "\(category?.id ?? "any")|\(model.entries.isEmpty)") {
+                // Launch already loads your list; this only retries after a failed load.
+                if model.entries.isEmpty && model.listLoadedOnce && !model.isLoadingList { await model.refreshList() }
                 await model.generateRecommendations(category: category)
             }
             .onChange(of: category) { _, _ in index = 0; handled = 0 }
@@ -55,7 +57,13 @@ struct ForYouView: View {
 
     @ViewBuilder
     private var content: some View {
-        if model.isLoadingFeed(category) && picks.isEmpty {
+        if picks.isEmpty && model.entries.isEmpty && !model.listLoadedOnce {
+            VStack(spacing: 14) {
+                ProgressView()
+                Text("Loading your list…").font(.headline)
+            }
+            .padding(40)
+        } else if model.isLoadingFeed(category) && picks.isEmpty {
             VStack(spacing: 14) {
                 ProgressView()
                 Text(category == nil ? "Hoshi is reading your list…" : "Finding \(category!.name) picks for you…")
