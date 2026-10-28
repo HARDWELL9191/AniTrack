@@ -33,6 +33,21 @@ enum DiskCache {
         }
     }
 
+    /// Log-out: removes only what belongs to an account (your list, picks, fan signals, profile).
+    /// Show data that's the same for everyone (AI analysis, age ratings, episodes, categories)
+    /// stays, so logging back in doesn't redo that work.
+    static func clearPersonal() {
+        queue.async {
+            let fm = FileManager.default
+            guard let files = try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else { return }
+            let personal = ["viewer", "list-", "feed", "fans"]
+            for file in files where file.pathExtension == "json" {
+                let name = file.deletingPathExtension().lastPathComponent
+                if personal.contains(where: { name.hasPrefix($0) }) { try? fm.removeItem(at: file) }
+            }
+        }
+    }
+
     static func clearAll() {
         queue.async {
             let fm = FileManager.default

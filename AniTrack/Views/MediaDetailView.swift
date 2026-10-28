@@ -137,7 +137,7 @@ struct MediaDetailView: View {
 
                 // Season 2+ of other shows is left out (their Season 1 shows up instead, elsewhere).
                 let recs = (d.recommendations?.nodes ?? []).compactMap(\.mediaRecommendation)
-                    .filter { !(model.settings.hideChinese && $0.countryOfOrigin == "CN") && !$0.isLaterSeason }
+                    .filter { $0.isAdult != true && !(model.settings.hideChinese && $0.countryOfOrigin == "CN") && !$0.isLaterSeason }
                     .filter { model.entry(for: $0.id) == nil && !model.franchises.contains($0) }   // planned/watched stay out
                     .sorted { (model.matcher.match(for: $0) ?? 0) > (model.matcher.match(for: $1) ?? 0) }
                 if !recs.isEmpty {

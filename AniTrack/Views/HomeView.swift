@@ -186,7 +186,7 @@ extension HomeView {
     /// Horizontal row of cover cards under a Home shelf header. Suggestion rows drop a show as soon
     /// as you plan it, watch it or say "Not for me" (the next one slides into its place);
     /// rows of your own list (Planning, Currently watching) pass `suggestions: false`.
-    func cardRow(_ items: [Media], matches: [Int: Int] = [:], width: CGFloat = 104,
+    func cardRow(_ items: [Media], width: CGFloat = 104,
                  suggestions: Bool = true) -> some View {
         let shown = suggestions
             ? items.filter { model.entry(for: $0.id) == nil && !model.settings.dismissedPicks.contains($0.id) }
@@ -195,7 +195,7 @@ extension HomeView {
             LazyHStack(alignment: .top, spacing: 12) {
                 ForEach(shown) { media in
                     NavigationLink(value: MediaLink(id: media.id)) {
-                        MediaCard(media: media, width: width, matchOverride: matches[media.id])
+                        MediaCard(media: media, width: width)
                     }
                     .buttonStyle(.plain)
                 }

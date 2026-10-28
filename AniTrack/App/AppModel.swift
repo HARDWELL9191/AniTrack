@@ -31,7 +31,12 @@ final class AppModel {
     private(set) var feeds: [String: RecommendationResult] = [:]
     private(set) var loadingFeeds: Set<String> = []
     private(set) var loadingMore: Set<String> = []
-    var recommendationError: String?
+    /// Picks errors per feed (category), so one category's error never shows on another.
+    private(set) var recommendationErrors: [String: String] = [:]
+
+    func recommendationError(for category: AnimeCategory?) -> String? {
+        recommendationErrors[Self.feedKey(category)]
+    }
 
     // Categories (AniList genres + tags), loaded once and cached.
     private(set) var allCategories: [AnimeCategory] = []
@@ -139,7 +144,19 @@ final class AppModel {
         notForMeListReady = false
         notForMeLoadedFor = nil
         notForMeMedia = [:]
-        DiskCache.clearAll()
+        recommendationErrors = [:]
+        forceRebuild = []
+        // Builds still running for the old account must not land in the next one.
+        generationTasks.values.forEach { $0.cancel() }
+        moreTasks.values.forEach { $0.cancel() }
+        generationTasks = [:]
+        moreTasks = [:]
+        loadingFeeds = []
+        loadingMore = []
+        matcher.resetSignals()
+        // Only your personal data: AI analysis, age ratings, categories and episode lists
+        // aren't tied to an account and would just cost battery/data to rebuild.
+        DiskCache.clearPersonal()
     }
 
     // MARK: - Loading
@@ -222,7 +239,9 @@ final class AppModel {
     }
 
     private func isAuthError(_ error: Error) -> Bool {
-        if case APIError.http(let code) = error, code == 401 || code == 400 { return true }
+        // Only a clear "not logged in" answer logs you out. A bare HTTP 400 can also be an error
+        // page during an AniList outage; real expired tokens come with an "Invalid token" message.
+        if case APIError.http(let code) = error, code == 401 { return true }
         if case APIError.graphQL(let msg) = error, msg.localizedCaseInsensitiveContains("invalid token")
             || msg.localizedCaseInsensitiveContains("unauthorized") { return true }
         return false
@@ -332,7 +351,9 @@ final class AppModel {
     }
 
     /// Marks a show as fully watched and moves it to Completed (keeps your score if you have one).
-    func markCompleted(_ media: Media, askRating: Bool = true) async {
+    /// Returns false if AniList couldn't be updated.
+    @discardableResult
+    func markCompleted(_ media: Media, askRating: Bool = true) async -> Bool {
         let existing = entry(for: media.id)
         let progress = media.episodes ?? media.availableEpisodes ?? existing?.progress
         do {
@@ -341,8 +362,10 @@ final class AppModel {
             if askRating && (existing?.scoreValue ?? 0) == 0 { ratePrompt = media }
             // It's on your list now, so it no longer belongs in any picks feed (not a dislike).
             removeFromFeeds(media.id)
+            return true
         } catch {
             errorMessage = error.localizedDescription
+            return false
         }
     }
 
@@ -367,7 +390,30 @@ final class AppModel {
                 firstSeasonsOnly: Bool = false,
                 page: Int = 1,
                 perPage: Int = 25) async throws -> [Media] {
-        var vars: [String: Any] = ["page": page, "perPage": perPage, "sort": sort, "isAdult": false]
+        try await browsePage(search: search, sort: sort, season: season, seasonYear: seasonYear, status: status,
+                             category: category, genres: genres, excludeGenres: excludeGenres,
+                             minScore: minScore, maxPopularity: maxPopularity, minPopularity: minPopularity,
+                             firstSeasonsOnly: firstSeasonsOnly, page: page, perPage: perPage).media
+    }
+
+    /// Like `browse`, plus whether AniList has another page (judged before shows are hidden
+    /// locally, so hiding e.g. Chinese animation never stops endless scrolling early).
+    func browsePage(search: String? = nil,
+                    sort: [String],
+                    season: String? = nil,
+                    seasonYear: Int? = nil,
+                    status: String? = nil,
+                    category: AnimeCategory? = nil,
+                    genres: [String]? = nil,
+                    excludeGenres: [String]? = nil,
+                    minScore: Int? = nil,
+                    maxPopularity: Int? = nil,
+                    minPopularity: Int? = nil,
+                    firstSeasonsOnly: Bool = false,
+                    page: Int = 1,
+                    perPage: Int = 25) async throws -> (media: [Media], hasNextPage: Bool) {
+        var vars: [String: Any] = ["page": page, "perPage": perPage, "sort": sort,
+                                   "isAdult": category?.isAdultOnly == true]
         if let genres, !genres.isEmpty { vars["genres"] = genres }
         if let excludeGenres, !excludeGenres.isEmpty { vars["genresNot"] = excludeGenres }
         if let minScore { vars["scoreGreater"] = minScore }
@@ -380,7 +426,8 @@ final class AppModel {
         if let status { vars["status"] = status }
         let data = try await client.run(firstSeasonsOnly ? Queries.browseWithRelations : Queries.browse,
                                         variables: vars, as: PageData.self)
-        return data.page.media.filter { media in
+        let hasNext = data.page.pageInfo?.hasNextPage ?? (data.page.media.count >= perPage)
+        let shown = data.page.media.filter { media in
             if settings.hideChinese && media.countryOfOrigin == "CN" { return false }
             if firstSeasonsOnly {
                 // Season 2+ of a show, or a show where you already have another season: skip.
@@ -389,6 +436,7 @@ final class AppModel {
             }
             return true
         }
+        return (shown, hasNext)
     }
 
     func detail(id: Int) async throws -> MediaDetail {
@@ -480,7 +528,7 @@ final class AppModel {
         let key = Self.feedKey(category)
         guard !loadingFeeds.contains(key) else { return }
         guard !entries.isEmpty else {
-            recommendationError = "Your list is empty. Add and rate a few shows first."
+            recommendationErrors[key] = "Your list is empty. Add and rate a few shows first."
             return
         }
         let options = recommendationOptions(category)
@@ -515,10 +563,12 @@ final class AppModel {
             }
         }
         loadingFeeds.insert(key)
-        recommendationError = nil
+        recommendationErrors[key] = nil
+        let account = viewer?.id
         let picks: [Recommendation]
         do {
             let (found, usedAI, fans) = try await Recommender.run(entries: entries, client: client, options: options)
+            guard viewer?.id == account, !Task.isCancelled else { loadingFeeds.remove(key); return }   // logged out meanwhile
             matcher.addFanSignal(fans)
             DiskCache.saveInBackground(matcher.fanSnapshot, name: cacheName("fans2"))
             picks = found
@@ -528,7 +578,7 @@ final class AppModel {
             DiskCache.saveInBackground(result, name: feedCacheName(category))
         } catch {
             loadingFeeds.remove(key)
-            if !Self.isCancellation(error) { recommendationError = error.localizedDescription }
+            if !Self.isCancellation(error) { recommendationErrors[key] = error.localizedDescription }
             return
         }
         loadingFeeds.remove(key)
@@ -545,6 +595,7 @@ final class AppModel {
         defer { loadingMore.remove(key) }
 
         let options = recommendationOptions(category)
+        let account = viewer?.id
         var shown = Set(current.picks.map(\.id))
         var emptyRounds = 0
         // Try up to 3 deeper rounds to find something new before calling it the end.
@@ -554,6 +605,7 @@ final class AppModel {
             do {
                 let (more, usedAI, fans) = try await Recommender.run(entries: entries, client: client, options: options,
                                                                round: round, exclude: shown)
+                guard viewer?.id == account, !Task.isCancelled else { return }   // logged out meanwhile
                 matcher.addFanSignal(fans)
                 DiskCache.saveInBackground(matcher.fanSnapshot, name: cacheName("fans2"))
                 let fresh = more.filter { !shown.contains($0.id) }
@@ -566,7 +618,7 @@ final class AppModel {
                 shown.formUnion(fresh.map(\.id))
                 break
             } catch {
-                if !Self.isCancellation(error) { recommendationError = error.localizedDescription }
+                if !Self.isCancellation(error) { recommendationErrors[key] = error.localizedDescription }
                 feeds[key] = current
                 return
             }
@@ -578,8 +630,10 @@ final class AppModel {
 
     /// Takes a show out of every picks feed (it's on your list now). Not a dislike.
     func removeFromFeeds(_ mediaId: Int) {
-        for key in feeds.keys { feeds[key]?.remove(mediaId) }
-        for (key, value) in feeds { DiskCache.saveInBackground(value, name: feedCacheName(key: key)) }
+        for key in Array(feeds.keys) where feeds[key]?.picks.contains(where: { $0.id == mediaId }) == true {
+            feeds[key]?.remove(mediaId)
+            if let updated = feeds[key] { DiskCache.saveInBackground(updated, name: feedCacheName(key: key)) }
+        }
     }
 
     /// Long-press "Plan to watch": adds it to Planning (it then leaves Home rows and picks).
@@ -607,12 +661,7 @@ final class AppModel {
             saveNotForMeState()
             syncNotForMe()
         }
-        for key in feeds.keys {
-            feeds[key]?.remove(mediaId)
-        }
-        for (key, value) in feeds {
-            DiskCache.saveInBackground(value, name: feedCacheName(key: key))
-        }
+        removeFromFeeds(mediaId)
     }
 
     private func cacheName(_ kind: String) -> String {
@@ -817,14 +866,15 @@ final class AppModel {
     func loadCategories() async {
         if !allCategories.isEmpty { return }
         struct Cached: Codable { let categories: [AnimeCategory]; let savedAt: Date }
-        if let cached = DiskCache.load(Cached.self, name: "categories"),
+        // v2: now includes the Hentai genre (shown only when picked).
+        if let cached = DiskCache.load(Cached.self, name: "categories2"),
            Date().timeIntervalSince(cached.savedAt) < 7 * 86_400, !cached.categories.isEmpty {
             allCategories = cached.categories
             return
         }
         do {
             let data = try await client.run(Queries.categories, as: CategoryCollectionData.self)
-            let genres = (data.genres ?? []).filter { $0 != "Hentai" }.map(AnimeCategory.genre)
+            let genres = (data.genres ?? []).map(AnimeCategory.genre)
             let tags = (data.tags ?? [])
                 .filter { $0.isAdult != true && $0.isGeneralSpoiler != true }
                 .map { AnimeCategory.tag($0.name) }
@@ -834,7 +884,7 @@ final class AppModel {
                 .filter { !featured.contains($0) }
                 .sorted { $0.name.localizedCompare($1.name) == .orderedAscending }
             allCategories = featured + rest
-            DiskCache.save(Cached(categories: allCategories, savedAt: Date()), name: "categories")
+            DiskCache.save(Cached(categories: allCategories, savedAt: Date()), name: "categories2")
         } catch {
             // Cancelled (screen left mid-load): leave it empty so it loads properly next time.
             if Self.isCancellation(error) { return }

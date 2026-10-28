@@ -64,7 +64,7 @@ enum BackgroundPrefetch {
 
         // 1) What you already have locally (no network).
         let entries = DiskCache.load([ListEntry].self, name: "list-\(viewer.id)") ?? []
-        let feed = DiskCache.load(RecommendationResult.self, name: "feed-any-\(viewer.id)")
+        let feed = DiskCache.load(RecommendationResult.self, name: "feed3-any-\(viewer.id)")
         var pool: [Int: Media] = [:]
         for e in entries { pool[e.mediaId] = e.media }
         for p in feed?.picks ?? [] { pool[p.media.id] = p.media }

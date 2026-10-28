@@ -522,8 +522,12 @@ struct AnimeCategory: Codable, Hashable, Identifiable {
         .tag("Reincarnation"), .tag("Harem"), .genre("Comedy"), .tag("Magic"), .tag("Super Power"),
         .genre("Adventure"), .genre("Slice of Life"), .tag("School"), .genre("Drama"), .tag("Demons"),
         .genre("Mystery"), .genre("Psychological"), .genre("Sci-Fi"), .tag("Revenge"), .genre("Supernatural"),
-        .genre("Horror"), .genre("Sports"), .genre("Mecha"), .genre("Thriller")
+        .genre("Horror"), .genre("Sports"), .genre("Mecha"), .genre("Thriller"), .genre("Hentai")
     ]
+
+    /// AniList's adult genre. Its shows appear only on screens where this category is picked;
+    /// everywhere else (Home, For You "Any", search, recommendations) adult shows stay hidden.
+    var isAdultOnly: Bool { kind == .genre && name == "Hentai" }
 
     /// Whether a show belongs to this category (tags need a decent relevance rank).
     func matches(_ media: Media) -> Bool {

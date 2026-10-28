@@ -30,8 +30,6 @@ struct ShowActionsMenu: ViewModifier {
     @Environment(\.pushDetail) private var pushDetail
     @Environment(\.cardSheetsAllowed) private var sheetsAllowed
     let media: Media
-    /// For You's own % for a pick, so the preview shows the same number as the card.
-    var match: Int? = nil
 
     func body(content: Content) -> some View {
         // A custom preview, so only the pressed show lifts out (inside a List the system would
@@ -45,7 +43,7 @@ struct ShowActionsMenu: ViewModifier {
                                 coverColor: media.coverImage?.color,
                                 title: media.displayTitle(model.settings.titleLanguage),
                                 score: media.averageScore,
-                                match: match ?? model.matcher.match(for: media),
+                                match: model.matcher.match(for: media),
                                 age: model.ages.rating(for: media.id)?.label)
             }
     }
@@ -115,8 +113,8 @@ struct ShowMenuPreview: View {
 }
 
 extension View {
-    func showActions(_ media: Media, match: Int? = nil) -> some View {
-        modifier(ShowActionsMenu(media: media, match: match))
+    func showActions(_ media: Media) -> some View {
+        modifier(ShowActionsMenu(media: media))
     }
 
     /// Gives a NavigationStack's content the "open details" action used by long-press menus.

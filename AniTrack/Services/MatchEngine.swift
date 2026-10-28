@@ -125,6 +125,13 @@ final class MatchEngine {
 
     var fanSnapshot: [Int: Double] { fanSignal }
 
+    /// Log-out: forget the previous account's fan signals and cached badges.
+    func resetSignals() {
+        fanSignal.removeAll()
+        memo.removeAll()
+        version &+= 1
+    }
+
     /// Adds fan-recommendation strengths from a picks build (keeps the strongest per show).
     func addFanSignal(_ signal: [Int: Double]) {
         guard !signal.isEmpty else { return }

@@ -1,0 +1,226 @@
+import SwiftUI
+
+/// Profile → "Export lists to Excel": pick any of your lists, get one .xlsx with a sheet per list,
+/// then save it to Files or share it.
+struct ListExportSheet: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+
+    /// One exportable list.
+    struct Choice: Identifiable, Hashable {
+        let id: String
+        let label: String
+        let symbol: String
+        let status: ListStatus?   // nil = "Not for me"
+    }
+
+    private static let choices: [Choice] =
+        [ListStatus.CURRENT, .REPEATING, .COMPLETED, .PAUSED, .DROPPED, .PLANNING].map {
+            Choice(id: $0.rawValue, label: $0.label, symbol: $0.symbol, status: $0)
+        } + [Choice(id: "NOT_FOR_ME", label: "Not for me", symbol: "hand.thumbsdown.fill", status: nil)]
+
+    @State private var selected: Set<String> = []
+    @State private var didSetDefaults = false
+    @State private var file: URL?
+    @State private var isBuilding = false
+    @State private var failure: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    ForEach(Self.choices) { choice in
+                        Toggle(isOn: binding(for: choice)) {
+                            HStack {
+                                Label(choice.label, systemImage: choice.symbol)
+                                Spacer()
+                                Text("\(count(choice))")
+                                    .monospacedDigit()
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    Button(allSelected ? "Deselect all" : "Select all") {
+                        selected = allSelected ? [] : Set(Self.choices.map(\.id))
+                    }
+                } header: {
+                    Text("Lists to include")
+                } footer: {
+                    Text("Each list becomes its own sheet with titles, your score, progress, episodes, format, season, average score, match %, genres, dates and an AniList link. Opens in Excel, Numbers and Google Sheets.")
+                }
+
+                Section {
+                    if let file {
+                        ShareLink(item: file,
+                                  preview: SharePreview(file.lastPathComponent, image: Image(systemName: "tablecells"))) {
+                            Label("Save or share Excel file", systemImage: "square.and.arrow.up")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.glassProminent)
+                    } else {
+                        Button {
+                            Task { await build() }
+                        } label: {
+                            if isBuilding {
+                                ProgressView().frame(maxWidth: .infinity)
+                            } else {
+                                Label("Create Excel file", systemImage: "tablecells")
+                                    .frame(maxWidth: .infinity)
+                            }
+                        }
+                        .buttonStyle(.glassProminent)
+                        .disabled(selected.isEmpty || isBuilding)
+                    }
+                } footer: {
+                    if let failure {
+                        Text(failure).foregroundStyle(.red)
+                    }
+                }
+                .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets())
+            }
+            .navigationTitle("Export to Excel")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
+            }
+            .onChange(of: selected) { _, _ in file = nil }   // a different choice needs a new file
+            .task {
+                if !didSetDefaults {
+                    didSetDefaults = true
+                    // Every list that has something in it.
+                    selected = Set(Self.choices.filter { count($0) > 0 }.map(\.id))
+                }
+                await model.loadNotForMeMedia()   // titles for "Not for me" shows not loaded yet
+            }
+        }
+    }
+
+    private var allSelected: Bool { selected.count == Self.choices.count }
+
+    private func binding(for choice: Choice) -> Binding<Bool> {
+        Binding(get: { selected.contains(choice.id) },
+                set: { on in if on { selected.insert(choice.id) } else { selected.remove(choice.id) } })
+    }
+
+    private func count(_ choice: Choice) -> Int {
+        if let status = choice.status { return model.entries.filter { $0.status == status }.count }
+        return model.settings.dismissedPicks.count
+    }
+
+    // MARK: Building
+
+    private func build() async {
+        isBuilding = true
+        failure = nil
+        defer { isBuilding = false }
+        let sheets = Self.choices.filter { selected.contains($0.id) }.map(sheet(for:))
+        let name = fileName()
+        // XML + ZIP work happens off the main thread (a big list is a few MB of text).
+        let result = await Task.detached(priority: .userInitiated) { () -> Result<URL, Error> in
+            do {
+                let folder = FileManager.default.temporaryDirectory.appendingPathComponent("Export", isDirectory: true)
+                try? FileManager.default.removeItem(at: folder)   // old exports
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                let url = folder.appendingPathComponent(name)
+                try XLSXWriter.data(sheets: sheets).write(to: url, options: .atomic)
+                return .success(url)
+            } catch {
+                return .failure(error)
+            }
+        }.value
+        switch result {
+        case .success(let url): file = url
+        case .failure(let error): failure = "Couldn't create the file: \(error.localizedDescription)"
+        }
+    }
+
+    private func fileName() -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        let user = (model.viewer?.name ?? "")
+            .filter { $0.isLetter || $0.isNumber || $0 == "_" || $0 == "-" }
+        let who = user.isEmpty ? "" : " \(user)"
+        return "AniTrack\(who) lists \(formatter.string(from: Date())).xlsx"
+    }
+
+    private func sheet(for choice: Choice) -> XLSXWriter.Sheet {
+        let lang = model.settings.titleLanguage
+        if let status = choice.status {
+            let entries = model.entries.filter { $0.status == status }
+                .sorted { $0.media.displayTitle(lang).localizedCompare($1.media.displayTitle(lang)) == .orderedAscending }
+            let columns: [XLSXWriter.Column] = [
+                .init(title: "Title", width: 42), .init(title: "Other title", width: 36),
+                .init(title: "My score (/10)", width: 14), .init(title: "Episodes watched", width: 16),
+                .init(title: "Episodes", width: 10), .init(title: "Format", width: 10),
+                .init(title: "Season", width: 13), .init(title: "Show status", width: 12),
+                .init(title: "Average score (/10)", width: 18), .init(title: "Match %", width: 10),
+                .init(title: "Genres", width: 34), .init(title: "Added", width: 12),
+                .init(title: "Last updated", width: 13), .init(title: "AniList", width: 36)
+            ]
+            let rows: [[XLSXWriter.Cell]] = entries.map { e -> [XLSXWriter.Cell] in
+                let m = e.media
+                return [
+                    .text(m.displayTitle(lang)), .text(otherTitle(m, lang)),
+                    Self.number(e.scoreValue > 0 ? e.scoreValue / 10 : nil),
+                    Self.number(Double(e.progressValue)),
+                    Self.number(m.episodes.map { Double($0) }),
+                    .text(m.formatLabel), .text(m.seasonLabel ?? ""), .text(m.statusLabel),
+                    Self.number(m.averageScore.map { Double($0) / 10 }),
+                    Self.number(model.matcher.match(for: m).map { Double($0) }),
+                    .text((m.genres ?? []).joined(separator: ", ")),
+                    Self.date(e.createdAt), Self.date(e.updatedAt),
+                    .link(m.siteUrl ?? "https://anilist.co/anime/\(m.id)")
+                ]
+            }
+            return XLSXWriter.Sheet(name: choice.label, columns: columns, rows: rows)
+        }
+
+        // "Not for me": shows only (no score or progress); details may still be loading for a few.
+        let ids = model.settings.dismissedPicks
+        let known = ids.compactMap { model.notForMeMedia[$0] }
+            .sorted { $0.displayTitle(lang).localizedCompare($1.displayTitle(lang)) == .orderedAscending }
+        let unknown = ids.filter { model.notForMeMedia[$0] == nil }.sorted()
+        let columns: [XLSXWriter.Column] = [
+            .init(title: "Title", width: 42), .init(title: "Other title", width: 36),
+            .init(title: "Episodes", width: 10), .init(title: "Format", width: 10),
+            .init(title: "Season", width: 13), .init(title: "Show status", width: 12),
+            .init(title: "Average score (/10)", width: 18), .init(title: "Match %", width: 10),
+            .init(title: "Genres", width: 34), .init(title: "AniList", width: 36)
+        ]
+        var rows: [[XLSXWriter.Cell]] = known.map { m -> [XLSXWriter.Cell] in
+            [
+                .text(m.displayTitle(lang)), .text(otherTitle(m, lang)),
+                Self.number(m.episodes.map { Double($0) }),
+                .text(m.formatLabel), .text(m.seasonLabel ?? ""), .text(m.statusLabel),
+                Self.number(m.averageScore.map { Double($0) / 10 }),
+                Self.number(model.matcher.match(for: m).map { Double($0) }),
+                .text((m.genres ?? []).joined(separator: ", ")),
+                .link(m.siteUrl ?? "https://anilist.co/anime/\(m.id)")
+            ]
+        }
+        rows += unknown.map { id -> [XLSXWriter.Cell] in
+            [.text("AniList #\(id)"), .empty, .empty, .empty, .empty, .empty, .empty, .empty, .empty,
+             .link("https://anilist.co/anime/\(id)")]
+        }
+        return XLSXWriter.Sheet(name: choice.label, columns: columns, rows: rows)
+    }
+
+    private static func number(_ value: Double?) -> XLSXWriter.Cell {
+        value.map { XLSXWriter.Cell.number($0) } ?? .empty
+    }
+
+    private static func date(_ unix: Int?) -> XLSXWriter.Cell {
+        guard let unix, unix > 0 else { return .empty }
+        return .date(Date(timeIntervalSince1970: TimeInterval(unix)))
+    }
+
+    /// The romaji title when titles are shown in English (and the other way round).
+    private func otherTitle(_ m: Media, _ lang: TitleLanguage) -> String {
+        let main = m.displayTitle(lang)
+        let other = lang == .romaji ? (m.title.english ?? m.title.native) : (m.title.romaji ?? m.title.native)
+        guard let other, other != main else { return "" }
+        return other
+    }
+}

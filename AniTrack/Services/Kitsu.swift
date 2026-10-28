@@ -274,13 +274,14 @@ actor SeasonChain {
         var after: [Media] = []
         var back = Self.link(of: media, "PREQUEL")
         var forward = Self.link(of: media, "SEQUEL")
+        var failed = false
 
         for _ in 0..<12 {
             let wanted = [back, forward].compactMap { $0 }.filter { known[$0] == nil }
             if !wanted.isEmpty {
                 guard let data = try? await client.run(Queries.mediaByIds,
                                                        variables: ["ids": wanted, "perPage": wanted.count],
-                                                       as: PageData.self) else { break }
+                                                       as: PageData.self) else { failed = true; break }
                 for m in data.page.media { known[m.id] = m }
             }
             var moved = false
@@ -299,7 +300,9 @@ actor SeasonChain {
             if !moved { break }
         }
         let result = before + [media] + after
-        for m in result { cache[m.id] = result }
+        // A failed request (offline, page left mid-load) gives a partial chain: show it,
+        // but don't keep it, so the next visit finds every season.
+        if !failed { for m in result { cache[m.id] = result } }
         return result
     }
 
@@ -330,6 +333,9 @@ actor EpisodeService {
         var kitsuTotal: Int?
         var savedAt: Date
         var finished: Bool
+        /// Which lists were used: nil = both, "kitsu" (AniList's was another season's) or
+        /// "anilist" (Kitsu's entry was the whole series).
+        var sources: String?
 
         /// Every episode has a description and a thumbnail (nothing left to fill in).
         var complete: Bool {
@@ -339,8 +345,8 @@ actor EpisodeService {
 
     private var memory: [Int: Page] = [:]
 
-    // v2: lists saved by the previous version could be wrongly empty or mismatched.
-    private func cacheName(_ id: Int) -> String { "episodes2-\(id)" }
+    // v3: lists saved before the title check could carry Kitsu descriptions on the wrong episodes.
+    private func cacheName(_ id: Int) -> String { "episodes3-\(id)" }
 
     /// Whatever is saved for this show, however old (shown instantly while refreshing).
     func saved(for mediaId: Int) async -> Page? {
@@ -361,18 +367,45 @@ actor EpisodeService {
         async let streaming = streamingEpisodes(media.id, laterPart: Self.hasPrequel(media),
                                                 expected: media.episodes, client: client)
         async let kitsuId = KitsuClient.shared.kitsuId(for: .init(id: media.id, mal: media.idMal))
-        let fromAniList = await streaming
-        let kid = await kitsuId
-        var kitsu: (episodes: [EpisodeInfo], total: Int?)? = nil
-        if let kid { kitsu = await KitsuClient.shared.episodes(kitsuId: kid, offset: 0) }
-
-        let total = Self.episodeCount(media: media, anilist: fromAniList.count, kitsu: kitsu?.total)
-        var merged = Self.merge(count: total, anilist: fromAniList, kitsu: kitsu?.episodes ?? [])
-        // A refresh only ever adds: anything saved before (e.g. a refresh while offline, or
-        // descriptions loaded with "Show more") is kept where the new data has nothing.
         var old = memory[media.id]
         if old == nil { old = await DiskCache.loadInBackground(Page.self, name: cacheName(media.id)) }
-        if let old {
+        let fromAniList = await streaming
+        var kid = await kitsuId ?? old?.kitsuId
+        var kitsu: (episodes: [EpisodeInfo], total: Int?)? = nil
+        if let kid { kitsu = await KitsuClient.shared.episodes(kitsuId: kid, offset: 0) }
+        // Kitsu didn't answer (offline, busy): keep the saved list as it is rather than
+        // rebuilding it from AniList alone; it's refreshed on a later visit.
+        let kitsuFailed = kid != nil && kitsu == nil
+        if kitsuFailed, let old {
+            memory[media.id] = old
+            return old
+        }
+
+        // Both lists must describe the same episodes, or titles, pictures and descriptions would
+        // mix two seasons. Checked by comparing titles; one source is dropped when they differ.
+        var anilistEpisodes = fromAniList
+        var sources: String? = nil
+        if let episodes = kitsu?.episodes, !episodes.isEmpty {
+            switch Self.alignment(anilist: fromAniList, kitsu: episodes, laterPart: Self.hasPrequel(media),
+                                  expected: media.episodes, kitsuTotal: kitsu?.total) {
+            case .same:
+                break
+            case .kitsuOnly:
+                anilistEpisodes = []
+                sources = "kitsu"
+            case .anilistOnly:
+                kitsu = nil
+                kid = nil   // "Show more" won't fetch more from it either
+                sources = "anilist"
+            }
+        }
+
+        let total = Self.episodeCount(media: media, anilist: anilistEpisodes.count, kitsu: kitsu?.total)
+        var merged = Self.merge(count: total, anilist: anilistEpisodes, kitsu: kitsu?.episodes ?? [])
+        // A refresh only ever adds: anything saved before (e.g. a refresh while offline, or
+        // descriptions loaded with "Show more") is kept where the new data has nothing.
+        // Only from a list built from the same source(s), so a switch never brings old details back.
+        if let old, old.sources == sources {
             let previous = Dictionary(old.episodes.map { ($0.number, $0) }, uniquingKeysWith: { a, _ in a })
             merged = merged.map { fresh in
                 guard let p = previous[fresh.number] else { return fresh }
@@ -383,9 +416,12 @@ actor EpisodeService {
                 return e
             }
         }
-        let page = Page(episodes: merged, total: total, kitsuId: kid,
+        // (Kitsu unchecked: "Show more" mustn't add its episodes until a refresh compares them.)
+        let page = Page(episodes: merged, total: total, kitsuId: kitsuFailed ? nil : kid,
                         kitsuLoaded: kitsu?.episodes.count ?? 0, kitsuTotal: kitsu?.total,
-                        savedAt: Date(), finished: media.status == "FINISHED")
+                        // Built without Kitsu because it didn't answer: due again on the next visit.
+                        savedAt: kitsuFailed ? .distantPast : Date(), finished: media.status == "FINISHED",
+                        sources: sources)
         memory[media.id] = page
         DiskCache.saveInBackground(page, name: cacheName(media.id))
         return page
@@ -400,7 +436,7 @@ actor EpisodeService {
         var byNumber = Dictionary(page.episodes.map { ($0.number, $0) }, uniquingKeysWith: { a, _ in a })
         for k in more.episodes where k.number >= 1 && k.number <= page.total {
             var e = byNumber[k.number] ?? EpisodeInfo(number: k.number)
-            if e.title == nil { e.title = k.title }
+            if e.title == nil { e.title = Self.realTitle(k.title) }
             if e.description == nil { e.description = k.description }
             if e.thumbnail == nil { e.thumbnail = k.thumbnail }
             byNumber[k.number] = e
@@ -432,10 +468,61 @@ actor EpisodeService {
         guard count > 0 else { return [] }
         return (1...count).map { n in
             EpisodeInfo(number: n,
-                        title: a[n]?.title ?? k[n]?.title,
+                        title: realTitle(a[n]?.title) ?? realTitle(k[n]?.title),
                         description: k[n]?.description,
                         thumbnail: a[n]?.thumbnail ?? k[n]?.thumbnail)
         }
+    }
+
+    enum Alignment: Equatable { case same, kitsuOnly, anilistOnly }
+
+    /// Do AniList's and Kitsu's lists describe the same episodes? Compares real titles of up to
+    /// 8 shared episode numbers.
+    /// - Most agree: both are used (AniList titles/pictures, Kitsu descriptions).
+    /// - They disagree: AniList's list is another season's. Streaming sites list a whole series,
+    ///   so AniList often carries Season 1 on later seasons (My Hero Academia S2–S5, Jujutsu
+    ///   Kaisen S2, SAO II, Mob Psycho II…), while Kitsu is matched to this exact season by ID.
+    ///   Checked on 114 shows: in every one of the 18 disagreements Kitsu had the right season.
+    ///   So only Kitsu's episodes are used — unless Kitsu's entry is far longer than this later
+    ///   season (it's the whole series), then only AniList's.
+    /// - Nothing to compare: both are kept, except that long Kitsu entry case.
+    static func alignment(anilist: [EpisodeInfo], kitsu: [EpisodeInfo], laterPart: Bool,
+                          expected: Int?, kitsuTotal: Int?) -> Alignment {
+        var kitsuTooLong = false
+        if laterPart, let expected, let kitsuTotal {
+            kitsuTooLong = Double(kitsuTotal) > Double(expected) * 1.5 + 2
+        }
+        let a = realTitles(anilist), k = realTitles(kitsu)
+        let shared = a.keys.filter { k[$0] != nil }.sorted().prefix(8)
+        if shared.count < 2 { return kitsuTooLong ? .anilistOnly : .same }
+        let matching = shared.filter { similar(a[$0]!, k[$0]!) }.count
+        if matching * 2 >= shared.count { return .same }
+        return kitsuTooLong ? .anilistOnly : .kitsuOnly
+    }
+
+    /// Titles that say something ("Episode 5", "Untitled", "TBA" don't count).
+    private static func realTitles(_ episodes: [EpisodeInfo]) -> [Int: String] {
+        var result: [Int: String] = [:]
+        for e in episodes where result[e.number] == nil {
+            if let t = realTitle(e.title) { result[e.number] = t }
+        }
+        return result
+    }
+
+    static func realTitle(_ title: String?) -> String? {
+        guard let t = title?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty else { return nil }
+        if t.wholeMatch(of: #/(?i)(?:episode|ep\.?)\s*\d+|untitled|tba|tbd|n\/a/#) != nil { return nil }
+        return t
+    }
+
+    /// Same episode title, allowing for small wording/translation differences.
+    static func similar(_ a: String, _ b: String) -> Bool {
+        func words(_ s: String) -> Set<String> {
+            Set(s.lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init).filter { $0.count > 2 })
+        }
+        let x = words(a), y = words(b)
+        guard !x.isEmpty, !y.isEmpty else { return a.lowercased() == b.lowercased() }
+        return Double(x.intersection(y).count) / Double(min(x.count, y.count)) >= 0.5
     }
 
     /// Season 2+ or a later cour: anything comes before it (Slime S2's prequel is an OVA).
@@ -450,7 +537,9 @@ actor EpisodeService {
         guard let data = try? await client.run(Queries.streamingEpisodes, variables: ["id": id],
                                                as: StreamingEpisodesData.self) else { return [] }
         var result: [EpisodeInfo] = []
-        let raw = data.media?.streamingEpisodes ?? []
+        // Trailers and ads ("PV 2", "Trailer", "CM") sometimes sit in the list and would take an
+        // episode's place.
+        let raw = (data.media?.streamingEpisodes ?? []).filter { !Self.isPromo($0.title) }
         for (index, ep) in raw.reversed().enumerated() {   // AniList lists them newest first
             let (number, title, special) = Self.parse(ep.title, fallback: index + 1)
             guard number >= 1, !special else { continue }    // "Episode 0" / "Episode 24.5" specials
@@ -470,6 +559,12 @@ actor EpisodeService {
             return []
         }
         return result
+    }
+
+    static func isPromo(_ title: String?) -> Bool {
+        guard let title else { return false }
+        return title.trimmingCharacters(in: .whitespaces)
+            .firstMatch(of: #/(?i)^(?:PV|CM|trailer|teaser|promo|preview)\b/#) != nil
     }
 
     /// "Episode 12 - The Title" → (12, "The Title", false); "Episode 24.5 - Recap" is a special.

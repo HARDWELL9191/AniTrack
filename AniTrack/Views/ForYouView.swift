@@ -74,7 +74,7 @@ struct ForYouView: View {
                     .multilineTextAlignment(.center)
             }
             .padding(40)
-        } else if let error = model.recommendationError, picks.isEmpty {
+        } else if let error = model.recommendationError(for: category), picks.isEmpty {
             ContentUnavailableView("Couldn't build picks", systemImage: "exclamationmark.triangle",
                                    description: Text(error))
         } else if picks.isEmpty {
@@ -255,8 +255,8 @@ struct PickCard: View {
                         if model.canEdit {
                             Button {
                                 Task {
-                                    await model.markCompleted(rec.media)
-                                    onWatched()
+                                    // Only counts as handled if AniList saved it (else it stays put).
+                                    if await model.markCompleted(rec.media) { onWatched() }
                                 }
                             } label: {
                                 Label("Already watched", systemImage: "eye.fill")

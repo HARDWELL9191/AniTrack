@@ -22,6 +22,24 @@ jobs:
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-version
 
+      - name: Test Excel export writer
+        run: |
+          set -euo pipefail
+          mkdir -p build-test
+          xcrun swiftc AniTrack/Services/XLSXWriter.swift tools/xlsx_test/main.swift -o build-test/xlsx_test
+          build-test/xlsx_test build-test/sample.xlsx
+          python3 -m venv build-test/venv
+          build-test/venv/bin/pip install --quiet openpyxl
+          build-test/venv/bin/python tools/xlsx_test/verify.py build-test/sample.xlsx
+
+      - name: Upload sample workbook
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: xlsx-sample
+          path: build-test/sample.xlsx
+          if-no-files-found: ignore
+
       - name: Use custom icon if provided
         run: |
           # Drop any square image named custom-icon.png (or .jpg) in the repo root to use it as the app icon.

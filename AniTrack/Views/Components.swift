@@ -226,8 +226,6 @@ struct MediaCard: View {
     @Environment(\.zoomNamespace) private var zoom
     let media: Media
     var width: CGFloat = 112
-    /// For You's own match for this pick, so one show never shows two different numbers.
-    var matchOverride: Int? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -236,7 +234,7 @@ struct MediaCard: View {
                                width: width, height: width * 1.45)
                     .zoomSource(id: media.id, in: zoom)
                     .overlay(alignment: .bottomLeading) {
-                        if let value = matchOverride ?? model.matcher.match(for: media) {
+                        if let value = model.matcher.match(for: media) {
                             MatchBubble(value: value).padding(5)
                         }
                     }
@@ -261,7 +259,7 @@ struct MediaCard: View {
         }
         .foregroundStyle(.primary)
         .contentShape(Rectangle())
-        .showActions(media, match: matchOverride)
+        .showActions(media)
     }
 }
 

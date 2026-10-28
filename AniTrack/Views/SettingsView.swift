@@ -6,6 +6,7 @@ struct SettingsView: View {
     private enum Field { case clientId, token }
     @FocusState private var focused: Field?
     @State private var confirmLogout = false
+    @State private var showExport = false
 
     var body: some View {
         @Bindable var settings = model.settings
@@ -32,6 +33,17 @@ struct SettingsView: View {
                     }
                     Toggle("Hide Chinese animation", isOn: $settings.hideChinese)
                         .onChange(of: settings.hideChinese) { _, _ in model.invalidatePicks() }
+                }
+
+                Section {
+                    Button { showExport = true } label: {
+                        Label("Export lists to Excel", systemImage: "tablecells")
+                    }
+                    .disabled(model.entries.isEmpty && settings.dismissedPicks.isEmpty)
+                } header: {
+                    Text("Your lists")
+                } footer: {
+                    Text("Choose which lists to include; each one becomes a sheet in a single .xlsx file you can save to Files or share.")
                 }
 
                 Section {
@@ -105,6 +117,10 @@ struct SettingsView: View {
                     Button("Done") { focused = nil }
                         .fontWeight(.semibold)
                 }
+            }
+            .sheet(isPresented: $showExport) {
+                ListExportSheet()
+                    .presentationDetents([.large])
             }
             .confirmationDialog("Log out of AniTrack?", isPresented: $confirmLogout, titleVisibility: .visible) {
                 Button("Log out", role: .destructive) { model.logOut() }

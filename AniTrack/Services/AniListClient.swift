@@ -53,7 +53,18 @@ final class AniListClient {
                 "variables": variables
             ])
 
-            let (data, response) = try await session.data(for: request)
+            let result: (Data, URLResponse)
+            do {
+                result = try await session.data(for: request)
+            } catch let error as URLError
+                        where [URLError.Code.timedOut, .networkConnectionLost].contains(error.code) && attempt < 2
+                            && !query.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("mutation") {
+                // One quiet retry for a dropped connection (switching Wi-Fi/cellular, a tunnel).
+                // Reads only: a change that may already have been saved is never sent twice.
+                try await Task.sleep(nanoseconds: 1_000_000_000)
+                continue
+            }
+            let (data, response) = result
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
 
             if status == 429 {

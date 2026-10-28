@@ -315,7 +315,8 @@ enum Recommender {
         let topTags = profile.top(prefix: "t:", count: 3)
         let topGenres = profile.top(prefix: "g:", count: 2)
         var explorations: [[String: Any]] = []
-        let base: [String: Any] = ["page": round, "perPage": 40, "isAdult": false, "excludeIds": excludeIds]
+        let adultOnly = options.category?.isAdultOnly == true
+        let base: [String: Any] = ["page": round, "perPage": 40, "isAdult": adultOnly, "excludeIds": excludeIds]
 
         if let category = options.category {
             // Category mode: the category is the main source, ranked by your taste below.
@@ -366,7 +367,8 @@ enum Recommender {
 
         func allowed(_ m: Media) -> Bool {
             if onList[m.id] != nil || exclude.contains(m.id) { return false }
-            if m.isAdult == true { return false }
+            // Adult shows only when the Hentai category is picked.
+            if m.isAdult == true && !adultOnly { return false }
             if options.hideChinese && m.countryOfOrigin == "CN" { return false }
             if m.format == "MUSIC" { return false }
             if !options.includeUnreleased && m.status == "NOT_YET_RELEASED" { return false }
@@ -415,14 +417,16 @@ enum Recommender {
 
             if !taste.isEmpty {
                 // Rescale cosine within this batch (embeddings of similar text cluster tightly).
-                let sims = shortList.map { item -> Float in
-                    guard let v = vectors[item.media.id] else { return 0 }
-                    return SemanticEngine.cosine(taste, v)
+                // A show without a synopsis vector (no synopsis, or analysis skipped) gets a
+                // neutral 0.5 instead of the lowest score, and doesn't stretch the scale.
+                let sims = shortList.map { item -> Float? in
+                    vectors[item.media.id].map { SemanticEngine.cosine(taste, $0) }
                 }
-                let lo = sims.min() ?? 0, hi = sims.max() ?? 1
+                let known = sims.compactMap { $0 }
+                let lo = known.min() ?? 0, hi = known.max() ?? 1
                 let span = max(hi - lo, 0.0001)
                 ranked = zip(shortList, sims).map { item, sim -> (media: Media, score: Double) in
-                    let semantic = Double((sim - lo) / span)
+                    let semantic = sim.map { Double(($0 - lo) / span) } ?? 0.5
                     return (media: item.media,
                             score: 0.38 * item.collab + 0.24 * item.tagSim + 0.28 * semantic + 0.10 * item.quality)
                 }

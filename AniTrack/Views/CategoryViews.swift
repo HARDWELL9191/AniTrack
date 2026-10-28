@@ -137,9 +137,12 @@ struct CategoryBrowseView: View {
     @State private var items: [Media] = []
     @State private var page = 1
     @State private var canLoadMore = true
-    @State private var isLoading = false
+    @State private var loadingKey: String?   // sort+search of the page request in flight
     @State private var error: String?
-    @State private var loadedKey: String?
+    @State private var loadedKey: String?    // sort+search whose first page arrived
+
+    private var currentKey: String { "\(sort.rawValue)|\(search)" }
+    private var isLoading: Bool { loadingKey == currentKey }
 
     var body: some View {
         List {
@@ -171,38 +174,53 @@ struct CategoryBrowseView: View {
                 }
             }
         }
-        .task(id: "\(sort.rawValue)|\(search)") {
-            let key = "\(sort.rawValue)|\(search)"
+        .task(id: currentKey) {
+            let key = currentKey
             guard loadedKey != key else { return }   // coming back from a detail page: keep results
             if !search.isEmpty { try? await Task.sleep(nanoseconds: 450_000_000) }
             guard !Task.isCancelled else { return }
-            loadedKey = key
+            loadedKey = nil
             items = []
             page = 1
             canLoadMore = true
+            error = nil
             await loadPage()
+            // A page where every show was hidden (e.g. Chinese animation off) has no row to
+            // trigger the next page, so fetch a couple more right away.
+            var extra = 0
+            while items.isEmpty, canLoadMore, error == nil, extra < 3, !Task.isCancelled, currentKey == key {
+                extra += 1
+                await loadPage()
+            }
         }
     }
 
     private func loadPage() async {
-        guard canLoadMore, !isLoading else { return }
-        isLoading = true
-        defer { isLoading = false }
+        let key = currentKey
+        guard canLoadMore, loadingKey != key else { return }
+        loadingKey = key
+        defer { if loadingKey == key { loadingKey = nil } }
         do {
             let text = search.trimmingCharacters(in: .whitespaces)
-            let result = try await model.browse(search: text.isEmpty ? nil : text,
-                                                sort: text.isEmpty ? sort.apiSort : ["SEARCH_MATCH"],
-                                                category: category,
-                                                page: page,
-                                                perPage: 30)
+            let result = try await model.browsePage(search: text.isEmpty ? nil : text,
+                                                    sort: text.isEmpty ? sort.apiSort : ["SEARCH_MATCH"],
+                                                    category: category,
+                                                    page: page,
+                                                    perPage: 30)
+            // Sort or search changed while this page was loading: it belongs to the old results.
+            guard key == currentKey else { return }
             let known = Set(items.map(\.id))
-            items += result.filter { !known.contains($0.id) }
-            canLoadMore = result.count >= 20
+            items += result.media.filter { !known.contains($0.id) }
+            // Judged on AniList's own answer, so hidden shows never end scrolling early.
+            canLoadMore = result.hasNextPage
             page += 1
             error = nil
+            loadedKey = key
         } catch {
-            // Cancelled (screen left mid-load): not an error, the next appearance loads it.
+            // Cancelled (screen left mid-load): not an error, and not marked loaded, so it
+            // loads again when the screen reappears instead of staying empty.
             if AppModel.isCancellation(error) { return }
+            guard key == currentKey else { return }
             self.error = error.localizedDescription
             canLoadMore = false
         }
