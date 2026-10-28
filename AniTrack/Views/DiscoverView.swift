@@ -180,8 +180,8 @@ struct DiscoverView: View {
         let upcoming = AppModel.currentSeason(offset: 1)
         // Each shelf loads on its own: one failing doesn't blank the others.
         async let t = shelf(sort: ["TRENDING_DESC", "POPULARITY_DESC"])
-        async let s = shelf(sort: ["POPULARITY_DESC"], season: current.season, year: current.year, dropLaterSeasons: true)
-        async let n = shelf(sort: ["POPULARITY_DESC"], season: upcoming.season, year: upcoming.year, dropLaterSeasons: true)
+        async let s = shelf(sort: ["POPULARITY_DESC"], season: current.season, year: current.year)
+        async let n = shelf(sort: ["POPULARITY_DESC"], season: upcoming.season, year: upcoming.year)
         async let r = shelf(sort: ["SCORE_DESC"])
         let results = [await t, await s, await n, await r]
         var failures: [Error] = []
@@ -205,11 +205,9 @@ struct DiscoverView: View {
         loadedSections = failures.isEmpty
     }
 
-    private func shelf(sort: [String], season: String? = nil, year: Int? = nil,
-                       dropLaterSeasons: Bool = false) async -> Result<[Media], Error> {
+    private func shelf(sort: [String], season: String? = nil, year: Int? = nil) async -> Result<[Media], Error> {
         do {
-            return .success(try await model.browse(sort: sort, season: season, seasonYear: year,
-                                                   dropLaterSeasons: dropLaterSeasons))
+            return .success(try await model.browse(sort: sort, season: season, seasonYear: year))
         } catch {
             return .failure(error)
         }

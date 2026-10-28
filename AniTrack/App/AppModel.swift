@@ -404,14 +404,12 @@ final class AppModel {
                 maxPopularity: Int? = nil,
                 minPopularity: Int? = nil,
                 firstSeasonsOnly: Bool = false,
-                dropLaterSeasons: Bool = false,
                 page: Int = 1,
                 perPage: Int = 25) async throws -> [Media] {
         try await browsePage(search: search, sort: sort, season: season, seasonYear: seasonYear, status: status,
                              category: category, genres: genres, excludeGenres: excludeGenres,
                              minScore: minScore, maxPopularity: maxPopularity, minPopularity: minPopularity,
-                             firstSeasonsOnly: firstSeasonsOnly, dropLaterSeasons: dropLaterSeasons,
-                             page: page, perPage: perPage).media
+                             firstSeasonsOnly: firstSeasonsOnly, page: page, perPage: perPage).media
     }
 
     /// Like `browse`, plus whether AniList has another page (judged before shows are hidden
@@ -428,7 +426,6 @@ final class AppModel {
                     maxPopularity: Int? = nil,
                     minPopularity: Int? = nil,
                     firstSeasonsOnly: Bool = false,
-                    dropLaterSeasons: Bool = false,
                     page: Int = 1,
                     perPage: Int = 25) async throws -> (media: [Media], hasNextPage: Bool) {
         var vars: [String: Any] = ["page": page, "perPage": perPage, "sort": sort,
@@ -447,12 +444,9 @@ final class AppModel {
         // With relations, so later seasons can be told apart and shown as their first season.
         let data = try await client.run(Queries.browseWithRelations, variables: vars, as: PageData.self)
         let hasNext = data.page.pageInfo?.hasNextPage ?? (data.page.media.count >= perPage)
-        // Season shelves ("this season", "next season") leave sequels out, so an old first
-        // season never shows up under a "this season" heading. Everywhere else a later
-        // season is shown as its first season.
-        let collapsed = dropLaterSeasons
-            ? data.page.media.filter { !$0.isLaterSeason }
-            : await SeasonRoots.collapse(data.page.media, client: client)
+        // A later season is shown as its first season (its own seasons are in the details
+        // page's dropdown).
+        let collapsed = await SeasonRoots.collapse(data.page.media, client: client)
         let adultOK = category?.isAdultOnly == true
         let shown = collapsed.filter { media in
             if media.isAdult == true && !adultOK { return false }   // a first season fetched by id
