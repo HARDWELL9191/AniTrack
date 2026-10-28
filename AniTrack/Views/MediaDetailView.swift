@@ -264,13 +264,17 @@ struct EntryEditorView: View {
     @State private var isSaving = false
     @State private var confirmDelete = false
     @State private var didLoad = false
+    /// Set when you pick a status yourself (not when the episode stepper changes it), so
+    /// "Completed"/"Planning" picked here applies to the whole show.
+    @State private var pickedStatus = false
 
     private var entryId: Int? { existing?.id ?? lite?.id }
 
     var body: some View {
         NavigationStack {
             Form {
-                Picker("Status", selection: $status) {
+                Picker("Status", selection: Binding(get: { status },
+                                                    set: { status = $0; pickedStatus = true })) {
                     ForEach(ListStatus.allCases) { s in
                         Label(s.label, systemImage: s.symbol).tag(s)
                     }
@@ -296,6 +300,8 @@ struct EntryEditorView: View {
             }
             .confirmationDialog("Remove from your list?", isPresented: $confirmDelete, titleVisibility: .visible) {
                 Button("Remove", role: .destructive) { Task { await remove() } }
+            } message: {
+                Text("Its other seasons are removed too.")
             }
             .onChange(of: progress) { _, newValue in
                 guard didLoad else { return }   // ignore the initial fill from your existing entry
@@ -314,9 +320,20 @@ struct EntryEditorView: View {
     private func save() async {
         isSaving = true
         defer { isSaving = false }
+        let isNew = entryId == nil
+        let oldScore = Int((existing?.score ?? lite?.score ?? 0).rounded())
+        let newScore = Int((score * 10).rounded())
         do {
-            try await model.save(media: media, status: status, progress: progress,
-                                 scoreRaw: Int((score * 10).rounded()))
+            try await model.save(media: media, status: status, progress: progress, scoreRaw: newScore)
+            // Show-level changes go to the other seasons too (progress stays per season).
+            if pickedStatus && status == .COMPLETED {
+                model.updateOtherSeasons(of: media, .watched)
+            } else if isNew || (pickedStatus && status == .PLANNING) {
+                model.updateOtherSeasons(of: media, .planned)
+            }
+            if newScore > 0 && newScore != oldScore {
+                model.updateOtherSeasons(of: media, .scored(newScore))
+            }
             dismiss()
         } catch {
             model.errorMessage = error.localizedDescription
@@ -326,7 +343,7 @@ struct EntryEditorView: View {
     private func remove() async {
         guard let entryId else { return }
         do {
-            try await model.delete(entryId: entryId)
+            try await model.removeShow(media, entryId: entryId)
             dismiss()
         } catch {
             model.errorMessage = error.localizedDescription

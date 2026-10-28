@@ -126,12 +126,14 @@ struct RemoveFromListSwipe: ViewModifier {
                     Button("Remove", role: .destructive) {
                         Task {
                             do {
-                                try await model.delete(entryId: entry.id)
+                                try await model.removeShow(entry.media, entryId: entry.id)
                             } catch {
                                 model.errorMessage = error.localizedDescription
                             }
                         }
                     }
+                } message: {
+                    Text("Its other seasons are removed too.")
                 }
         } else {
             content

@@ -11,6 +11,7 @@ struct DiscoverView: View {
     @State private var results: [Media] = []
     @State private var isSearching = false
     @State private var lastSearchKey = ""
+    @State private var searchError: String?
 
     @State private var trending: [Media] = []
     @State private var thisSeason: [Media] = []
@@ -139,6 +140,10 @@ struct DiscoverView: View {
             }
             if isSearching && results.isEmpty {
                 HStack { Spacer(); ProgressView(); Spacer() }
+            } else if !isSearching && results.isEmpty, let searchError {
+                // Not "no results": the search itself didn't go through (typing again retries).
+                ContentUnavailableView("Couldn't search", systemImage: "wifi.exclamationmark",
+                                       description: Text(searchError))
             } else if !isSearching && results.isEmpty {
                 ContentUnavailableView.search(text: query)
             }
@@ -158,7 +163,7 @@ struct DiscoverView: View {
 
     private func search() async {
         let text = query.trimmingCharacters(in: .whitespaces)
-        guard !text.isEmpty else { results = []; lastSearchKey = ""; return }
+        guard !text.isEmpty else { results = []; lastSearchKey = ""; searchError = nil; return }
         let key = "\(text)|\(searchCategory?.id ?? "")"
         guard key != lastSearchKey else { return }   // back from a detail page: keep results
         // Debounce typing so we don't hammer the API (and the battery).
@@ -171,9 +176,13 @@ struct DiscoverView: View {
             if !Task.isCancelled {
                 results = found
                 lastSearchKey = key
+                searchError = nil
             }
         } catch {
-            if !Task.isCancelled { results = [] }
+            if !Task.isCancelled && !AppModel.isCancellation(error) {
+                results = []
+                searchError = "Check your connection and try again. (\(error.localizedDescription))"
+            }
         }
     }
 

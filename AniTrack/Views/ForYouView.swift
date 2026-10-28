@@ -85,14 +85,16 @@ struct ForYouView: View {
                                                      : "Nothing new in \(category!.name) right now. Try another category."))
         } else {
             let safeIndex = min(index, picks.count - 1)
-            PickCard(rec: picks[safeIndex],
+            // Each button is tied to the card it belongs to (never re-looked-up at tap time).
+            let shownPick = picks[safeIndex]
+            PickCard(rec: shownPick,
                      position: safeIndex + 1 + handled,
                      total: picks.count + handled,
                      moreComing: !(feed?.exhausted ?? true),
                      onNext: { next(from: safeIndex) },
                      onDismiss: {
                          handled += 1
-                         withAnimation(.snappy) { model.dismissPick(picks[safeIndex].id) }
+                         withAnimation(.snappy) { model.dismissPick(shownPick.id, media: shownPick.media) }
                          preloadIfNeeded(at: safeIndex)
                      },
                      onWatched: {
@@ -100,7 +102,7 @@ struct ForYouView: View {
                          // markCompleted already took it out of the feed; the next pick slides in.
                          preloadIfNeeded(at: safeIndex)
                      })
-                .id(picks[safeIndex].id)
+                .id(shownPick.id)
                 .transition(.asymmetric(insertion: .move(edge: .trailing).combined(with: .opacity),
                                         removal: .move(edge: .leading).combined(with: .opacity)))
                 .padding(.horizontal)
@@ -359,14 +361,12 @@ struct PickCard: View {
     private func addToPlanning() async {
         isAdding = true
         defer { isAdding = false }
-        do {
-            try await model.save(media: rec.media, status: .PLANNING, progress: nil, scoreRaw: nil)
-            added = true
-            // Planned = handled: move on to the next pick (the feed drops it, the next card slides in).
-            withAnimation(.snappy) { model.removeFromFeeds(rec.id) }
-            onWatched()
-        } catch {
-            model.errorMessage = error.localizedDescription
-        }
+        // The whole show goes to Planning (its other seasons follow in the background).
+        let planned = await model.planToWatch(rec.media)
+        guard planned else { return }   // the error is shown already
+        added = true
+        // Planned = handled: move on to the next pick (the feed drops it, the next card slides in).
+        withAnimation(.snappy) { model.removeFromFeeds(rec.id) }
+        onWatched()
     }
 }

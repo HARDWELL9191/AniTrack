@@ -22,8 +22,15 @@ struct LibraryView: View {
     @State private var sort: SortOrder = .updated
     @State private var filter = ""
 
-    private var items: [ListEntry] {
-        var list = model.entries.filter { $0.status == status }
+    /// One row per show (its other seasons in the same list are folded under it).
+    private var rows: [AppModel.ShowRow] {
+        let grouped = model.shows(in: [status])
+        let extras = Dictionary(grouped.map { ($0.entry.id, $0.extraSeasons) }, uniquingKeysWith: { a, _ in a })
+        return items(grouped.map(\.entry)).map { AppModel.ShowRow(entry: $0, extraSeasons: extras[$0.id] ?? 0) }
+    }
+
+    private func items(_ source: [ListEntry]) -> [ListEntry] {
+        var list = source
         let text = filter.trimmingCharacters(in: .whitespaces)
         if !text.isEmpty {
             list = list.filter { entry in
@@ -75,15 +82,16 @@ struct LibraryView: View {
                     notForMeRows
                 } else {
                 Group {
-                    if items.isEmpty {
+                    let shown = rows
+                    if shown.isEmpty {
                         Text(model.isLoadingList ? "Loading…" : "No shows marked \(status.label.lowercased()).")
                             .foregroundStyle(.secondary)
                     }
-                    ForEach(items) { entry in
-                        NavigationLink(value: MediaLink(id: entry.mediaId)) {
-                            MediaRow(media: entry.media, subtitle: subtitle(for: entry))
+                    ForEach(shown) { row in
+                        NavigationLink(value: MediaLink(id: row.entry.mediaId)) {
+                            MediaRow(media: row.entry.media, subtitle: subtitle(for: row.entry, extraSeasons: row.extraSeasons))
                         }
-                        .removeFromListSwipe(entry)
+                        .removeFromListSwipe(row.entry)
                     }
                 }
                 }
@@ -137,9 +145,9 @@ struct LibraryView: View {
                         status = s
                     } label: {
                         if s == status && !showingNotForMe {
-                            Label("\(s.label) (\(model.count(of: s)))", systemImage: "checkmark")
+                            Label("\(s.label) (\(model.showCount(of: s)))", systemImage: "checkmark")
                         } else {
-                            Label("\(s.label) (\(model.count(of: s)))", systemImage: s.symbol)
+                            Label("\(s.label) (\(model.showCount(of: s)))", systemImage: s.symbol)
                         }
                     }
                 }
@@ -158,7 +166,7 @@ struct LibraryView: View {
                         Text("Not for me (\(model.settings.dismissedPicks.count))")
                     } else {
                         Image(systemName: status.symbol)
-                        Text("\(status.label) (\(model.count(of: status)))")
+                        Text("\(status.label) (\(model.showCount(of: status)))")
                     }
                     Image(systemName: "chevron.down").font(.caption.weight(.semibold))
                 }
@@ -202,13 +210,14 @@ struct LibraryView: View {
 
     /// Opens on the first status that actually has shows, unless you already picked one.
     private func pickDefaultStatus() {
-        guard !userPickedStatus, !showingNotForMe, model.count(of: status) == 0 else { return }
+        guard !userPickedStatus, !showingNotForMe, model.showCount(of: status) == 0 else { return }
         let order: [ListStatus] = [.CURRENT, .REPEATING, .PLANNING, .COMPLETED, .PAUSED, .DROPPED]
-        if let first = order.first(where: { model.count(of: $0) > 0 }) { status = first }
+        if let first = order.first(where: { model.showCount(of: $0) > 0 }) { status = first }
     }
 
-    private func subtitle(for entry: ListEntry) -> String {
+    private func subtitle(for entry: ListEntry, extraSeasons: Int) -> String {
         var parts: [String] = []
+        if extraSeasons > 0 { parts.append("\(extraSeasons + 1) seasons") }
         if entry.scoreValue > 0 { parts.append("Your score ★ \(Fmt.score(entry.score))") }
         parts.append(entry.media.formatLabel)
         if let season = entry.media.seasonLabel { parts.append(season) }

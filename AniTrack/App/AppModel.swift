@@ -147,6 +147,8 @@ final class AppModel {
         recommendationErrors = [:]
         forceRebuild = []
         // Builds still running for the old account must not land in the next one.
+        showSyncTask?.cancel()
+        showSyncTask = nil
         generationTasks.values.forEach { $0.cancel() }
         moreTasks.values.forEach { $0.cancel() }
         generationTasks = [:]
@@ -280,6 +282,46 @@ final class AppModel {
         entries.filter { $0.status == status }.count
     }
 
+    /// Your list as shows: a later season sits under an earlier season of the same show that's
+    /// in the same list (Completed S1 + S2 + S3 → one row, "+2 seasons"). A season that's alone
+    /// in a list (watching S2 while S1 is completed) keeps its own row. AniList still has one
+    /// entry per season; this only changes how they're shown.
+    struct ShowRow: Identifiable {
+        let entry: ListEntry
+        /// Other seasons of this show in the same list, folded under this row.
+        let extraSeasons: Int
+        var id: Int { entry.id }
+    }
+
+    func shows(in statuses: [ListStatus]) -> [ShowRow] {
+        let wanted = Set(statuses)
+        var extra: [Int: Int] = [:]   // shown mediaId → seasons folded under it
+        var folded: Set<Int> = []
+        for e in entries where wanted.contains(e.status) && e.media.isLaterSeason {
+            var current = e.media
+            var visited: Set<Int> = [e.mediaId]
+            var anchor: Int?
+            while let previous = current.prequelId, visited.count < 15, !visited.contains(previous),
+                  let earlier = entry(for: previous) {
+                visited.insert(previous)
+                if wanted.contains(earlier.status) && Seasons.isSeries(earlier.media.format) {
+                    anchor = earlier.mediaId   // keeps going: the earliest one wins
+                }
+                current = earlier.media
+            }
+            if let anchor {
+                folded.insert(e.mediaId)
+                extra[anchor, default: 0] += 1
+            }
+        }
+        return entries
+            .filter { wanted.contains($0.status) && !folded.contains($0.mediaId) }
+            .map { ShowRow(entry: $0, extraSeasons: extra[$0.mediaId] ?? 0) }
+    }
+
+    /// Shows (not seasons) in one list.
+    func showCount(of status: ListStatus) -> Int { shows(in: [status]).count }
+
     struct ListStats {
         var count: Int
         var episodes: Int
@@ -378,6 +420,7 @@ final class AppModel {
             if askRating && (existing?.scoreValue ?? 0) == 0 { ratePrompt = media }
             // It's on your list now, so it no longer belongs in any picks feed (not a dislike).
             removeFromFeeds(media.id)
+            updateOtherSeasons(of: media, .watched)
             return true
         } catch {
             errorMessage = error.localizedDescription
@@ -677,14 +720,108 @@ final class AppModel {
         }
     }
 
-    /// Long-press "Plan to watch": adds it to Planning (it then leaves Home rows and picks).
-    func planToWatch(_ media: Media) async {
+    /// "Plan to watch": adds the show (every season) to Planning; it then leaves Home rows and
+    /// picks. Returns false if AniList couldn't be updated.
+    @discardableResult
+    func planToWatch(_ media: Media) async -> Bool {
         do {
             try await save(media: media, status: .PLANNING, progress: nil, scoreRaw: nil)
             removeFromFeeds(media.id)
+            updateOtherSeasons(of: media, .planned)
+            return true
         } catch {
             errorMessage = error.localizedDescription
+            return false
         }
+    }
+
+    // MARK: - Whole show
+    //
+    // The app treats a show as one thing (its seasons live in the details page's dropdown),
+    // but AniList keeps one entry per season. So show-level changes are copied to the other
+    // seasons in the background, gently spaced, and your AniList stays complete:
+    // planned → the rest are planned too; watched → all completed (an airing season becomes
+    // Watching, an unreleased one Planning); removed → all removed; your score → every season
+    // you haven't scored yourself. Progress always stays per season.
+
+    enum ShowChange: Equatable {
+        case planned
+        case watched
+        case removed
+        case scored(Int)
+    }
+
+    @ObservationIgnored private var showSyncTask: Task<Void, Never>?
+
+    /// All seasons of the show `media` belongs to: TV/ONA entries with the same title, from the
+    /// same chain the season dropdown shows (named spin-off series are left alone).
+    private func otherSeasons(of media: Media) async -> [Media] {
+        guard Seasons.isSeries(media.format) else { return [] }
+        let chain = await SeasonChain.shared.seasons(for: media, client: client)
+        return chain.filter {
+            $0.id != media.id && Seasons.isSeries($0.format) && Seasons.sameShow(media.title, $0.title)
+        }
+    }
+
+    func updateOtherSeasons(of media: Media, _ change: ShowChange) {
+        guard case .loggedIn = mode else { return }
+        let previous = showSyncTask
+        let account = viewer?.id
+        // One after another, so two quick changes never race each other.
+        showSyncTask = Task {
+            await previous?.value
+            guard viewer?.id == account else { return }
+            let seasons = await otherSeasons(of: media)
+            var failed = false
+            for season in seasons {
+                guard viewer?.id == account, !Task.isCancelled else { return }
+                let current = entry(for: season.id)
+                do {
+                    var wrote = true
+                    switch change {
+                    case .planned:
+                        if current == nil {
+                            try await save(media: season, status: .PLANNING, progress: nil, scoreRaw: nil)
+                        } else { wrote = false }
+                    case .watched:
+                        if current?.status == .COMPLETED { wrote = false; break }
+                        switch season.status {
+                        case "NOT_YET_RELEASED":
+                            if current == nil {
+                                try await save(media: season, status: .PLANNING, progress: nil, scoreRaw: nil)
+                            } else { wrote = false }
+                        case "RELEASING":
+                            let aired = season.availableEpisodes ?? current?.progress
+                            try await save(media: season, status: .CURRENT,
+                                           progress: max(aired ?? 0, current?.progressValue ?? 0), scoreRaw: nil)
+                        default:
+                            try await save(media: season, status: .COMPLETED,
+                                           progress: season.episodes ?? current?.progress, scoreRaw: nil)
+                        }
+                    case .removed:
+                        if let current {
+                            try await delete(entryId: current.id)
+                        } else { wrote = false }
+                    case .scored(let score):
+                        if let current, current.scoreValue == 0, score > 0 {
+                            try await save(media: season, status: current.status, progress: nil, scoreRaw: score)
+                        } else { wrote = false }
+                    }
+                    if wrote { try? await Task.sleep(nanoseconds: Self.writeSpacing) }
+                } catch {
+                    failed = true
+                }
+            }
+            if failed {
+                errorMessage = "Couldn't update every season of \(media.displayTitle(settings.titleLanguage)) on AniList. Try again in a moment."
+            }
+        }
+    }
+
+    /// Removes the show from your list: this entry, then its other seasons.
+    func removeShow(_ media: Media, entryId: Int) async throws {
+        try await delete(entryId: entryId)
+        updateOtherSeasons(of: media, .removed)
     }
 
     /// The on-device AI setting changed, or Low Power Mode / heat ended: bring the AI part of

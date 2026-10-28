@@ -85,7 +85,8 @@ struct HomeView: View {
                     }
                 }
 
-                let watching = model.entries(in: [.CURRENT, .REPEATING])
+                let watching = model.shows(in: [.CURRENT, .REPEATING]).map(\.entry)
+                    .sorted { ($0.updatedAt ?? 0) > ($1.updatedAt ?? 0) }
                 if !watching.isEmpty {
                     HomeSection {
                         cardRow(watching.map(\.media), suggestions: false)
@@ -137,7 +138,7 @@ struct HomeView: View {
 
     /// Your Planning list, best fit first: answers "what should I start next?".
     private var planningByMatch: [Media] {
-        model.entries(in: [.PLANNING])
+        model.shows(in: [.PLANNING]).map(\.entry)
             .map { ($0.media, model.matcher.match(for: $0.media) ?? 0) }
             .sorted { $0.1 > $1.1 }
             .prefix(15)
@@ -300,7 +301,7 @@ struct ProfileHeader: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(viewer.name).font(.title3.bold())
                 let stats = model.listStats
-                Text("\(model.count(of: .COMPLETED)) seen · \(model.count(of: .PLANNING)) planned · \(model.count(of: .DROPPED)) dropped")
+                Text("\(model.showCount(of: .COMPLETED)) seen · \(model.showCount(of: .PLANNING)) planned · \(model.showCount(of: .DROPPED)) dropped")
                     .font(.caption).foregroundStyle(.secondary)
                 Text(stats.meanScore.map { "Your average score \(String(format: "%.1f", $0))/10" } ?? "Rate shows to sharpen your picks")
                     .font(.caption).foregroundStyle(.secondary)

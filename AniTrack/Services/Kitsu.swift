@@ -306,8 +306,18 @@ actor SeasonChain {
         // (Dragon Ball → Z → GT, and Super).
         let extras = await Self.foldedSeasons(for: result)
         let present = Set(result.map(\.id))
-        let added = extras.filter { !present.contains($0.id) && Seasons.isSeries($0.format) }
+        var added = extras.filter { !present.contains($0.id) && Seasons.isSeries($0.format) }
+        var seenAdded: Set<Int> = []
+        added = added.filter { seenAdded.insert($0.id).inserted }
         if !added.isEmpty {
+            // Saved copies can be up to a week old: fetch them fresh (one request), so an airing
+            // season shows its current episodes. Offline, the saved copies are used.
+            if let data = try? await client.run(Queries.mediaByIds,
+                                                 variables: ["ids": added.map(\.id), "perPage": min(added.count, 50)],
+                                                 as: PageData.self) {
+                let fresh = Dictionary(data.page.media.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+                added = added.map { fresh[$0.id] ?? $0 }
+            }
             var seen: Set<Int> = []
             result = (result + added).filter { seen.insert($0.id).inserted }.sorted(by: Self.airedBefore)
         }

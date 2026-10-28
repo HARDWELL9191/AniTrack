@@ -53,6 +53,7 @@ struct RatePromptView: View {
         do {
             let status = model.entry(for: media.id)?.status ?? .COMPLETED
             try await model.save(media: media, status: status, progress: nil, scoreRaw: value * 10)
+            model.updateOtherSeasons(of: media, .scored(value * 10))
             dismiss()
         } catch {
             model.errorMessage = error.localizedDescription

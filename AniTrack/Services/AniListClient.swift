@@ -207,12 +207,12 @@ enum Queries {
             progress
             updatedAt
             createdAt
-            media { ...media }
+            media { ...media ...rel }
           }
         }
       }
     }
-    """ + mediaFragment
+    """ + mediaFragment + relFragment
 
     static let browse = """
     query ($page: Int, $perPage: Int, $search: String, $sort: [MediaSort], $season: MediaSeason,
