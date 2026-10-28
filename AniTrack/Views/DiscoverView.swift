@@ -19,6 +19,9 @@ struct DiscoverView: View {
     @State private var topRated: [Media] = []
     @State private var loadedSections = false
     @State private var isLoadingSections = false
+    @State private var isVisible = false
+    @State private var shelvesSavedAt: Date?
+    @State private var pendingShelves: SavedShelves?
     @State private var browseCategory: AnimeCategory?
     @State private var sectionError: String?
 
@@ -50,6 +53,7 @@ struct DiscoverView: View {
             }
             .navigationDestination(item: $browseCategory) { CategoryBrowseView(category: $0) }
             .task { await loadSections() }
+            .onDisappear { isVisible = false }
         }
         .pushDetailAction($path)
     }
@@ -73,18 +77,15 @@ struct DiscoverView: View {
                                            items: nextSeason)
                 }
                 if !topRated.isEmpty { HorizontalMediaSection(title: "All-time top rated", items: topRated) }
-                // Only while shelves are actually loading (one failed shelf used to leave it
-                // spinning forever under the ones that did load).
-                if isLoadingSections {
+                // Only while there's nothing to show yet (a refresh behind saved shelves
+                // never shows a spinner).
+                if isLoadingSections && trending.isEmpty && thisSeason.isEmpty && nextSeason.isEmpty && topRated.isEmpty {
                     ProgressView().frame(maxWidth: .infinity).padding(.top, 60)
                 }
             }
             .padding(.vertical)
         }
-        .refreshable {
-            loadedSections = false
-            await loadSections()
-        }
+        .refreshable { await refreshShelves() }
     }
 
     /// Minimal "Browse by category" dropdown; picking one opens that category's page.
@@ -186,47 +187,97 @@ struct DiscoverView: View {
         }
     }
 
+    // MARK: Shelves (saved on the phone)
+    //
+    // Discover opens instantly with the shelves from last time, all four at once. Shelves under
+    // 6 hours old are used as they are (no requests). Older ones are fetched behind the screen
+    // and swapped in only while Discover isn't on screen, so cards never change under you.
+    // Pull to refresh fetches and shows fresh shelves right away.
+
+    private struct SavedShelves: Codable {
+        var trending: [Media]
+        var thisSeason: [Media]
+        var nextSeason: [Media]
+        var topRated: [Media]
+        var savedAt: Date
+        /// The season the shelves were built for ("FALL-2026"); a new season starts fresh.
+        var seasonKey: String
+    }
+
+    private static let shelvesFile = "discover-shelves-v1"
+    private static let shelvesMaxAge: TimeInterval = 6 * 3_600
+    private static var currentSeasonKey: String {
+        let s = AppModel.currentSeason()
+        return "\(s.season)-\(s.year)"
+    }
+
     private func loadSections() async {
-        guard !loadedSections, !isLoadingSections else { return }
+        isVisible = true
+        // Fresh shelves that arrived while you were elsewhere: show them now, all at once.
+        if let pending = pendingShelves {
+            pendingShelves = nil
+            show(pending)
+        }
+        if !loadedSections, let saved = await DiskCache.loadInBackground(SavedShelves.self, name: Self.shelvesFile),
+           saved.seasonKey == Self.currentSeasonKey, trending.isEmpty && thisSeason.isEmpty {
+            show(saved)
+            loadedSections = true
+            shelvesSavedAt = saved.savedAt
+        }
+        let stale = shelvesSavedAt.map { Date().timeIntervalSince($0) > Self.shelvesMaxAge } ?? true
+        guard !loadedSections || stale else { return }
+        // Nothing to show yet: load with the spinner. Otherwise refresh behind the screen.
+        await fetchShelves(showWhenDone: !loadedSections)
+    }
+
+    /// Pull to refresh: always fresh, shown right away.
+    private func refreshShelves() async {
+        await fetchShelves(showWhenDone: true)
+    }
+
+    private func fetchShelves(showWhenDone: Bool) async {
+        guard !isLoadingSections else { return }
         isLoadingSections = true
         defer { isLoadingSections = false }
         let current = AppModel.currentSeason()
         let upcoming = AppModel.currentSeason(offset: 1)
-        // Each shelf loads on its own: one failing doesn't blank the others.
-        async let t = shelf(sort: ["TRENDING_DESC", "POPULARITY_DESC"])
-        async let s = shelf(sort: ["POPULARITY_DESC"], season: current.season, year: current.year)
-        async let n = shelf(sort: ["POPULARITY_DESC"], season: upcoming.season, year: upcoming.year)
-        async let r = shelf(sort: ["SCORE_DESC"])
-        // Shelves that already loaded are kept (only the missing ones matter on a retry).
-        let results = [await t, await s, await n, await r]
-        var failures: [Error] = []
-        for (index, result) in results.enumerated() {
-            switch result {
-            case .success(let items):
-                withAnimation(.snappy) {
-                    switch index {
-                    case 0: trending = items
-                    case 1: thisSeason = items
-                    case 2: nextSeason = items
-                    default: topRated = items
-                    }
-                }
-            case .failure(let error):
-                failures.append(error)
-            }
+        // All four at once, with one shared first-season lookup.
+        let results = await model.browseShelves([
+            .init(sort: ["TRENDING_DESC", "POPULARITY_DESC"]),
+            .init(sort: ["POPULARITY_DESC"], season: current.season, seasonYear: current.year),
+            .init(sort: ["POPULARITY_DESC"], season: upcoming.season, seasonYear: upcoming.year),
+            .init(sort: ["SCORE_DESC"])
+        ])
+        let failures = results.compactMap { result -> Error? in
+            if case .failure(let error) = result { return error }
+            return nil
         }
+        // A shelf that failed keeps what it had.
+        func items(_ index: Int, _ old: [Media]) -> [Media] { (try? results[index].get()) ?? old }
+        let fresh = SavedShelves(trending: items(0, trending), thisSeason: items(1, thisSeason),
+                                 nextSeason: items(2, nextSeason), topRated: items(3, topRated),
+                                 savedAt: Date(), seasonKey: Self.currentSeasonKey)
         // Cancelled (you left the tab mid-load) isn't an error: just try again next time.
         let realFailures = failures.filter { !AppModel.isCancellation($0) }
-        sectionError = realFailures.count == results.count ? realFailures.first?.localizedDescription : nil
+        if failures.isEmpty {
+            DiskCache.saveInBackground(fresh, name: Self.shelvesFile)
+            shelvesSavedAt = fresh.savedAt
+        }
+        if showWhenDone || !isVisible || !query.trimmingCharacters(in: .whitespaces).isEmpty {
+            show(fresh)   // asked for, or not on screen right now
+        } else if failures.isEmpty {
+            pendingShelves = fresh   // on screen: swapped in next time Discover appears
+        }
+        sectionError = realFailures.count == results.count && trending.isEmpty && thisSeason.isEmpty
+            ? realFailures.first?.localizedDescription : nil
         // Anything missing is fetched again the next time Discover appears.
-        loadedSections = failures.isEmpty
+        loadedSections = failures.isEmpty || loadedSections
     }
 
-    private func shelf(sort: [String], season: String? = nil, year: Int? = nil) async -> Result<[Media], Error> {
-        do {
-            return .success(try await model.browse(sort: sort, season: season, seasonYear: year))
-        } catch {
-            return .failure(error)
-        }
+    private func show(_ shelves: SavedShelves) {
+        trending = shelves.trending
+        thisSeason = shelves.thisSeason
+        nextSeason = shelves.nextSeason
+        topRated = shelves.topRated
     }
 }

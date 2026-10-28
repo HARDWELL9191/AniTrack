@@ -471,6 +471,86 @@ final class AppModel {
                     firstSeasonsOnly: Bool = false,
                     page: Int = 1,
                     perPage: Int = 25) async throws -> (media: [Media], hasNextPage: Bool) {
+        let raw = try await rawPage(search: search, sort: sort, season: season, seasonYear: seasonYear,
+                                    status: status, category: category, genres: genres,
+                                    excludeGenres: excludeGenres, minScore: minScore,
+                                    maxPopularity: maxPopularity, minPopularity: minPopularity,
+                                    page: page, perPage: perPage)
+        // A later season is shown as its first season (its own seasons are in the details
+        // page's dropdown).
+        let collapsed = await SeasonRoots.collapse(raw.media, client: client)
+        let searching = !(search ?? "").isEmpty
+        return (finish(collapsed, searching: searching, category: category, firstSeasonsOnly: firstSeasonsOnly),
+                raw.hasNextPage)
+    }
+
+    /// One Discover shelf.
+    struct ShelfSpec: Sendable {
+        let sort: [String]
+        var season: String? = nil
+        var seasonYear: Int? = nil
+    }
+
+    /// Several shelves at once, with one shared first-season lookup: a show that's in two
+    /// shelves is looked up once, and every shelf is ready at the same moment. Each result is
+    /// that shelf's shows, or its error (one failing shelf never blanks the others).
+    func browseShelves(_ specs: [ShelfSpec]) async -> [Result<[Media], Error>] {
+        var raw: [Result<[Media], Error>] = Array(repeating: .success([]), count: specs.count)
+        await withTaskGroup(of: (Int, Result<[Media], Error>).self) { group in
+            for (index, spec) in specs.enumerated() {
+                group.addTask {
+                    do {
+                        let page = try await self.rawPage(sort: spec.sort, season: spec.season,
+                                                          seasonYear: spec.seasonYear)
+                        return (index, .success(page.media))
+                    } catch {
+                        return (index, .failure(error))
+                    }
+                }
+            }
+            for await (index, result) in group { raw[index] = result }
+        }
+        var known: [Int: Media] = [:]
+        for result in raw { for m in (try? result.get()) ?? [] { known[m.id] = m } }
+        let later = known.values.filter(\.isLaterSeason)
+        var found: [Int: SeasonRoots.Found] = [:]
+        if !later.isEmpty {
+            found = await SeasonRoots.resolve(Array(later), known: known, client: client, waitOnRateLimit: false)
+        }
+        return raw.map { result in
+            result.map { finish(SeasonRoots.apply($0, found: found), searching: false, category: nil, firstSeasonsOnly: false) }
+        }
+    }
+
+    /// The local filters every browse result goes through.
+    private func finish(_ items: [Media], searching: Bool, category: AnimeCategory?, firstSeasonsOnly: Bool) -> [Media] {
+        let adultOK = category?.isAdultOnly == true
+        return items.filter { media in
+            if media.isAdult == true && !adultOK { return false }   // a first season fetched by id
+            if media.isMovie && !searching { return false }
+            if settings.hideChinese && media.countryOfOrigin == "CN" { return false }
+            // "Not for me" stays out of every shelf and category page (search still finds it).
+            if !searching && settings.dismissedPicks.contains(media.id) { return false }
+            // Suggestion shelves: a show where you already have another season is skipped.
+            if firstSeasonsOnly && franchises.contains(media) { return false }
+            return true
+        }
+    }
+
+    /// One page from AniList as it comes (with relations), before any local filtering.
+    private func rawPage(search: String? = nil,
+                         sort: [String],
+                         season: String? = nil,
+                         seasonYear: Int? = nil,
+                         status: String? = nil,
+                         category: AnimeCategory? = nil,
+                         genres: [String]? = nil,
+                         excludeGenres: [String]? = nil,
+                         minScore: Int? = nil,
+                         maxPopularity: Int? = nil,
+                         minPopularity: Int? = nil,
+                         page: Int = 1,
+                         perPage: Int = 25) async throws -> (media: [Media], hasNextPage: Bool) {
         var vars: [String: Any] = ["page": page, "perPage": perPage, "sort": sort,
                                    "isAdult": category?.isAdultOnly == true]
         if let genres, !genres.isEmpty { vars["genres"] = genres }
@@ -487,21 +567,7 @@ final class AppModel {
         // With relations, so later seasons can be told apart and shown as their first season.
         let data = try await client.run(Queries.browseWithRelations, variables: vars, as: PageData.self)
         let hasNext = data.page.pageInfo?.hasNextPage ?? (data.page.media.count >= perPage)
-        // A later season is shown as its first season (its own seasons are in the details
-        // page's dropdown).
-        let collapsed = await SeasonRoots.collapse(data.page.media, client: client)
-        let adultOK = category?.isAdultOnly == true
-        let shown = collapsed.filter { media in
-            if media.isAdult == true && !adultOK { return false }   // a first season fetched by id
-            if media.isMovie && !searching { return false }
-            if settings.hideChinese && media.countryOfOrigin == "CN" { return false }
-            // "Not for me" stays out of every shelf and category page (search still finds it).
-            if !searching && settings.dismissedPicks.contains(media.id) { return false }
-            // Suggestion shelves: a show where you already have another season is skipped.
-            if firstSeasonsOnly && franchises.contains(media) { return false }
-            return true
-        }
-        return (shown, hasNext)
+        return (data.page.media, hasNext)
     }
 
     func detail(id: Int) async throws -> MediaDetail {

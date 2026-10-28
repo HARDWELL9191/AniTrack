@@ -573,6 +573,11 @@ enum SeasonRoots {
         guard !later.isEmpty else { return items }
         let found = await resolve(later, known: Dictionary(items.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }),
                                   client: client, waitOnRateLimit: false)
+        return apply(items, found: found)
+    }
+
+    /// Swaps in first seasons already worked out (same order, no duplicates).
+    static func apply(_ items: [Media], found: [Int: Found]) -> [Media] {
         var seen: Set<Int> = []
         var result: [Media] = []
         for media in items {
