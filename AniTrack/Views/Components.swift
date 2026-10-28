@@ -106,21 +106,24 @@ struct BannerImageView: View {
 struct RemoveFromListSwipe: ViewModifier {
     @Environment(AppModel.self) private var model
     let entry: ListEntry
-    @State private var confirm = false
 
     @ViewBuilder
     func body(content: Content) -> some View {
         if model.canEdit {
             content
                 .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                    // Not role: .destructive — that makes iOS slide the row away right away,
-                    // before you've confirmed (it then jumped back). Red, and asks first.
-                    Button {
-                        confirm = true
+                    // Swipe = removed, no question asked (the whole show, every season).
+                    Button(role: .destructive) {
+                        Task {
+                            do {
+                                try await model.removeShow(entry.media, entryId: entry.id)
+                            } catch {
+                                model.errorMessage = error.localizedDescription
+                            }
+                        }
                     } label: {
                         Label("Remove", systemImage: "trash")
                     }
-                    .tint(.red)
                 }
                 .swipeActions(edge: .leading, allowsFullSwipe: true) {
                     if entry.status != .COMPLETED {
@@ -131,20 +134,6 @@ struct RemoveFromListSwipe: ViewModifier {
                         }
                         .tint(.green)
                     }
-                }
-                .confirmationDialog("Remove \(entry.media.displayTitle(model.settings.titleLanguage)) from your list?",
-                                    isPresented: $confirm, titleVisibility: .visible) {
-                    Button("Remove", role: .destructive) {
-                        Task {
-                            do {
-                                try await model.removeShow(entry.media, entryId: entry.id)
-                            } catch {
-                                model.errorMessage = error.localizedDescription
-                            }
-                        }
-                    }
-                } message: {
-                    Text("Its other seasons are removed too.")
                 }
         } else {
             content

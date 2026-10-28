@@ -970,8 +970,17 @@ final class AppModel {
     }
 
     /// Removes the show from your list: this entry, then its other seasons.
+    /// Leaves your list at once (the row never jumps back while AniList answers); if AniList
+    /// says no, it comes back and the error is shown.
     func removeShow(_ media: Media, entryId: Int) async throws {
-        try await delete(entryId: entryId)
+        let removed = entries.first { $0.id == entryId }
+        entries.removeAll { $0.id == entryId }
+        do {
+            _ = try await client.run(Queries.deleteEntry, variables: ["id": entryId], as: DeleteEntryData.self)
+        } catch {
+            if let removed, !entries.contains(where: { $0.id == entryId }) { entries.append(removed) }
+            throw error
+        }
         updateOtherSeasons(of: media, .removed)
     }
 
