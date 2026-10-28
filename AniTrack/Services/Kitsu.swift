@@ -340,7 +340,7 @@ actor EpisodeService {
             memory[media.id] = saved
             return saved
         }
-        async let streaming = streamingEpisodes(media.id, client: client)
+        async let streaming = streamingEpisodes(media.id, laterPart: Self.hasSeriesPrequel(media), client: client)
         async let kitsuId = KitsuClient.shared.kitsuId(for: .init(id: media.id, mal: media.idMal))
         let fromAniList = await streaming
         let kid = await kitsuId
@@ -403,32 +403,41 @@ actor EpisodeService {
         }
     }
 
-    private func streamingEpisodes(_ id: Int, client: AniListClient) async -> [EpisodeInfo] {
+    /// Season 2+, or the second cour of a season (has a TV/ONA entry before it).
+    private static func hasSeriesPrequel(_ media: Media) -> Bool {
+        (media.relations?.edges ?? []).contains {
+            $0.relationType == "PREQUEL" && Seasons.isSeries($0.node?.format)
+        }
+    }
+
+    private func streamingEpisodes(_ id: Int, laterPart: Bool, client: AniListClient) async -> [EpisodeInfo] {
         guard let data = try? await client.run(Queries.streamingEpisodes, variables: ["id": id],
                                                as: StreamingEpisodesData.self) else { return [] }
         var result: [EpisodeInfo] = []
         let raw = data.media?.streamingEpisodes ?? []
         for (index, ep) in raw.reversed().enumerated() {   // AniList lists them newest first
-            let (number, title) = Self.parse(ep.title, fallback: index + 1)
-            guard number >= 1 else { continue }              // "Episode 0" specials
+            let (number, title, special) = Self.parse(ep.title, fallback: index + 1)
+            guard number >= 1, !special else { continue }    // "Episode 0" / "Episode 24.5" specials
             result.append(EpisodeInfo(number: number, title: title, description: nil, thumbnail: ep.thumbnail))
         }
-        // Second cours on streaming sites often keep counting ("Episode 12" is this part's
-        // episode 1): shift so the first one is 1.
+        // Later parts on streaming sites often keep counting ("Episode 12" is this part's
+        // episode 1): shift so the first one is 1. A first season whose list doesn't start at
+        // episode 1 is another season's list (an AniList data mix-up), so it isn't used.
         if let first = result.map(\.number).min(), first > 1 {
+            guard laterPart else { return [] }
             result = result.map { var e = $0; e.number -= first - 1; return e }
         }
         return result
     }
 
-    /// "Episode 12 - The Title" → (12, "The Title").
-    static func parse(_ raw: String?, fallback: Int) -> (Int, String?) {
-        guard let raw = raw?.trimmingCharacters(in: .whitespaces), !raw.isEmpty else { return (fallback, nil) }
-        if let match = raw.firstMatch(of: #/^(?:Episode|Ep\.?)\s*(\d+)\s*[-–—:]?\s*(.*)$/#.ignoresCase()) {
+    /// "Episode 12 - The Title" → (12, "The Title", false); "Episode 24.5 - Recap" is a special.
+    static func parse(_ raw: String?, fallback: Int) -> (Int, String?, Bool) {
+        guard let raw = raw?.trimmingCharacters(in: .whitespaces), !raw.isEmpty else { return (fallback, nil, false) }
+        if let match = raw.firstMatch(of: #/^(?:Episode|Ep\.?)\s*(\d+)(\.\d+)?\s*[-–—:]?\s*(.*)$/#.ignoresCase()) {
             let number = Int(match.1) ?? fallback
-            let title = String(match.2).trimmingCharacters(in: .whitespaces)
-            return (number, title.isEmpty ? nil : title)
+            let title = String(match.3).trimmingCharacters(in: .whitespaces)
+            return (number, title.isEmpty ? nil : title, match.2 != nil)
         }
-        return (fallback, raw)
+        return (fallback, raw, false)
     }
 }
