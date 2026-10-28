@@ -241,7 +241,7 @@ struct MediaCard: View {
                         }
                     }
                     .overlay(alignment: .topLeading) {
-                        AgeBadge(mediaId: media.id).padding(5)
+                        AgeBadge(media: media).padding(5)
                     }
                 if let entry = model.entry(for: media.id) {
                     Image(systemName: entry.status.symbol)
@@ -294,7 +294,7 @@ struct MediaRow: View {
                             MatchBubble(value: value)
                         }
                     }
-                    AgeBadge(mediaId: media.id)
+                    AgeBadge(media: media)
                 }
             }
             Spacer(minLength: 0)

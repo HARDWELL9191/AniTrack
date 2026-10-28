@@ -57,7 +57,7 @@ struct MediaDetailView: View {
                 HStack(alignment: .bottom, spacing: 14) {
                     CoverImageView(url: media.coverURL, color: media.coverImage?.color,
                                    width: 110, height: 160, cornerRadius: 10)
-                        .overlay(alignment: .topLeading) { AgeBadge(mediaId: media.id).padding(5) }
+                        .overlay(alignment: .topLeading) { AgeBadge(media: media).padding(5) }
                         .shadow(color: .black.opacity(0.25), radius: 8, y: 4)
                     VStack(alignment: .leading, spacing: 6) {
                         Text(media.displayTitle(model.settings.titleLanguage))

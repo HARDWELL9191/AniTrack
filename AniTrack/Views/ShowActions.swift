@@ -86,7 +86,7 @@ struct ShowMenuPreview: View {
         VStack(alignment: .leading, spacing: 8) {
             CoverImageView(url: media.coverURL, color: media.coverImage?.color,
                            width: 200, height: 290, cornerRadius: 12)
-                .overlay(alignment: .topLeading) { AgeBadge(mediaId: media.id).padding(6) }
+                .overlay(alignment: .topLeading) { AgeBadge(media: media).padding(6) }
                 .overlay(alignment: .bottomLeading) {
                     if let value = match ?? model.matcher.match(for: media) { MatchBubble(value: value).padding(6) }
                 }
@@ -213,7 +213,8 @@ struct AgeBubble: View {
 /// The age bubble for a show, if its rating is known (asks for it when it appears).
 struct AgeBadge: View {
     @Environment(AppModel.self) private var model
-    let mediaId: Int
+    let media: Media
+    private var mediaId: Int { media.id }
 
     var body: some View {
         ZStack {
@@ -223,6 +224,6 @@ struct AgeBadge: View {
             }
         }
         .animation(.easeOut(duration: 0.2), value: model.ages.rating(for: mediaId)?.label)
-        .onAppear { model.ages.request(mediaId) }
+        .onAppear { model.ages.request(media) }
     }
 }

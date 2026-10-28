@@ -45,6 +45,14 @@ def run(q, variables):
         return e.code, e.read(), time.time() - t
 
 
+if os.environ.get("ANILIST_USER", "") == "episodes":
+    import traceback
+    try:
+        exec(open("tools/episodes_check.py").read(), globals())
+    except Exception:
+        note("episodes crash", traceback.format_exc()[-1500:], "error")
+    raise SystemExit(0)
+
 if os.environ.get("ANILIST_USER", "") == "kitsu-missing":
     import traceback
     try:

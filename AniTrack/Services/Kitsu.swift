@@ -51,14 +51,15 @@ struct EpisodeInfo: Identifiable, Codable, Hashable {
 
 /// Kitsu's free public API (no account or key). Used for two things only: age ratings and
 /// episode descriptions/thumbnails. Shows are matched by their AniList id, so there's no
-/// title guessing. Ratings are saved on the phone for good; a show Kitsu doesn't know is
-/// re-checked after a week.
+/// title guessing. Ratings are saved on the phone for good; a show without one is
+/// re-checked after a day.
 actor KitsuClient {
     static let shared = KitsuClient()
 
     private static let base = "https://kitsu.app/api/edge"
     private static let cacheName = "kitsu-ratings-v1"
-    private static let recheckMissingAfter: TimeInterval = 7 * 86_400
+    /// Shows without a rating yet are checked again after this long.
+    private static let recheckAfter: TimeInterval = 86_400
 
     struct Mapping: Codable {
         var kitsuId: String?
@@ -101,30 +102,50 @@ actor KitsuClient {
         return result
     }
 
-    /// Looks up ratings (up to 20 shows per request). `failed` is true when Kitsu couldn't be
+    /// A show to look up: its AniList id, plus its MyAnimeList id as a backup (Kitsu links
+    /// some shows, e.g. brand-new ones, only by their MyAnimeList id).
+    struct Lookup: Hashable {
+        let id: Int
+        let mal: Int?
+    }
+
+    /// Looks up ratings, 10 shows per request. `failed` is true when Kitsu couldn't be
     /// reached, so the caller can try again later instead of treating the shows as unknown.
-    func ratings(for ids: [Int]) async -> (found: [Int: AgeRating], failed: Bool) {
+    /// A rating, once found, is kept for good; a show without one (Kitsu often rates new
+    /// shows a while after they start airing) is checked again after a day.
+    func ratings(for lookups: [Lookup]) async -> (found: [Int: AgeRating], failed: Bool) {
         await loadIfNeeded()
         var found: [Int: AgeRating] = [:]
-        var toFetch: [Int] = []
+        var toFetch: [Lookup] = []
         let now = Date()
-        for id in Set(ids) {
-            if let m = mappings[id] {
-                if let r = m.rating { found[id] = r; continue }
-                if m.kitsuId != nil || now.timeIntervalSince(m.checkedAt) < Self.recheckMissingAfter { continue }
+        for lookup in Set(lookups) {
+            if let m = mappings[lookup.id] {
+                if let r = m.rating { found[lookup.id] = r; continue }
+                if now.timeIntervalSince(m.checkedAt) < Self.recheckAfter { continue }
             }
-            toFetch.append(id)
+            toFetch.append(lookup)
         }
         var failed = false
         var start = 0
         while start < toFetch.count {
-            let chunk = Array(toFetch[start..<min(start + 20, toFetch.count)])
-            start += 20
-            guard let fetched = await fetchMappings(chunk) else { failed = true; break }
-            for id in chunk {
-                let m = fetched[id] ?? Mapping(kitsuId: nil, rating: nil, checkedAt: now)
-                mappings[id] = m
-                if let r = m.rating { found[id] = r }
+            let chunk = Array(toFetch[start..<min(start + 10, toFetch.count)])
+            start += 10
+            guard var fetched = await fetchMappings(site: "anilist/anime", ids: chunk.map(\.id)) else {
+                failed = true
+                break
+            }
+            // Backup: shows Kitsu hasn't linked to AniList yet, by their MyAnimeList id.
+            let unlinked = chunk.filter { fetched[$0.id] == nil && $0.mal != nil }
+            if !unlinked.isEmpty,
+               let byMal = await fetchMappings(site: "myanimelist/anime", ids: unlinked.compactMap(\.mal)) {
+                for lookup in unlinked {
+                    if let mal = lookup.mal, let m = byMal[mal] { fetched[lookup.id] = m }
+                }
+            }
+            for lookup in chunk {
+                let m = fetched[lookup.id] ?? Mapping(kitsuId: mappings[lookup.id]?.kitsuId, rating: nil, checkedAt: now)
+                mappings[lookup.id] = m
+                if let r = m.rating { found[lookup.id] = r }
             }
         }
         if !toFetch.isEmpty { scheduleSave() }
@@ -132,16 +153,17 @@ actor KitsuClient {
     }
 
     /// Kitsu's own id for a show (needed for its episode list).
-    func kitsuId(for anilistId: Int) async -> String? {
+    func kitsuId(for lookup: Lookup) async -> String? {
         await loadIfNeeded()
-        if let id = mappings[anilistId]?.kitsuId { return id }
-        _ = await ratings(for: [anilistId])
-        return mappings[anilistId]?.kitsuId
+        if let id = mappings[lookup.id]?.kitsuId { return id }
+        _ = await ratings(for: [lookup])
+        return mappings[lookup.id]?.kitsuId
     }
 
-    private func fetchMappings(_ ids: [Int]) async -> [Int: Mapping]? {
+    /// Kitsu mappings for up to 10 ids of one site, keyed by that site's id.
+    private func fetchMappings(site: String, ids: [Int]) async -> [Int: Mapping]? {
         let list = ids.map(String.init).joined(separator: ",")
-        let url = "\(Self.base)/mappings?filter%5BexternalSite%5D=anilist/anime&filter%5BexternalId%5D=\(list)"
+        let url = "\(Self.base)/mappings?filter%5BexternalSite%5D=\(site)&filter%5BexternalId%5D=\(list)"
             + "&include=item&page%5Blimit%5D=20&fields%5Banime%5D=ageRating,ageRatingGuide"
         guard let response: MappingResponse = await get(url) else { return nil }
         var ratingsByKitsuId: [String: AgeRating] = [:]
@@ -319,7 +341,7 @@ actor EpisodeService {
             return saved
         }
         async let streaming = streamingEpisodes(media.id, client: client)
-        async let kitsuId = KitsuClient.shared.kitsuId(for: media.id)
+        async let kitsuId = KitsuClient.shared.kitsuId(for: .init(id: media.id, mal: media.idMal))
         let fromAniList = await streaming
         let kid = await kitsuId
         var kitsu: (episodes: [EpisodeInfo], total: Int?)? = nil

@@ -30,6 +30,8 @@ struct MediaTag: Codable, Hashable {
 
 struct Media: Codable, Identifiable, Hashable {
     var id: Int
+    /// MyAnimeList id (backup for finding the show on Kitsu).
+    var idMal: Int?
     var title: MediaTitle
     var coverImage: CoverImage?
     var bannerImage: String?

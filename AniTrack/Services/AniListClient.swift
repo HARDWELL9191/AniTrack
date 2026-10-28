@@ -89,6 +89,7 @@ enum Queries {
     static let mediaFragment = """
     fragment media on Media {
       id
+      idMal
       title { romaji english native userPreferred }
       coverImage { large extraLarge color }
       bannerImage

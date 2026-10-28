@@ -179,7 +179,7 @@ struct PickCard: View {
             HStack(alignment: .top, spacing: 14) {
                 CoverImageView(url: rec.media.coverURL, color: rec.media.coverImage?.color,
                                width: 120, height: 174, cornerRadius: 12)
-                    .overlay(alignment: .topLeading) { AgeBadge(mediaId: rec.media.id).padding(6) }
+                    .overlay(alignment: .topLeading) { AgeBadge(media: rec.media).padding(6) }
                     .zoomSource(id: rec.media.id, in: zoom)
                     .shadow(color: .black.opacity(0.2), radius: 8, y: 4)
                 VStack(alignment: .leading, spacing: 8) {
