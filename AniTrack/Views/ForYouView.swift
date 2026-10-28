@@ -31,17 +31,11 @@ struct ForYouView: View {
             .toolbarTitleDisplayMode(.inlineLarge)
             .mediaDestination(zoom: zoom)
             .environment(\.zoomNamespace, zoom)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        index = 0
-                        handled = 0
-                        Task { await model.generateRecommendations(category: category, force: true) }
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
-                    }
-                    .disabled(model.isLoadingFeed(category))
-                }
+            // Pull down for fresh picks (same as Discover).
+            .refreshable {
+                index = 0
+                handled = 0
+                await model.generateRecommendations(category: category, force: true)
             }
             .task(id: category?.id ?? "any") {
                 if model.entries.isEmpty { await model.refreshList() }

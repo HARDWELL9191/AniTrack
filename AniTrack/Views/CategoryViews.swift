@@ -13,6 +13,7 @@ struct CategoryChipsBar: View {
 
     var body: some View {
         HStack {
+            Spacer()
             Menu {
                 if showAny {
                     Button { selected = nil } label: {
@@ -31,18 +32,10 @@ struct CategoryChipsBar: View {
                     Label("All categories…", systemImage: "magnifyingglass")
                 }
             } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "line.3.horizontal.decrease")
-                    Text(selected?.name ?? "Any category")
-                        .lineLimit(1)
-                    Image(systemName: "chevron.down")
-                        .font(.caption.weight(.semibold))
-                }
-                .font(.subheadline.weight(.semibold))
+                CategoryMenuLabel(text: selected?.name ?? "Any category")
             }
             .menuStyle(.button)
             .buttonStyle(.glass)
-            Spacer()
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 4)
@@ -60,6 +53,20 @@ struct CategoryChipsBar: View {
         Button { selected = category } label: {
             if selected == category { Label(category.name, systemImage: "checkmark") } else { Text(category.name) }
         }
+    }
+}
+
+/// The look of the category dropdown button (For You, Discover).
+struct CategoryMenuLabel: View {
+    let text: String
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "line.3.horizontal.decrease")
+            Text(text).lineLimit(1)
+            Image(systemName: "chevron.down")
+                .font(.caption.weight(.semibold))
+        }
+        .font(.subheadline.weight(.semibold))
     }
 }
 

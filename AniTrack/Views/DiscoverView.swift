@@ -91,7 +91,6 @@ struct DiscoverView: View {
     /// Minimal "Browse by category" dropdown; picking one opens that category's page.
     private var categoryGrid: some View {
         HStack {
-            Text("Categories").font(.title3.weight(.bold))
             Spacer()
             Menu {
                 Section("Genres") {
@@ -109,16 +108,13 @@ struct DiscoverView: View {
                     Label("All categories…", systemImage: "magnifyingglass")
                 }
             } label: {
-                HStack(spacing: 6) {
-                    Text("Browse")
-                    Image(systemName: "chevron.down").font(.caption.weight(.semibold))
-                }
-                .font(.subheadline.weight(.semibold))
+                // Same button as For You's category dropdown; picking one opens that category.
+                CategoryMenuLabel(text: "Categories")
             }
             .menuStyle(.button)
             .buttonStyle(.glass)
         }
-        .padding(.horizontal)
+        .padding(.horizontal, 16)
     }
 
     private var searchResults: some View {
