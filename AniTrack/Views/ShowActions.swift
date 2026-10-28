@@ -51,7 +51,8 @@ struct ShowActionsMenu: ViewModifier {
     @ViewBuilder
     private var menuItems: some View {
             let entry = model.entry(for: media.id)
-            if model.canEdit && entry?.status != .PLANNING {
+            // Only for shows not on your lists: it must never move a watched show back to Planning.
+            if model.canEdit && entry == nil {
                 Button("Plan to watch", systemImage: "bookmark.fill") {
                     Task { await model.planToWatch(media) }
                 }

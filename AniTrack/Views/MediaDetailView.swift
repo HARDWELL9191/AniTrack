@@ -110,7 +110,12 @@ struct MediaDetailView: View {
 
                 tags(media)
 
-                if let edges = d.relations?.edges?.filter({ $0.node?.type == "ANIME" }), !edges.isEmpty {
+                // Other seasons of this show are in the Episodes season dropdown, not here; movies,
+                // OVAs, spin-offs and side stories stay.
+                if let edges = d.relations?.edges?.filter({ edge in
+                    guard let node = edge.node, node.type == "ANIME" else { return false }
+                    return !(Seasons.isSeries(node.format) && Seasons.sameShow(media.title, node.title))
+                }), !edges.isEmpty {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Related").font(.headline).padding(.horizontal)
                         ScrollView(.horizontal, showsIndicators: false) {
@@ -139,6 +144,7 @@ struct MediaDetailView: View {
                 let recs = (d.recommendations?.nodes ?? []).compactMap(\.mediaRecommendation)
                     .filter { $0.isAdult != true && !$0.isMovie && !(model.settings.hideChinese && $0.countryOfOrigin == "CN") && !$0.isLaterSeason }
                     .filter { model.entry(for: $0.id) == nil && !model.franchises.contains($0) }   // planned/watched stay out
+                    .filter { !model.settings.dismissedPicks.contains($0.id) }
                     .sorted { (model.matcher.match(for: $0) ?? 0) > (model.matcher.match(for: $1) ?? 0) }
                 if !recs.isEmpty {
                     HorizontalMediaSection(title: "More like this · best match first", items: recs)

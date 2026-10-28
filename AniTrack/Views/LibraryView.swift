@@ -17,6 +17,7 @@ struct LibraryView: View {
 
     @State private var status: ListStatus = .CURRENT
     @State private var showingNotForMe = false
+    @State private var notForMeFailed = false
     @State private var userPickedStatus = false
     @State private var sort: SortOrder = .updated
     @State private var filter = ""
@@ -95,9 +96,20 @@ struct LibraryView: View {
             .mediaDestination(zoom: zoom)
             .environment(\.zoomNamespace, zoom)
             .searchable(text: $filter, prompt: "Filter this list")
-            .refreshable { await model.refreshList() }
+            .refreshable {
+                await model.refreshList()
+                if showingNotForMe {
+                    let ok = await model.loadNotForMeMedia()
+                    notForMeFailed = !ok
+                }
+            }
             .onAppear { pickDefaultStatus() }
-            .task(id: showingNotForMe) { if showingNotForMe { await model.loadNotForMeMedia() } }
+            .task(id: showingNotForMe) {
+                if showingNotForMe {
+                    let ok = await model.loadNotForMeMedia()
+                    notForMeFailed = !ok
+                }
+            }
             .onChange(of: model.entries.count) { _, _ in pickDefaultStatus() }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -164,7 +176,8 @@ struct LibraryView: View {
         if shows.isEmpty {
             Text(model.settings.dismissedPicks.isEmpty
                  ? "Nothing here. Shows you mark \"Not for me\" in For You appear here."
-                 : (filter.isEmpty ? "Loading…" : "No matches."))
+                 : (!filter.isEmpty ? "No matches."
+                    : (notForMeFailed ? "Couldn't load these shows. Pull down to try again." : "Loading…")))
                 .foregroundStyle(.secondary)
         } else {
             Text("Hidden from your picks. Swipe left on a show to bring it back.")

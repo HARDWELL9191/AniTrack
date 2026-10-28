@@ -171,7 +171,10 @@ final class AppModel {
             case .none:
                 viewer = nil
             }
-            if let viewer { DiskCache.save(viewer, name: "viewer") }
+            if let viewer {
+                DiskCache.save(viewer, name: "viewer")
+                useDismissedPicks(of: viewer.id)
+            }
             if let lang = viewer?.options?.titleLanguage, defaults.object(forKey: "titleLanguage") == nil {
                 if lang.hasPrefix("ENGLISH") { settings.titleLanguage = .english }
                 else if lang.hasPrefix("NATIVE") { settings.titleLanguage = .native }
@@ -236,6 +239,19 @@ final class AppModel {
         guard viewer != nil,
               let cached = await DiskCache.loadInBackground([Int: Double].self, name: cacheName("fans2")) else { return }
         matcher.addFanSignal(cached)
+    }
+
+    /// "Not for me" belongs to one account. Switching to another (e.g. a different username in
+    /// read-only mode) puts the previous one's away and brings this one's back. Logged-in
+    /// accounts are then brought in line with AniList's own copy on the list refresh.
+    private func useDismissedPicks(of viewerId: Int) {
+        let ownerKey = "dismissedPicks-owner"
+        let owner = defaults.object(forKey: ownerKey) as? Int
+        guard owner != viewerId else { return }
+        defaults.set(viewerId, forKey: ownerKey)
+        guard let owner else { return }   // first run: what's saved already belongs to this account
+        defaults.set(Array(settings.dismissedPicks), forKey: "dismissedPicks-\(owner)")
+        settings.dismissedPicks = Set(defaults.array(forKey: "dismissedPicks-\(viewerId)") as? [Int] ?? [])
     }
 
     private func isAuthError(_ error: Error) -> Bool {
@@ -425,17 +441,19 @@ final class AppModel {
         if let season { vars["season"] = season }
         if let seasonYear { vars["seasonYear"] = seasonYear }
         if let status { vars["status"] = status }
-        let data = try await client.run(firstSeasonsOnly ? Queries.browseWithRelations : Queries.browse,
-                                        variables: vars, as: PageData.self)
+        // With relations, so later seasons can be told apart and shown as their first season.
+        let data = try await client.run(Queries.browseWithRelations, variables: vars, as: PageData.self)
         let hasNext = data.page.pageInfo?.hasNextPage ?? (data.page.media.count >= perPage)
-        let shown = data.page.media.filter { media in
+        let collapsed = await SeasonRoots.collapse(data.page.media, client: client)
+        let adultOK = category?.isAdultOnly == true
+        let shown = collapsed.filter { media in
+            if media.isAdult == true && !adultOK { return false }   // a first season fetched by id
             if media.isMovie && !searching { return false }
             if settings.hideChinese && media.countryOfOrigin == "CN" { return false }
-            if firstSeasonsOnly {
-                // Season 2+ of a show, or a show where you already have another season: skip.
-                if media.isLaterSeason { return false }
-                if franchises.contains(media) { return false }
-            }
+            // "Not for me" stays out of every shelf and category page (search still finds it).
+            if !searching && settings.dismissedPicks.contains(media.id) { return false }
+            // Suggestion shelves: a show where you already have another season is skipped.
+            if firstSeasonsOnly && franchises.contains(media) { return false }
             return true
         }
         return (shown, hasNext)
@@ -548,14 +566,7 @@ final class AppModel {
                 // match % and the next "load more" round already use your updated taste.
                 if (current.fingerprint == fingerprint && age < 3 * 86_400) || age < 86_400 {
                     // Drop anything now on your list or excluded by your current settings.
-                    let onList = current.picks.filter { pick in
-                        entry(for: pick.id) != nil
-                            || franchises.contains(pick.media)
-                            || settings.dismissedPicks.contains(pick.id)
-                            || (settings.hideChinese && pick.media.countryOfOrigin == "CN")
-                            || pick.media.isMovie
-                            || (!settings.includeUnreleased && pick.media.status == "NOT_YET_RELEASED")
-                    }.map(\.id)
+                    let onList = current.picks.filter { !stillWanted($0.media) }.map(\.id)
                     if !onList.isEmpty {
                         for id in onList { current.remove(id) }
                         feeds[key] = current
@@ -574,8 +585,10 @@ final class AppModel {
             guard viewer?.id == account, !Task.isCancelled else { loadingFeeds.remove(key); return }   // logged out meanwhile
             matcher.addFanSignal(fans)
             DiskCache.saveInBackground(matcher.fanSnapshot, name: cacheName("fans2"))
-            picks = found
-            let result = RecommendationResult(picks: found, generatedAt: Date(), fingerprint: fingerprint,
+            // Built from the list as it was when the build started: anything you planned,
+            // watched or dismissed meanwhile stays out.
+            picks = found.filter { stillWanted($0.media) }
+            let result = RecommendationResult(picks: picks, generatedAt: Date(), fingerprint: fingerprint,
                                               usedOnDeviceAI: usedAI, round: 1, exhausted: false)
             feeds[key] = result
             DiskCache.saveInBackground(result, name: feedCacheName(category))
@@ -590,24 +603,30 @@ final class AppModel {
     }
 
     /// Called when you get near the end of the feed: digs one round deeper and appends.
+    /// While it runs you keep using the feed (planning, dismissing), so the result is added to
+    /// the feed as it is *now*, never written over it with the copy from before.
     private func performLoadMore(category: AnimeCategory?) async {
         let key = Self.feedKey(category)
-        guard var current = feeds[key], !current.exhausted,
+        guard let start = feeds[key], !start.exhausted,
               !loadingMore.contains(key), !loadingFeeds.contains(key) else { return }
         loadingMore.insert(key)
         defer { loadingMore.remove(key) }
 
         let options = recommendationOptions(category)
         let account = viewer?.id
-        var shown = Set(current.picks.map(\.id))
+        let generatedAt = start.generatedAt
+        var shown = Set(start.picks.map(\.id))
+        var round = start.round
+        var added: [Recommendation] = []
+        var usedAI = false
         var emptyRounds = 0
+        var failed = false
         // Try up to 3 deeper rounds to find something new before calling it the end.
         while emptyRounds < 3 {
-            let round = current.round + 1
-            current.round = round
+            round += 1
             do {
-                let (more, usedAI, fans) = try await Recommender.run(entries: entries, client: client, options: options,
-                                                               round: round, exclude: shown)
+                let (more, ai, fans) = try await Recommender.run(entries: entries, client: client, options: options,
+                                                             round: round, exclude: shown)
                 guard viewer?.id == account, !Task.isCancelled else { return }   // logged out meanwhile
                 matcher.addFanSignal(fans)
                 DiskCache.saveInBackground(matcher.fanSnapshot, name: cacheName("fans2"))
@@ -616,19 +635,36 @@ final class AppModel {
                     emptyRounds += 1
                     continue
                 }
-                current.picks += fresh
-                current.usedOnDeviceAI = current.usedOnDeviceAI || usedAI
+                added = fresh
+                usedAI = ai
                 shown.formUnion(fresh.map(\.id))
                 break
             } catch {
                 if !Self.isCancellation(error) { recommendationErrors[key] = error.localizedDescription }
-                feeds[key] = current
-                return
+                failed = true
+                break
             }
         }
-        if emptyRounds >= 3 { current.exhausted = true }
-        feeds[key] = current
-        DiskCache.saveInBackground(current, name: feedCacheName(category))
+        // The feed was rebuilt or cleared meanwhile (refresh, settings change): this is stale.
+        guard var latest = feeds[key], latest.generatedAt == generatedAt else { return }
+        let present = Set(latest.picks.map(\.id))
+        latest.picks += added.filter { !present.contains($0.id) && stillWanted($0.media) }
+        latest.round = max(latest.round, round)
+        latest.usedOnDeviceAI = latest.usedOnDeviceAI || usedAI
+        if !failed && emptyRounds >= 3 { latest.exhausted = true }
+        feeds[key] = latest
+        DiskCache.saveInBackground(latest, name: feedCacheName(category))
+    }
+
+    /// Whether a pick still belongs in a feed: not on your list (or another season of it), not
+    /// dismissed, and allowed by your current settings.
+    private func stillWanted(_ media: Media) -> Bool {
+        if entry(for: media.id) != nil || franchises.contains(media) { return false }
+        if settings.dismissedPicks.contains(media.id) { return false }
+        if settings.hideChinese && media.countryOfOrigin == "CN" { return false }
+        if media.isMovie || media.isLaterSeason { return false }
+        if !settings.includeUnreleased && media.status == "NOT_YET_RELEASED" { return false }
+        return true
     }
 
     /// Takes a show out of every picks feed (it's on your list now). Not a dislike.
@@ -723,7 +759,9 @@ final class AppModel {
     private(set) var notForMeMedia: [Int: Media] = [:]
 
     /// Fetches details for dismissed shows that aren't known yet (local-only or older ones).
-    func loadNotForMeMedia() async {
+    /// Returns false if AniList couldn't be reached.
+    @discardableResult
+    func loadNotForMeMedia() async -> Bool {
         let missing = Array(settings.dismissedPicks.filter { notForMeMedia[$0] == nil })
         var start = 0
         while start < missing.count {
@@ -731,9 +769,10 @@ final class AppModel {
             start += 50
             guard let data = try? await client.run(Queries.mediaByIds,
                                                     variables: ["ids": chunk, "perPage": chunk.count],
-                                                    as: PageData.self) else { return }
+                                                    as: PageData.self) else { return false }
             for m in data.page.media { notForMeMedia[m.id] = m }
         }
+        return true
     }
 
     /// Brings one show back: it can be suggested again (and leaves AniList's "Not for me" list).

@@ -145,11 +145,14 @@ struct CategoryBrowseView: View {
     private var isLoading: Bool { loadingKey == currentKey }
 
     var body: some View {
+        // "Not for me" shows leave the page right away (they're also left out of new pages);
+        // a search here still finds them.
+        let visible = search.isEmpty ? items.filter { !model.settings.dismissedPicks.contains($0.id) } : items
         List {
-            ForEach(items) { media in
+            ForEach(visible) { media in
                 NavigationLink(value: MediaLink(id: media.id)) { MediaRow(media: media) }
                     .onAppear {
-                        if media.id == items.last?.id { Task { await loadPage() } }
+                        if media.id == visible.last?.id { Task { await loadPage() } }
                     }
             }
             if isLoading {

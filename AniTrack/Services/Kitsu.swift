@@ -152,12 +152,13 @@ actor KitsuClient {
         return (found, failed)
     }
 
-    /// Kitsu's own id for a show (needed for its episode list).
-    func kitsuId(for lookup: Lookup) async -> String? {
+    /// Kitsu's own id for a show (needed for its episode list), and whether Kitsu couldn't
+    /// be reached (as opposed to Kitsu not knowing the show).
+    func kitsuIdLookup(for lookup: Lookup) async -> (id: String?, failed: Bool) {
         await loadIfNeeded()
-        if let id = mappings[lookup.id]?.kitsuId { return id }
-        _ = await ratings(for: [lookup])
-        return mappings[lookup.id]?.kitsuId
+        if let id = mappings[lookup.id]?.kitsuId { return (id, false) }
+        let (_, failed) = await ratings(for: [lookup])
+        return (mappings[lookup.id]?.kitsuId, failed)
     }
 
     /// Kitsu mappings for up to 10 ids of one site, keyed by that site's id.
@@ -366,16 +367,18 @@ actor EpisodeService {
         }
         async let streaming = streamingEpisodes(media.id, laterPart: Self.hasPrequel(media),
                                                 expected: media.episodes, client: client)
-        async let kitsuId = KitsuClient.shared.kitsuId(for: .init(id: media.id, mal: media.idMal))
+        async let kitsuLookup = KitsuClient.shared.kitsuIdLookup(for: .init(id: media.id, mal: media.idMal))
         var old = memory[media.id]
         if old == nil { old = await DiskCache.loadInBackground(Page.self, name: cacheName(media.id)) }
         let fromAniList = await streaming
-        var kid = await kitsuId ?? old?.kitsuId
+        let (foundId, lookupFailed) = await kitsuLookup
+        var kid = foundId ?? old?.kitsuId
         var kitsu: (episodes: [EpisodeInfo], total: Int?)? = nil
         if let kid { kitsu = await KitsuClient.shared.episodes(kitsuId: kid, offset: 0) }
-        // Kitsu didn't answer (offline, busy): keep the saved list as it is rather than
-        // rebuilding it from AniList alone; it's refreshed on a later visit.
-        let kitsuFailed = kid != nil && kitsu == nil
+        // Kitsu didn't answer (offline, busy), either for the show's id or its episodes: keep
+        // the saved list as it is rather than rebuilding it from AniList alone (whose list can
+        // be another season's); it's refreshed on a later visit.
+        let kitsuFailed = (kid != nil && kitsu == nil) || (kid == nil && lookupFailed)
         if kitsuFailed, let old {
             memory[media.id] = old
             return old

@@ -270,10 +270,19 @@ extension Media {
         return (edges.first { Seasons.isSeries($0.node?.format) } ?? edges.first)?.node?.id
     }
 
-    /// A TV/ONA entry whose title says it's another season ("2nd Season", "Part 2", "II"…) and
-    /// that has an earlier entry. Named sequels are not later seasons.
+    /// A TV/ONA entry that continues an earlier entry of the same show: its prequel is a TV/ONA
+    /// season with the same title ("Cyberpunk: Edgerunners 2" ← "Cyberpunk: Edgerunners"), or
+    /// its own title says it's another season ("2nd Season", "Part 2", "II"…) and something of
+    /// the same show comes before it (Slime S2 ← an OVA). Later seasons appear only in the
+    /// details page's season dropdown; everywhere else the first season stands in for them.
     var isLaterSeason: Bool {
-        Seasons.isSeries(format) && Seasons.hasSeasonMarker(title) && prequelId != nil
+        guard Seasons.isSeries(format) else { return false }
+        let prequels = (relations?.edges ?? []).filter { edge in
+            guard edge.relationType == "PREQUEL", let node = edge.node else { return false }
+            return (node.type == nil || node.type == "ANIME") && Seasons.sameShow(title, node.title)
+        }
+        if prequels.contains(where: { Seasons.isSeries($0.node?.format) }) { return true }
+        return !prequels.isEmpty && Seasons.hasSeasonMarker(title)
     }
 }
 

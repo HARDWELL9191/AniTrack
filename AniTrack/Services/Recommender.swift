@@ -190,7 +190,7 @@ enum Recommender {
         // Load missing links (a few hops covers Season 5 → OVA → Season 1). Fetched entries are
         // remembered for the session, so endless-feed rounds don't request them again.
         if !later.isEmpty {
-            for _ in 0..<5 {
+            for _ in 0..<10 {
                 let missing = Array(Set(later.compactMap { walk($0).next }))
                 guard !missing.isEmpty else { break }
                 var fetched: [Media] = []
@@ -218,11 +218,12 @@ enum Recommender {
                 result[id] = result[id] ?? media
                 continue
             }
+            // (The walk only follows prequels of the same show, so every node is this show.)
             let nodes = walk(media).nodes
-            if nodes.contains(where: { onList[$0.id] != nil && Seasons.sameBase($0.title, media.title) }) { continue }
-            // Earliest TV/ONA season of this same show. If it can't be identified (odd titles,
-            // offline), the pick is kept as it is: a show is never dropped on a guess.
-            let root = nodes.last { Seasons.isSeries($0.format) && Seasons.sameBase($0.title, media.title) } ?? media
+            if nodes.contains(where: { onList[$0.id] != nil }) { continue }
+            // Earliest TV/ONA season of this same show. If it can't be identified (offline),
+            // the pick is kept as it is: a show is never dropped on a guess.
+            let root = nodes.last { Seasons.isSeries($0.format) } ?? media
             if root.id != id {
                 if onList[root.id] != nil || franchises.contains(root) { continue }
                 collab[root.id, default: 0] += collab[id] ?? 0
@@ -311,7 +312,9 @@ enum Recommender {
         }
 
         // 2) Explore beyond what fans linked: your top tags/genres, and the chosen category.
-        let excludeIds = Array(Set(onList.keys).union(exclude))
+        // Only your list is excluded here: excluding shows already picked too would shift every
+        // page and skip unseen shows in deeper rounds (picked ones are filtered out below).
+        let excludeIds = Array(onList.keys)
         let topTags = profile.top(prefix: "t:", count: 3)
         let topGenres = profile.top(prefix: "g:", count: 2)
         var explorations: [[String: Any]] = []
@@ -459,6 +462,42 @@ actor SeasonCache {
     static let shared = SeasonCache()
     private var media: [Int: Media] = [:]
 
+    // Later season id → its first season, saved on the phone (refreshed weekly), so shelves
+    // and search don't look the same franchises up again on every launch.
+    private struct SavedRoot: Codable { let root: Media; let savedAt: Date }
+    private static let rootsFile = "season-roots-v1"
+    private var roots: [Int: SavedRoot] = [:]
+    private var rootsLoaded = false
+    private var saveTask: Task<Void, Never>?
+
+    func root(for laterId: Int) async -> Media? {
+        await loadRoots()
+        guard let saved = roots[laterId], Date().timeIntervalSince(saved.savedAt) < 7 * 86_400 else { return nil }
+        return saved.root
+    }
+
+    func storeRoots(_ found: [Int: Media]) async {
+        guard !found.isEmpty else { return }
+        await loadRoots()
+        if roots.count > 3000 { roots.removeAll(keepingCapacity: true) }
+        let now = Date()
+        for (id, root) in found { roots[id] = SavedRoot(root: root, savedAt: now) }
+        saveTask?.cancel()
+        saveTask = Task {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)   // one write per burst
+            guard !Task.isCancelled else { return }
+            DiskCache.saveInBackground(self.roots, name: Self.rootsFile)
+        }
+    }
+
+    private func loadRoots() async {
+        guard !rootsLoaded else { return }
+        rootsLoaded = true
+        if let saved = await DiskCache.loadInBackground([Int: SavedRoot].self, name: Self.rootsFile) {
+            roots.merge(saved) { current, _ in current }
+        }
+    }
+
     func merged(with candidates: [Int: Media]) -> [Int: Media] {
         media.merging(candidates) { _, new in new }
     }
@@ -466,5 +505,79 @@ actor SeasonCache {
     func store(_ items: [Media]) {
         if media.count > 1500 { media.removeAll(keepingCapacity: true) }
         for m in items { media[m.id] = m }
+    }
+}
+
+/// Later seasons are shown as their first season everywhere except the details page's season
+/// dropdown: "Black Clover Season 2" in a shelf or search becomes "Black Clover".
+enum SeasonRoots {
+    /// Same order, each later season replaced by its first season, no duplicates. When the
+    /// first season can't be found (offline), the earliest one found is used; never dropped.
+    static func collapse(_ items: [Media], client: AniListClient) async -> [Media] {
+        let allLater = items.filter(\.isLaterSeason)
+        guard !allLater.isEmpty else { return items }
+        // Already worked out before (saved on the phone): no requests.
+        var resolved: [Int: Media] = [:]
+        for media in allLater {
+            if let root = await SeasonCache.shared.root(for: media.id) { resolved[media.id] = root }
+        }
+        let later = allLater.filter { resolved[$0.id] == nil }
+        var known = await SeasonCache.shared.merged(
+            with: Dictionary(items.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }))
+
+        /// The earliest TV/ONA entry reached by walking prequels, and the next id to load.
+        func walk(_ media: Media) -> (root: Media?, next: Int?) {
+            var visited: Set<Int> = [media.id]
+            var current = media
+            var root: Media?
+            while let previous = current.prequelId, visited.count < 15, !visited.contains(previous) {
+                visited.insert(previous)
+                guard let earlier = known[previous] else { return (root, previous) }
+                if Seasons.isSeries(earlier.format) { root = earlier }
+                current = earlier
+            }
+            return (root, nil)
+        }
+
+        // Up to 10 hops: long franchises (JoJo Part 7 → Part 1) need that many.
+        for _ in 0..<10 {
+            let missing = Array(Set(later.compactMap { walk($0).next }))
+            guard !missing.isEmpty else { break }
+            var fetched: [Media] = []
+            var start = 0
+            while start < missing.count {
+                let chunk = Array(missing[start..<min(start + 50, missing.count)])
+                start += 50
+                if let data = try? await client.run(Queries.mediaByIds,
+                                                     variables: ["ids": chunk, "perPage": chunk.count],
+                                                     as: PageData.self) {
+                    for m in data.page.media { known[m.id] = m; fetched.append(m) }
+                }
+            }
+            guard !fetched.isEmpty else { break }   // offline or rate limited: use what we have
+            await SeasonCache.shared.store(fetched)
+        }
+
+        // Save only complete answers (the walk reached the start), so an offline half-answer
+        // is worked out properly next time.
+        var complete: [Int: Media] = [:]
+        for media in later {
+            let w = walk(media)
+            if let root = w.root, w.next == nil {
+                resolved[media.id] = root
+                complete[media.id] = root
+            } else if let root = w.root {
+                resolved[media.id] = root
+            }
+        }
+        await SeasonCache.shared.storeRoots(complete)
+
+        var seen: Set<Int> = []
+        var result: [Media] = []
+        for media in items {
+            let shown = resolved[media.id] ?? media
+            if seen.insert(shown.id).inserted { result.append(shown) }
+        }
+        return result
     }
 }

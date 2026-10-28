@@ -100,10 +100,12 @@ enum BackgroundPrefetch {
             }
         }
 
-        // 3) Embed only what's new, capped per charge, in small chunks.
+        // 3) Embed only what's new, capped per charge, in small chunks. Movies only when they're
+        //    on your list (they shape your taste); elsewhere the app doesn't suggest them.
+        let listIds = Set(entries.map(\.mediaId))
         let known = await SemanticEngine.shared.cachedVectors(for: Array(pool.keys))
         let missing = pool.values
-            .filter { known[$0.id] == nil && $0.isAdult != true && !$0.isMovie }
+            .filter { known[$0.id] == nil && $0.isAdult != true && (!$0.isMovie || listIds.contains($0.id)) }
             .sorted { ($0.popularity ?? 0) > ($1.popularity ?? 0) }
             .prefix(maxNewPerRun)
         var index = missing.startIndex

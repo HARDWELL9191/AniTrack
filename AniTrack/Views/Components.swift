@@ -161,11 +161,10 @@ struct ScoreBadge: View {
 struct MatchBadge: View {
     @Environment(AppModel.self) private var model
     let media: Media
-    var override: Int? = nil
     var showWord = false
 
     var body: some View {
-        if let value = override ?? model.matcher.match(for: media) {
+        if let value = model.matcher.match(for: media) {
             Label(showWord ? "\(value)% match" : "\(value)%", systemImage: "wand.and.stars")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(Theme.pink)
@@ -311,15 +310,18 @@ struct MediaRow: View {
 }
 
 struct HorizontalMediaSection: View {
+    @Environment(AppModel.self) private var model
     let title: String
     let items: [Media]
 
     var body: some View {
+        // A show marked "Not for me" (e.g. from its long-press menu) leaves the row right away.
+        let shown = items.filter { !model.settings.dismissedPicks.contains($0.id) }
         VStack(alignment: .leading, spacing: 10) {
             Text(title).font(.title3.weight(.bold)).padding(.horizontal)
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: 12) {
-                    ForEach(items) { media in
+                    ForEach(shown) { media in
                         NavigationLink(value: MediaLink(id: media.id)) {
                             MediaCard(media: media)
                         }

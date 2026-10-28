@@ -80,7 +80,7 @@ fetch([113415, 20, 1735, 97940, 21, 11061, 136430, 140960])   # JJK, Naruto, Shi
 pool.update({k: v for k, v in known.items()})
 for m in pool.values(): known.setdefault(m["id"], m)
 later = [m for m in pool.values() if later_new(m)]
-for _ in range(6):
+for _ in range(10):
     miss = list({root(m)[1] for m in later if root(m)[1]})
     if not miss: break
     fetch(miss)

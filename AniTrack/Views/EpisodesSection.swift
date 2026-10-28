@@ -142,9 +142,13 @@ struct EpisodesSection: View {
         expanded = []
         let season = selected
         // Show what's saved right away; refresh only if it's due (new descriptions/thumbnails).
-        if let saved = await EpisodeService.shared.saved(for: season.id), season.id == selectedId {
+        let saved = await EpisodeService.shared.saved(for: season.id)
+        guard season.id == selectedId else { return }   // switched season meanwhile
+        if let saved {
             page = saved
             guard await EpisodeService.shared.isStale(saved) else { return }
+        } else {
+            page = nil   // never show the previous season's episodes under this season's name
         }
         let result = await EpisodeService.shared.firstPage(for: season, client: model.client)
         guard season.id == selectedId else { return }   // switched season meanwhile
