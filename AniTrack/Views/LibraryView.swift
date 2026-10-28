@@ -84,7 +84,7 @@ struct LibraryView: View {
                 Group {
                     let shown = rows
                     if shown.isEmpty {
-                        Text(model.isLoadingList ? "Loading…" : "No shows marked \(status.label.lowercased()).")
+                        Text(model.isLoadingList || !model.listLoadedOnce ? "Loading…" : "No shows marked \(status.label.lowercased()).")
                             .foregroundStyle(.secondary)
                     }
                     ForEach(shown) { row in

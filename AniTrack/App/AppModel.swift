@@ -24,6 +24,9 @@ final class AppModel {
     /// Shows on your list by title, so other seasons of them aren't suggested.
     @ObservationIgnored private(set) var franchises = ListFranchises()
     private(set) var isLoadingList = false
+    /// True once AniList has answered for your list at least once (or failed): until then an
+    /// empty list means "still loading", never "your list is empty".
+    private(set) var listLoadedOnce = false
     private(set) var didBootstrap = false
     var errorMessage: String?
 
@@ -88,10 +91,26 @@ final class AppModel {
     }
 
     func reloadAll() async {
-        await loadViewer()
+        // Your last known profile and list first: instant, offline too, and never stuck behind a
+        // slow or rate-limited AniList. Fresh data replaces them as soon as it arrives.
+        useCachedViewer()
         await loadCachedList()
         await loadCachedFanSignal()
+        await loadViewer()
         await refreshList()
+    }
+
+    /// The saved profile, if it belongs to this account (logout clears it).
+    private func useCachedViewer() {
+        guard viewer == nil, let cached = DiskCache.load(Viewer.self, name: "viewer") else { return }
+        switch mode {
+        case .loggedIn:
+            viewer = cached
+        case .username(let name):
+            if cached.name.caseInsensitiveCompare(name) == .orderedSame { viewer = cached }
+        case .none:
+            break
+        }
     }
 
     // MARK: - Auth
@@ -136,6 +155,7 @@ final class AppModel {
         mode = .none
         viewer = nil
         entries = []
+        listLoadedOnce = false
         feeds = [:]
         notForMeSync?.cancel()
         notForMeSync = nil
@@ -167,9 +187,11 @@ final class AppModel {
         do {
             switch mode {
             case .loggedIn:
-                viewer = try await client.run(Queries.viewer, as: ViewerData.self).viewer
+                viewer = try await client.run(Queries.viewer, as: ViewerData.self,
+                                              waitOnRateLimit: viewer == nil).viewer
             case .username(let name):
-                viewer = try await client.run(Queries.userByName, variables: ["name": name], as: UserData.self).user
+                viewer = try await client.run(Queries.userByName, variables: ["name": name], as: UserData.self,
+                                              waitOnRateLimit: viewer == nil).user
             case .none:
                 viewer = nil
             }
@@ -196,9 +218,12 @@ final class AppModel {
     }
 
     func refreshList() async {
-        guard let userId = viewer?.id else { return }
+        guard let userId = viewer?.id else { listLoadedOnce = true; return }
         isLoadingList = true
-        defer { isLoadingList = false }
+        defer {
+            isLoadingList = false
+            listLoadedOnce = true
+        }
         do {
             let data = try await client.run(Queries.listCollection,
                                             variables: ["userId": userId],
@@ -659,7 +684,8 @@ final class AppModel {
         let key = Self.feedKey(category)
         guard !loadingFeeds.contains(key) else { return }
         guard !entries.isEmpty else {
-            recommendationErrors[key] = "Your list is empty. Add and rate a few shows first."
+            // Only once your list has really loaded; before that it's just not here yet.
+            if listLoadedOnce { recommendationErrors[key] = "Your list is empty. Add and rate a few shows first." }
             return
         }
         let options = recommendationOptions(category)
