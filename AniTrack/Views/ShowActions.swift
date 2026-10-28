@@ -67,8 +67,8 @@ struct ShowActionsMenu: ViewModifier {
             }
             if model.canEdit && entry?.status != .COMPLETED {
                 Button("Already watched", systemImage: "eye.fill") {
-                    // Inside a sheet the rating prompt can't open on top, so it's skipped there.
-                    Task { await model.markCompleted(media, askRating: sheetsAllowed) }
+                    // Inside a sheet the sheet itself shows the rating prompt.
+                    Task { await model.markCompleted(media, inSheet: !sheetsAllowed) }
                 }
             }
             if sheetsAllowed {
@@ -206,8 +206,6 @@ struct MatchBubble: View {
             .glassEffect(.regular.tint(Theme.pinkGlass.opacity(0.55)), in: .capsule)
             // Same faint white edge as the age bubble.
             .overlay(Capsule().strokeBorder(.white.opacity(0.22), lineWidth: 0.5))
-            .contentTransition(.numericText())
-            .animation(.snappy, value: value)
     }
 }
 

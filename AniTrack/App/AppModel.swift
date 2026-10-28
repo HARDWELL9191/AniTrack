@@ -52,6 +52,9 @@ final class AppModel {
 
     /// When set, a quick "how did you like it?" sheet appears (scores sharpen picks the most).
     var ratePrompt: Media?
+    /// The same prompt when "Already watched" is used inside a sheet ("More like this"):
+    /// shown by that sheet, since nothing can open on top of it from the main screen.
+    var sheetRatePrompt: Media?
     /// "More like this" / "Why would I like this?" opened from a card's long-press menu.
     var cardSheet: CardSheet?
     /// Age ratings for covers (Kitsu), saved on the phone for good.
@@ -368,6 +371,20 @@ final class AppModel {
 
     @discardableResult
     func save(media: Media, status: ListStatus, progress: Int?, scoreRaw: Int?) async throws -> EntryLite {
+        let saved = try await writeEntry(media: media, status: status, progress: progress, scoreRaw: scoreRaw)
+        var list = entries
+        Self.apply(saved, media: media, status: status, to: &list)
+        entries = list   // one change: one taste/match recalculation
+        // Planned/added from anywhere (detail page, Home, search): it, and other seasons of
+        // the same show, leave your saved picks right away.
+        removeKnownFromFeeds()
+        return saved
+    }
+
+    /// Sends one entry to AniList (turning a "Not for me" marker back into a normal entry).
+    /// Doesn't touch your local list: callers apply the result, so several writes can land as
+    /// a single change.
+    private func writeEntry(media: Media, status: ListStatus, progress: Int?, scoreRaw: Int?) async throws -> EntryLite {
         var vars: [String: Any] = ["mediaId": media.id, "status": status.rawValue]
         if let progress { vars["progress"] = max(0, progress) }
         if let scoreRaw { vars["scoreRaw"] = min(100, max(0, scoreRaw)) }
@@ -386,26 +403,23 @@ final class AppModel {
             settings.dismissedPicks.remove(media.id)
             saveNotForMeState()
         }
+        return saved
+    }
 
-        if let index = entries.firstIndex(where: { $0.mediaId == media.id }) {
-            // Edit a copy and assign once: one taste/match recalculation instead of four.
-            var updated = entries[index]
+    private static func apply(_ saved: EntryLite, media: Media, status: ListStatus, to list: inout [ListEntry]) {
+        let now = Int(Date().timeIntervalSince1970)
+        if let index = list.firstIndex(where: { $0.mediaId == media.id }) {
+            var updated = list[index]
             updated.status = saved.status ?? status
             updated.progress = saved.progress
             updated.score = saved.score
-            updated.updatedAt = saved.updatedAt ?? Int(Date().timeIntervalSince1970)
-            entries[index] = updated
+            updated.updatedAt = saved.updatedAt ?? now
+            list[index] = updated
         } else {
-            entries.append(ListEntry(id: saved.id, mediaId: media.id, status: saved.status ?? status,
-                                     score: saved.score, progress: saved.progress,
-                                     updatedAt: saved.updatedAt ?? Int(Date().timeIntervalSince1970),
-                                     media: media,
-                                     createdAt: Int(Date().timeIntervalSince1970)))
+            list.append(ListEntry(id: saved.id, mediaId: media.id, status: saved.status ?? status,
+                                  score: saved.score, progress: saved.progress,
+                                  updatedAt: saved.updatedAt ?? now, media: media, createdAt: now))
         }
-        // Planned/added from anywhere (detail page, Home, search): it, and other seasons of
-        // the same show, leave your saved picks right away.
-        removeKnownFromFeeds()
-        return saved
     }
 
     /// Removes picks that are on your list, or another season of a show on your list.
@@ -436,13 +450,15 @@ final class AppModel {
     /// Marks a show as fully watched and moves it to Completed (keeps your score if you have one).
     /// Returns false if AniList couldn't be updated.
     @discardableResult
-    func markCompleted(_ media: Media, askRating: Bool = true) async -> Bool {
+    func markCompleted(_ media: Media, askRating: Bool = true, inSheet: Bool = false) async -> Bool {
         let existing = entry(for: media.id)
         let progress = media.episodes ?? media.availableEpisodes ?? existing?.progress
         do {
             // scoreRaw nil = AniList keeps whatever score you already gave it.
             try await save(media: media, status: .COMPLETED, progress: progress, scoreRaw: nil)
-            if askRating && (existing?.scoreValue ?? 0) == 0 { ratePrompt = media }
+            if askRating && (existing?.scoreValue ?? 0) == 0 {
+                if inSheet { sheetRatePrompt = media } else { ratePrompt = media }
+            }
             // It's on your list now, so it no longer belongs in any picks feed (not a dislike).
             removeFromFeeds(media.id)
             updateOtherSeasons(of: media, .watched)
@@ -595,8 +611,21 @@ final class AppModel {
         return (data.page.media, hasNext)
     }
 
+    /// Details pages seen in the last 10 minutes, kept in memory: going back to a show (or
+    /// opening it again from another row) is instant and its zoom never waits on the network.
+    @ObservationIgnored private var detailCache: [Int: (detail: MediaDetail, at: Date)] = [:]
+
+    func cachedDetail(id: Int) -> MediaDetail? {
+        guard let hit = detailCache[id], Date().timeIntervalSince(hit.at) < 600 else { return nil }
+        return hit.detail
+    }
+
     func detail(id: Int) async throws -> MediaDetail {
-        try await client.run(Queries.detail, variables: ["id": id], as: MediaDetailData.self).media
+        if let hit = cachedDetail(id: id) { return hit }
+        let loaded = try await client.run(Queries.detail, variables: ["id": id], as: MediaDetailData.self).media
+        if detailCache.count > 40 { detailCache.removeAll(keepingCapacity: true) }
+        detailCache[id] = (loaded, Date())
+        return loaded
     }
 
     // MARK: - Recommendations
@@ -865,44 +894,61 @@ final class AppModel {
             guard viewer?.id == account else { return }
             let seasons = await otherSeasons(of: media)
             var failed = false
+            // Collected and applied to your list once at the end: saving four seasons used to
+            // change the list four times, and every change redraws every match badge.
+            var written: [(EntryLite, Media, ListStatus)] = []
+            var removed: Set<Int> = []
+            func write(_ season: Media, _ status: ListStatus, progress: Int?, score: Int?) async throws {
+                let saved = try await self.writeEntry(media: season, status: status, progress: progress, scoreRaw: score)
+                written.append((saved, season, status))
+            }
             for season in seasons {
-                guard viewer?.id == account, !Task.isCancelled else { return }
+                guard viewer?.id == account, !Task.isCancelled else { break }   // what's written still lands
                 let current = entry(for: season.id)
                 do {
                     var wrote = true
                     switch change {
                     case .planned:
                         if current == nil {
-                            try await save(media: season, status: .PLANNING, progress: nil, scoreRaw: nil)
+                            try await write(season, .PLANNING, progress: nil, score: nil)
                         } else { wrote = false }
                     case .watched:
                         if current?.status == .COMPLETED { wrote = false; break }
                         switch season.status {
                         case "NOT_YET_RELEASED":
                             if current == nil {
-                                try await save(media: season, status: .PLANNING, progress: nil, scoreRaw: nil)
+                                try await write(season, .PLANNING, progress: nil, score: nil)
                             } else { wrote = false }
                         case "RELEASING":
                             let aired = season.availableEpisodes ?? current?.progress
-                            try await save(media: season, status: .CURRENT,
-                                           progress: max(aired ?? 0, current?.progressValue ?? 0), scoreRaw: nil)
+                            try await write(season, .CURRENT,
+                                            progress: max(aired ?? 0, current?.progressValue ?? 0), score: nil)
                         default:
-                            try await save(media: season, status: .COMPLETED,
-                                           progress: season.episodes ?? current?.progress, scoreRaw: nil)
+                            try await write(season, .COMPLETED,
+                                            progress: season.episodes ?? current?.progress, score: nil)
                         }
                     case .removed:
                         if let current {
-                            try await delete(entryId: current.id)
+                            _ = try await client.run(Queries.deleteEntry, variables: ["id": current.id],
+                                                     as: DeleteEntryData.self)
+                            removed.insert(current.id)
                         } else { wrote = false }
                     case .scored(let score):
                         if let current, current.scoreValue == 0, score > 0 {
-                            try await save(media: season, status: current.status, progress: nil, scoreRaw: score)
+                            try await write(season, current.status, progress: nil, score: score)
                         } else { wrote = false }
                     }
                     if wrote { try? await Task.sleep(nanoseconds: Self.writeSpacing) }
                 } catch {
                     failed = true
                 }
+            }
+            if (!written.isEmpty || !removed.isEmpty), viewer?.id == account {
+                var list = entries
+                for (saved, season, status) in written { Self.apply(saved, media: season, status: status, to: &list) }
+                list.removeAll { removed.contains($0.id) }
+                entries = list
+                removeKnownFromFeeds()
             }
             if failed {
                 errorMessage = "Couldn't update every season of \(media.displayTitle(settings.titleLanguage)) on AniList. Try again in a moment."

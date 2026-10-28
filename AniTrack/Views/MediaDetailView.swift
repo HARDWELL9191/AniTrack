@@ -25,7 +25,11 @@ struct MediaDetailView: View {
             }
         }
         .navigationBarTitleDisplayMode(.inline)
-        .task(id: mediaId) { if detail == nil { await load() } }
+        .task(id: mediaId) { if detail == nil || recommendations.isEmpty { await load() } }
+        .onAppear {
+            // Seen in the last few minutes: the page is there from the first frame.
+            if detail == nil, let hit = model.cachedDetail(id: mediaId) { detail = hit }
+        }
         .sheet(isPresented: $showEditor) {
             if let media = detail?.media {
                 EntryEditorView(media: media, existing: model.entry(for: mediaId),
@@ -41,7 +45,7 @@ struct MediaDetailView: View {
             detail = loaded
             loadError = nil
             let raw = (loaded.recommendations?.nodes ?? []).compactMap(\.mediaRecommendation)
-            recommendations = raw   // shown right away; first seasons swapped in below
+            // One update, after first seasons are swapped in (it's below the fold anyway).
             recommendations = await SeasonRoots.collapse(raw, client: model.client)
         } catch {
             // Cancelled (page left mid-load): keep loading, it retries when it reappears.
@@ -55,7 +59,9 @@ struct MediaDetailView: View {
         let media = d.media
         let entry = model.entry(for: media.id)
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+            // Lazy: sections further down (episodes, tags, related, recommendations) are built
+            // when you scroll near them, not all during the zoom into the page.
+            LazyVStack(alignment: .leading, spacing: 18) {
                 ZStack(alignment: .bottomLeading) {
                     BannerImageView(url: media.bannerImage, fallbackColor: media.coverImage?.color, height: 180)
                     LinearGradient(colors: [.clear, Color(.systemBackground)], startPoint: .center, endPoint: .bottom)

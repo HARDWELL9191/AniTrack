@@ -252,7 +252,8 @@ final class MatchEngine {
     private func scheduleBatch() {
         batchTask?.cancel()
         batchTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            // A longer quiet moment: never during a page transition or scroll.
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
             guard !Task.isCancelled else { return }
             await self?.runBatch()
         }
@@ -263,7 +264,7 @@ final class MatchEngine {
         let batch = Array(pending.values.prefix(30))
         guard !batch.isEmpty else { return }
         for m in batch { pending[m.id] = nil }
-        let vectors = await Task.detached(priority: .utility) {
+        let vectors = await Task.detached(priority: .background) {
             await SemanticEngine.shared.vectors(for: batch)
         }.value
         apply(vectors, taste: taste)

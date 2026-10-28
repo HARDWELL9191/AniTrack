@@ -82,7 +82,8 @@ struct MoreLikeThisSheet: View {
                     ContentUnavailableView("Nothing similar found", systemImage: "square.stack.3d.up.slash",
                                            description: Text(error ?? "Fans haven't linked shows to this one yet."))
                 }
-                ForEach(items) { item in
+                // A show you plan, watch or dismiss here leaves the list right away.
+                ForEach(items.filter { model.entry(for: $0.id) == nil && !model.settings.dismissedPicks.contains($0.id) }) { item in
                     NavigationLink(value: MediaLink(id: item.id)) { MediaRow(media: item) }
                 }
             }
@@ -98,6 +99,11 @@ struct MoreLikeThisSheet: View {
         }
         .pushDetailAction($path)
         .environment(\.cardSheetsAllowed, false)
+        // "Already watched" from a menu in here: the rating prompt opens over this sheet.
+        .sheet(item: Binding(get: { model.sheetRatePrompt }, set: { model.sheetRatePrompt = $0 })) { media in
+            RatePromptView(media: media)
+                .presentationDetents([.height(360)])
+        }
     }
 
     private func load() async {

@@ -170,8 +170,6 @@ struct MatchBadge: View {
             Label(showWord ? "\(value)% match" : "\(value)%", systemImage: "wand.and.stars")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(Theme.pink)
-                .contentTransition(.numericText())
-                .animation(.snappy, value: value)
         }
     }
 }
