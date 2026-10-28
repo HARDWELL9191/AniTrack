@@ -113,11 +113,14 @@ struct RemoveFromListSwipe: ViewModifier {
         if model.canEdit {
             content
                 .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                    Button(role: .destructive) {
+                    // Not role: .destructive — that makes iOS slide the row away right away,
+                    // before you've confirmed (it then jumped back). Red, and asks first.
+                    Button {
                         confirm = true
                     } label: {
                         Label("Remove", systemImage: "trash")
                     }
+                    .tint(.red)
                 }
                 .swipeActions(edge: .leading, allowsFullSwipe: true) {
                     if entry.status != .COMPLETED {
