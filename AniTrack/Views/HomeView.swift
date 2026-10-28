@@ -159,8 +159,7 @@ extension HomeView {
                     }
                     .padding(.horizontal, 20)
                 } else {
-                    let matches = Dictionary(picks.prefix(20).map { ($0.id, $0.match) }, uniquingKeysWith: { a, _ in a })
-                    cardRow(Array(picks.prefix(20).map(\.media)), matches: matches, width: 140)
+                    cardRow(Array(picks.prefix(20).map(\.media)), width: 140)
                 }
             } header: {
                 sectionHeader("Picked for you", systemImage: "wand.and.stars", action: "See all") {

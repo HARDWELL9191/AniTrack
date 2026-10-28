@@ -93,8 +93,11 @@ struct EpisodesSection: View {
     private var content: some View {
         if let page, page.total > 0 {
             LazyVStack(alignment: .leading, spacing: 14) {
+                // No thumbnails anywhere for this season: a clean list of titles, no empty boxes.
+                let hasThumbnails = page.episodes.contains { $0.thumbnail != nil }
                 ForEach(page.episodes.prefix(shownCount)) { episode in
-                    EpisodeRow(episode: episode, expanded: expanded.contains(episode.number))
+                    EpisodeRow(episode: episode, expanded: expanded.contains(episode.number),
+                               showThumbnail: hasThumbnails)
                         .contentShape(Rectangle())
                         .onTapGesture {
                             guard episode.description != nil else { return }
@@ -163,10 +166,11 @@ struct EpisodesSection: View {
 struct EpisodeRow: View {
     let episode: EpisodeInfo
     let expanded: Bool
+    var showThumbnail = true
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            thumbnail
+            if showThumbnail { thumbnail }
             VStack(alignment: .leading, spacing: 3) {
                 Text("Episode \(episode.number)")
                     .font(.caption.weight(.semibold))

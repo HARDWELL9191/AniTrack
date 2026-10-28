@@ -114,7 +114,7 @@ struct ForYouView: View {
                                 Button {
                                     withAnimation(.snappy) { index = offset }
                                 } label: {
-                                    MediaCard(media: rec.media, width: 96, matchOverride: rec.match)
+                                    MediaCard(media: rec.media, width: 96)
                                 }
                                 .buttonStyle(.plain)
                                 .onAppear { if offset >= picks.count - 3 { preloadIfNeeded(at: offset) } }
@@ -195,7 +195,9 @@ struct PickCard: View {
                     Text(rec.media.displayTitle(model.settings.titleLanguage))
                         .font(.title3.bold())
                         .lineLimit(3)
-                    Text("\(rec.match)% match")
+                    // The same match % as everywhere else in the app (the pick's rank within
+                    // today's list is only a fallback while your taste profile is loading).
+                    Text("\(model.matcher.match(for: rec.media) ?? rec.match)% match")
                         .font(.headline)
                         .foregroundStyle(Theme.pink)
                     Text(meta).font(.caption).foregroundStyle(.secondary)

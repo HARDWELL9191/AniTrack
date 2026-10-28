@@ -339,7 +339,8 @@ actor EpisodeService {
 
     private var memory: [Int: Page] = [:]
 
-    private func cacheName(_ id: Int) -> String { "episodes-\(id)" }
+    // v2: lists saved by the previous version could be wrongly empty or mismatched.
+    private func cacheName(_ id: Int) -> String { "episodes2-\(id)" }
 
     /// Whatever is saved for this show, however old (shown instantly while refreshing).
     func saved(for mediaId: Int) async -> Page? {
@@ -461,9 +462,11 @@ actor EpisodeService {
         if let first = result.map(\.number).min(), first > 1 {
             guard laterPart else { return [] }
             result = result.map { var e = $0; e.number -= first - 1; return e }
-        } else if laterPart, let expected, result.count > expected + 2 {
+        } else if laterPart, let expected, Double(result.count) > Double(expected) * 1.5 + 2 {
             // A later season whose list starts at 1 but is far longer than the season itself
-            // is the earlier season's list (e.g. Demon Slayer arcs), so it isn't used.
+            // is an earlier season's list (Demon Slayer's 11-episode arc carries all 26 of
+            // Season 1), so it isn't used. A few extras (KonoSuba 2 lists 13 for 10) are fine:
+            // anything past the last episode is simply ignored.
             return []
         }
         return result
