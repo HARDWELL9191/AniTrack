@@ -316,35 +316,40 @@ final class AppModel {
     /// entry per season; this only changes how they're shown.
     struct ShowRow: Identifiable {
         let entry: ListEntry
-        /// Other seasons of this show in the same list, folded under this row.
+        /// The show's other seasons on your list, folded under this row.
         let extraSeasons: Int
+        /// Their titles (so the Lists filter finds the show by any season's name).
+        let foldedTitles: [MediaTitle]
         var id: Int { entry.id }
     }
 
+    /// Your list as shows, not seasons: every later season is folded into the show's earliest
+    /// season on your list, whichever list each one is in, so a show appears once, in the
+    /// list of that row ("8 seasons"). AniList still keeps one entry per season.
     func shows(in statuses: [ListStatus]) -> [ShowRow] {
         let wanted = Set(statuses)
-        var extra: [Int: Int] = [:]   // shown mediaId → seasons folded under it
+        var extra: [Int: Int] = [:]          // shown mediaId → seasons folded under it
+        var titles: [Int: [MediaTitle]] = [:]
         var folded: Set<Int> = []
-        for e in entries where wanted.contains(e.status) && e.media.isLaterSeason {
+        for e in entries where e.media.isLaterSeason {
             var current = e.media
             var visited: Set<Int> = [e.mediaId]
             var anchor: Int?
             while let previous = current.prequelId, visited.count < 15, !visited.contains(previous),
                   let earlier = entry(for: previous) {
                 visited.insert(previous)
-                if wanted.contains(earlier.status) && earlier.media.isSeason {
-                    anchor = earlier.mediaId   // keeps going: the earliest one wins
-                }
+                if earlier.media.isSeason { anchor = earlier.mediaId }   // keeps going: the earliest wins
                 current = earlier.media
             }
             if let anchor {
                 folded.insert(e.mediaId)
                 extra[anchor, default: 0] += 1
+                titles[anchor, default: []].append(e.media.title)
             }
         }
         return entries
             .filter { wanted.contains($0.status) && !folded.contains($0.mediaId) }
-            .map { ShowRow(entry: $0, extraSeasons: extra[$0.mediaId] ?? 0) }
+            .map { ShowRow(entry: $0, extraSeasons: extra[$0.mediaId] ?? 0, foldedTitles: titles[$0.mediaId] ?? []) }
     }
 
     /// Shows (not seasons) in one list.
@@ -385,6 +390,7 @@ final class AppModel {
     /// Doesn't touch your local list: callers apply the result, so several writes can land as
     /// a single change.
     private func writeEntry(media: Media, status: ListStatus, progress: Int?, scoreRaw: Int?) async throws -> EntryLite {
+        detailCache[media.id] = nil   // its page would show the old status
         var vars: [String: Any] = ["mediaId": media.id, "status": status.rawValue]
         if let progress { vars["progress"] = max(0, progress) }
         if let scoreRaw { vars["scoreRaw"] = min(100, max(0, scoreRaw)) }
@@ -470,6 +476,7 @@ final class AppModel {
     }
 
     func delete(entryId: Int) async throws {
+        if let mediaId = entries.first(where: { $0.id == entryId })?.mediaId { detailCache[mediaId] = nil }
         _ = try await client.run(Queries.deleteEntry, variables: ["id": entryId], as: DeleteEntryData.self)
         entries.removeAll { $0.id == entryId }
     }
@@ -941,6 +948,7 @@ final class AppModel {
                         }
                     case .removed:
                         if let current {
+                            detailCache[season.id] = nil
                             _ = try await client.run(Queries.deleteEntry, variables: ["id": current.id],
                                                      as: DeleteEntryData.self)
                             removed.insert(current.id)
@@ -973,6 +981,7 @@ final class AppModel {
     /// Leaves your list at once (the row never jumps back while AniList answers); if AniList
     /// says no, it comes back and the error is shown.
     func removeShow(_ media: Media, entryId: Int) async throws {
+        detailCache[media.id] = nil
         let removed = entries.first { $0.id == entryId }
         entries.removeAll { $0.id == entryId }
         do {

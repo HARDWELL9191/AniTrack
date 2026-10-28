@@ -228,6 +228,10 @@ struct DiscoverView: View {
 
     /// Pull to refresh: always fresh, shown right away.
     private func refreshShelves() async {
+        // A refresh already running behind the screen: let it finish, then fetch and show.
+        while isLoadingSections && !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: 150_000_000)
+        }
         await fetchShelves(showWhenDone: true)
     }
 

@@ -24,21 +24,23 @@ struct LibraryView: View {
 
     /// One row per show (its other seasons in the same list are folded under it).
     private var rows: [AppModel.ShowRow] {
-        let grouped = model.shows(in: [status])
-        let extras = Dictionary(grouped.map { ($0.entry.id, $0.extraSeasons) }, uniquingKeysWith: { a, _ in a })
-        return items(grouped.map(\.entry)).map { AppModel.ShowRow(entry: $0, extraSeasons: extras[$0.id] ?? 0) }
+        var grouped = model.shows(in: [status])
+        // The filter finds a show by the name of any of its seasons.
+        let text = filter.trimmingCharacters(in: .whitespaces)
+        if !text.isEmpty {
+            grouped = grouped.filter { row in
+                ([row.entry.media.title] + row.foldedTitles).contains { t in
+                    [t.english, t.romaji, t.native].compactMap { $0 }
+                        .contains { $0.localizedCaseInsensitiveContains(text) }
+                }
+            }
+        }
+        let byId = Dictionary(grouped.map { ($0.entry.id, $0) }, uniquingKeysWith: { a, _ in a })
+        return items(grouped.map(\.entry)).compactMap { byId[$0.id] }
     }
 
     private func items(_ source: [ListEntry]) -> [ListEntry] {
-        var list = source
-        let text = filter.trimmingCharacters(in: .whitespaces)
-        if !text.isEmpty {
-            list = list.filter { entry in
-                let t = entry.media.title
-                return [t.english, t.romaji, t.native].compactMap { $0 }
-                    .contains { $0.localizedCaseInsensitiveContains(text) }
-            }
-        }
+        var list = source   // (already filtered by `rows`)
         let lang = model.settings.titleLanguage
         switch sort {
         case .updated: list.sort { ($0.updatedAt ?? 0) > ($1.updatedAt ?? 0) }
