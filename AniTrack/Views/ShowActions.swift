@@ -188,6 +188,8 @@ struct MatchBubble: View {
             .padding(.horizontal, 7)
             .padding(.vertical, 4)
             .glassEffect(.regular.tint(Theme.pinkGlass.opacity(0.55)), in: .capsule)
+            // Same faint white edge as the age bubble.
+            .overlay(Capsule().strokeBorder(.white.opacity(0.22), lineWidth: 0.5))
             .contentTransition(.numericText())
             .animation(.snappy, value: value)
     }
