@@ -190,14 +190,16 @@ struct LibraryView: View {
                 }
             } label: {
                 HStack(spacing: 6) {
+                    // Icons don't add height (the bookmark is taller than the text): the button
+                    // is exactly as tall as Discover's Categories button, whose height is the text's.
                     if showingNotForMe {
-                        Image(systemName: "hand.thumbsdown")
+                        Image(systemName: "hand.thumbsdown").frame(height: 0)
                         Text("Not for me (\(model.settings.dismissedPicks.count))")
                     } else {
-                        Image(systemName: status.symbol)
+                        Image(systemName: status.symbol).frame(height: 0)
                         Text("\(status.label) (\(model.showCount(of: status)))")
                     }
-                    Image(systemName: "chevron.down").font(.caption.weight(.semibold))
+                    Image(systemName: "chevron.down").font(.caption.weight(.semibold)).frame(height: 0)
                 }
                 .font(.subheadline.weight(.semibold))
             }
