@@ -8,6 +8,9 @@ struct MediaDetailView: View {
     @State private var detail: MediaDetail?
     @State private var loadError: String?
     @State private var showEditor = false
+    /// When the page appeared: the list button ignores touches while the page is still opening
+    /// (the tap that opened it from a cover sitting under that spot must never open the editor).
+    @State private var appearedAt = Date.distantPast
     @State private var expanded = false
     @State private var showSpoilers = false
     /// Fan recommendations with later seasons swapped for their first season.
@@ -27,6 +30,7 @@ struct MediaDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task(id: mediaId) { if detail == nil || recommendations.isEmpty { await load() } }
         .onAppear {
+            appearedAt = Date()
             // Seen in the last few minutes: the page is there from the first frame.
             if detail == nil, let hit = model.cachedDetail(id: mediaId) { detail = hit }
         }
@@ -189,7 +193,10 @@ struct MediaDetailView: View {
         let status = entry?.status ?? lite?.status
         VStack(spacing: 10) {
             if model.canEdit {
-                Button { showEditor = true } label: {
+                Button {
+                    guard Date().timeIntervalSince(appearedAt) > 0.6 else { return }
+                    showEditor = true
+                } label: {
                     Label(status?.label ?? "Add to list", systemImage: status?.symbol ?? "plus.circle.fill")
                         .frame(maxWidth: .infinity)
                 }
