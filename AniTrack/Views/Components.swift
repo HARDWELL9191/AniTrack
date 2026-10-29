@@ -101,52 +101,6 @@ struct BannerImageView: View {
     }
 }
 
-/// Swipe left on a row to remove the show from your AniList list (asks first);
-/// swipe right to mark it as fully watched and move it to Completed.
-struct RemoveFromListSwipe: ViewModifier {
-    @Environment(AppModel.self) private var model
-    let entry: ListEntry
-
-    @ViewBuilder
-    func body(content: Content) -> some View {
-        if model.canEdit {
-            content
-                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                    // Swipe = removed, no question asked (the whole show, every season).
-                    Button(role: .destructive) {
-                        Task {
-                            do {
-                                try await model.removeShow(entry.media, entryId: entry.id)
-                            } catch {
-                                model.errorMessage = error.localizedDescription
-                            }
-                        }
-                    } label: {
-                        Label("Remove", systemImage: "trash")
-                    }
-                }
-                .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                    if entry.status != .COMPLETED {
-                        Button {
-                            Task { await model.markCompleted(entry.media) }
-                        } label: {
-                            Label("Completed", systemImage: "checkmark.circle.fill")
-                        }
-                        .tint(.green)
-                    }
-                }
-        } else {
-            content
-        }
-    }
-}
-
-extension View {
-    func removeFromListSwipe(_ entry: ListEntry) -> some View {
-        modifier(RemoveFromListSwipe(entry: entry))
-    }
-}
-
 /// Community score shown out of 10 (AniList stores it as 0–100), with a mood smiley.
 struct ScoreBadge: View {
     let score: Int?
@@ -225,6 +179,8 @@ struct MediaCard: View {
     @Environment(\.zoomNamespace) private var zoom
     let media: Media
     var width: CGFloat = 112
+    /// The little status icon for shows on your list (off in Lists, where it's the same on every cover).
+    var showsStatus = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -240,7 +196,7 @@ struct MediaCard: View {
                     .overlay(alignment: .topLeading) {
                         AgeBadge(media: media).padding(5)
                     }
-                if let entry = model.entry(for: media.id) {
+                if showsStatus, let entry = model.entry(for: media.id) {
                     Image(systemName: entry.status.symbol)
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.white)

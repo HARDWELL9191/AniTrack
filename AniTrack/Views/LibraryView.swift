@@ -23,7 +23,7 @@ struct LibraryView: View {
     @State private var sort: SortOrder = .updated
     @State private var filter = ""
 
-    /// One row per show (its other seasons in the same list are folded under it).
+    /// One card per show (its other seasons on your lists are folded into it).
     private var rows: [AppModel.ShowRow] {
         var grouped = model.shows(in: [status])
         // The filter finds a show by the name of any of its seasons.
@@ -89,36 +89,38 @@ struct LibraryView: View {
         return list.sorted { $0.displayTitle(lang).localizedCompare($1.displayTitle(lang)) == .orderedAscending }
     }
 
+    /// Card width for four across: measured from the screen, so every phone gets 4 equal columns.
+    @State private var cardWidth: CGFloat = 0
+    private static let columnCount = 4
+    private static let columnSpacing: CGFloat = 10
+    private static let sidePadding: CGFloat = 16
+
+    private var columns: [GridItem] {
+        Array(repeating: GridItem(.fixed(cardWidth), spacing: Self.columnSpacing, alignment: .top),
+              count: Self.columnCount)
+    }
+
     var body: some View {
         NavigationStack(path: $path) {
-            List {
-                // Status picker lives inside the list (a top safe-area inset was hidden
-                // behind the large navigation title on iOS 27).
-                statusBar
-                    .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 8, trailing: 16))
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-
-                if showingNotForMe {
-                    notForMeRows
-                } else {
-                Group {
-                    let shown = rows
-                    if shown.isEmpty {
-                        Text(model.isLoadingList || !model.listLoadedOnce ? "Loading…" : "No shows marked \(status.label.lowercased()).")
-                            .foregroundStyle(.secondary)
-                    }
-                    ForEach(shown) { row in
-                        NavigationLink(value: MediaLink(id: row.entry.mediaId)) {
-                            MediaRow(media: row.entry.media, subtitle: subtitle(for: row.entry, extraSeasons: row.extraSeasons))
-                        }
-                        .removeFromListSwipe(row.entry)
+            // A grid of covers like Home (long-press a cover for everything a swipe used to do).
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 12) {
+                    statusBar
+                        .padding(.horizontal, Self.sidePadding)
+                        .padding(.top, 4)
+                    if showingNotForMe {
+                        notForMeGrid
+                    } else {
+                        listGrid
                     }
                 }
-                }
+                .padding(.bottom, 24)
             }
-            // Flat rows with thin separators (no rounded card behind every show).
-            .listStyle(.plain)
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
+                let spacing = Self.columnSpacing * CGFloat(Self.columnCount - 1)
+                let fitted = ((width - Self.sidePadding * 2 - spacing) / CGFloat(Self.columnCount)).rounded(.down)
+                if fitted > 0, fitted != cardWidth { cardWidth = fitted }
+            }
             .navigationTitle("Lists")
             // Large title on the same row as the toolbar buttons (no empty row above it).
             .toolbarTitleDisplayMode(.inlineLarge)
@@ -161,6 +163,67 @@ struct LibraryView: View {
             }
         }
         .pushDetailAction($path)
+    }
+
+    /// Your shows in the picked list, four across.
+    @ViewBuilder
+    private var listGrid: some View {
+        let shown = rows
+        if shown.isEmpty {
+            message(model.isLoadingList || !model.listLoadedOnce
+                    ? "Loading…"
+                    : (filter.trimmingCharacters(in: .whitespaces).isEmpty
+                       ? "No shows marked \(status.label.lowercased())." : "No matches."))
+        } else if cardWidth > 0 {
+            LazyVGrid(columns: columns, alignment: .leading, spacing: 18) {
+                ForEach(shown) { row in
+                    card(row.entry.media)
+                }
+            }
+            .padding(.horizontal, Self.sidePadding)
+        }
+    }
+
+    /// Shows you marked "Not for me", same grid (long-press → Bring back).
+    @ViewBuilder
+    private var notForMeGrid: some View {
+        let shows = notForMeItems
+        if shows.isEmpty {
+            message(model.settings.dismissedPicks.isEmpty
+                    ? "Nothing here. Shows you mark \"Not for me\" in For You appear here."
+                    : (!filter.isEmpty ? "No matches."
+                       : (notForMeFailed ? "Couldn't load these shows. Pull down to try again." : "Loading…")))
+        } else {
+            Text("Hidden from your picks. Long-press a show and choose Bring back to see it again.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, Self.sidePadding)
+            if cardWidth > 0 {
+                LazyVGrid(columns: columns, alignment: .leading, spacing: 18) {
+                    ForEach(shows) { media in
+                        card(media)
+                    }
+                }
+                .padding(.horizontal, Self.sidePadding)
+            }
+        }
+    }
+
+    private func card(_ media: Media) -> some View {
+        NavigationLink(value: MediaLink(id: media.id)) {
+            // Every show here is in the list you're looking at: no status icon on each cover.
+            MediaCard(media: media, width: cardWidth, showsStatus: false)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func message(_ text: String) -> some View {
+        Text(text)
+            .foregroundStyle(.secondary)
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, Self.sidePadding)
+            .padding(.top, 40)
     }
 
     /// Status dropdown: one glass button showing the current list and its count.
@@ -207,49 +270,10 @@ struct LibraryView: View {
         }
     }
 
-    @ViewBuilder
-    private var notForMeRows: some View {
-        let shows = notForMeItems
-        if shows.isEmpty {
-            Text(model.settings.dismissedPicks.isEmpty
-                 ? "Nothing here. Shows you mark \"Not for me\" in For You appear here."
-                 : (!filter.isEmpty ? "No matches."
-                    : (notForMeFailed ? "Couldn't load these shows. Pull down to try again." : "Loading…")))
-                .foregroundStyle(.secondary)
-        } else {
-            Text("Hidden from your picks. Swipe left on a show to bring it back.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .listRowSeparator(.hidden)
-        }
-        ForEach(shows) { media in
-            NavigationLink(value: MediaLink(id: media.id)) {
-                MediaRow(media: media, subtitle: [media.formatLabel, media.seasonLabel].compactMap { $0 }.joined(separator: " · "))
-            }
-            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                Button {
-                    Task { await model.undoNotForMe(media.id) }
-                } label: {
-                    Label("Undo", systemImage: "arrow.uturn.backward")
-                }
-                .tint(.blue)
-            }
-        }
-    }
-
     /// Opens on the first status that actually has shows, unless you already picked one.
     private func pickDefaultStatus() {
         guard !userPickedStatus, !showingNotForMe, model.showCount(of: status) == 0 else { return }
         let order: [ListStatus] = [.CURRENT, .REPEATING, .PLANNING, .COMPLETED, .PAUSED, .DROPPED]
         if let first = order.first(where: { model.showCount(of: $0) > 0 }) { status = first }
-    }
-
-    private func subtitle(for entry: ListEntry, extraSeasons: Int) -> String {
-        var parts: [String] = []
-        if extraSeasons > 0 { parts.append("\(extraSeasons + 1) seasons") }
-        if entry.scoreValue > 0 { parts.append("Your score ★ \(Fmt.score(entry.score))") }
-        parts.append(entry.media.formatLabel)
-        if let season = entry.media.seasonLabel { parts.append(season) }
-        return parts.joined(separator: " · ")
     }
 }

@@ -81,6 +81,11 @@ struct ShowActionsMenu: ViewModifier {
                     withAnimation(.snappy) { model.dismissPick(media.id, media: media) }
                 }
             }
+            if model.settings.dismissedPicks.contains(media.id) {
+                Button("Bring back", systemImage: "arrow.uturn.backward") {
+                    Task { await model.undoNotForMe(media.id) }
+                }
+            }
             if model.canEdit && entry?.status != .COMPLETED {
                 Button("Already watched", systemImage: "eye.fill") {
                     // Inside a sheet the sheet itself shows the rating prompt.
@@ -95,6 +100,19 @@ struct ShowActionsMenu: ViewModifier {
             if sheetsAllowed, case .available = PickExplainer.shared.availability {
                 Button("Why would I like this?", systemImage: "apple.intelligence") {
                     model.cardSheet = .why(media)
+                }
+            }
+            if model.canEdit, let entry {
+                // The whole show (every season), straight away, like the swipe it replaces.
+                Button("Remove from list", systemImage: "trash", role: .destructive) {
+                    let model = model
+                    Task {
+                        do {
+                            try await model.removeShow(media, entryId: entry.id)
+                        } catch {
+                            model.errorMessage = error.localizedDescription
+                        }
+                    }
                 }
             }
     }
