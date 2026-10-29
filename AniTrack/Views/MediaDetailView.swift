@@ -33,10 +33,17 @@ struct MediaDetailView: View {
         .sheet(isPresented: $showEditor) {
             if let media = detail?.media {
                 EntryEditorView(media: media, existing: model.entry(for: mediaId),
-                                lite: model.isNotForMeEntry(detail?.mediaListEntry) ? nil : detail?.mediaListEntry)
+                                lite: loadedEntry(detail?.mediaListEntry))
                     .presentationDetents([.medium, .large])
             }
         }
+    }
+
+    /// The entry AniList sent with the page, unless it's a "Not for me" marker or you've
+    /// removed the show since (the page then shows "Add to list" straight away).
+    private func loadedEntry(_ lite: EntryLite?) -> EntryLite? {
+        guard let lite, !model.isNotForMeEntry(lite), !model.deletedEntryIds.contains(lite.id) else { return nil }
+        return lite
     }
 
     private func load() async {
@@ -96,8 +103,7 @@ struct MediaDetailView: View {
                 .padding(.top, -80)
 
                 // A "Not for me" marker isn't a real list entry: show the show as not on your list.
-                listControls(media: media, entry: entry,
-                             lite: model.isNotForMeEntry(d.mediaListEntry) ? nil : d.mediaListEntry)
+                listControls(media: media, entry: entry, lite: loadedEntry(d.mediaListEntry))
                     .padding(.horizontal)
 
                 infoGrid(media: media, studios: d.studios?.nodes?.map(\.name) ?? [])

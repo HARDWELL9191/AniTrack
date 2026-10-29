@@ -29,6 +29,10 @@ final class AppModel {
     /// empty list means "still loading", never "your list is empty".
     private(set) var listLoadedOnce = false
     private(set) var didBootstrap = false
+    /// List entries deleted in this session. A details page loaded earlier still carries the
+    /// entry AniList sent with it; this tells the page that entry is gone (a re-added show
+    /// gets a new entry id, so nothing ever needs to leave this set).
+    private(set) var deletedEntryIds: Set<Int> = []
     var errorMessage: String?
 
     // Recommendations ("Hoshi" picks), one feed per category ("any" = no category).
@@ -936,7 +940,10 @@ final class AppModel {
                 // Gone from your list at once; AniList is caught up in the background below.
                 for season in seasons { if let e = entry(for: season.id) { removedEntries[season.id] = e } }
                 let ids = Set(removedEntries.values.map(\.id))
-                if !ids.isEmpty { entries.removeAll { ids.contains($0.id) } }
+                if !ids.isEmpty {
+                    deletedEntryIds.formUnion(ids)
+                    entries.removeAll { ids.contains($0.id) }
+                }
             }
             for season in seasons {
                 guard viewer?.id == account, !Task.isCancelled else { break }   // what's written still lands
@@ -1000,10 +1007,12 @@ final class AppModel {
     func removeShow(_ media: Media, entryId: Int) async throws {
         detailCache[media.id] = nil
         let removed = entries.first { $0.id == entryId }
+        deletedEntryIds.insert(entryId)
         entries.removeAll { $0.id == entryId }
         do {
             _ = try await client.run(Queries.deleteEntry, variables: ["id": entryId], as: DeleteEntryData.self)
         } catch {
+            deletedEntryIds.remove(entryId)
             if let removed, !entries.contains(where: { $0.id == entryId }) { entries.append(removed) }
             throw error
         }
