@@ -24,9 +24,15 @@ dotnet publish (Join-Path $root "ai-helper/AniTrack.AI.csproj") -c Release -r wi
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed" }
 if (-not (Test-Path (Join-Path $helperOut "AniTrack.AI.exe"))) { throw "AniTrack.AI.exe missing" }
 
-# 2. The Windows App SDK runtime the helper runs on (installed by AniTrack's installer).
-$runtimeExe = Join-Path $winai "windowsappruntimeinstall-arm64.exe"
+# Windows ML's own ONNX Runtime and DirectML come along with the Windows App SDK package; the
+# helper doesn't use them (the language model runs inside Windows' AI components).
+foreach ($unused in "onnxruntime.dll", "DirectML.dll") { Remove-Item (Join-Path $helperOut $unused) -Force -ErrorAction SilentlyContinue }
+
+# 2. The Windows App SDK runtime the helper runs on. AniTrack's installer downloads it from
+#    Microsoft when it's missing (install_runtime.ps1); this copy is only for this build.
+$runtimeExe = Join-Path ([System.IO.Path]::GetTempPath()) "windowsappruntimeinstall-arm64.exe"
 Invoke-WebRequest $RuntimeUrl -OutFile $runtimeExe
+Remove-Item (Join-Path $winai "windowsappruntimeinstall-arm64.exe") -Force -ErrorAction SilentlyContinue
 
 # 3. Which framework package that runtime provides (name + version for the manifest): read from
 #    the Windows App SDK NuGet packages' MSIX inventory, or else from Windows after installing it.
@@ -101,6 +107,9 @@ Remove-Item "Cert:\CurrentUser\My\$($cert.Thumbprint)" -Force
 if ($signed -ne 0) { throw "signtool failed:`n$(($signOut | Select-Object -Last 10) -join "`n")" }
 
 Set-Content (Join-Path $winai "version.txt") $version -NoNewline
+$installer = Get-Content (Join-Path $root "winai/install_runtime.ps1") -Raw
+$installer = $installer.Replace("__FRAMEWORK_NAME__", $framework.Name).Replace("__RUNTIME_VERSION__", $RuntimeVersion)
+Set-Content (Join-Path $winai "install_runtime.ps1") $installer -Encoding utf8
 $files = Get-ChildItem $winai, $helperOut -Recurse -File
 $size = ($files | Measure-Object -Property Length -Sum).Sum
 Note ("Largest Windows AI files:`n" + (($files | Sort-Object Length -Descending | Select-Object -First 25 | ForEach-Object { "{0,8:N1} MB  {1}" -f ($_.Length / 1MB), $_.Name }) -join "`n") + "`n" + ("{0} files in ai-helper" -f (Get-ChildItem $helperOut -Recurse -File).Count))

@@ -13,8 +13,11 @@ $root = Split-Path -Parent $PSScriptRoot
 $res = Resolve-Path (Join-Path $root "src-tauri/resources")
 $winai = Join-Path $res "winai"
 
-& (Join-Path $winai "windowsappruntimeinstall-arm64.exe") --quiet
-Write-Host "runtime installer exit code: $LASTEXITCODE"
+# Same script the installer runs: downloads, checks Microsoft's signature, installs.
+$runtime = & (Join-Path $winai "install_runtime.ps1") 2>&1
+$runtimeExit = $LASTEXITCODE
+Note ("runtime install (exit $runtimeExit):`n" + ($runtime -join "`n"))
+if ($runtimeExit -ne 0) { throw "install_runtime.ps1 failed" }
 Import-Certificate -FilePath (Join-Path $winai "AniTrack.cer") -CertStoreLocation "Cert:\LocalMachine\TrustedPeople" | Out-Null
 Add-AppxPackage -Path (Join-Path $winai "AniTrack.AI.msix") -ExternalLocation $res -ForceUpdateFromAnyVersion
 Get-AppxPackage -Name "AniTrack.WindowsAI" | Format-List Name, Version, Architecture, IsDevelopmentMode, Dependencies
