@@ -192,7 +192,10 @@ extension HomeView {
     func cardRow(_ items: [Media], width: CGFloat = 104,
                  suggestions: Bool = true) -> some View {
         let shown = suggestions
-            ? items.filter { model.entry(for: $0.id) == nil && !model.settings.dismissedPicks.contains($0.id) }
+            ? items.filter {
+                model.entry(for: $0.id) == nil && !model.settings.dismissedPicks.contains($0.id)
+                    && !(model.settings.hideChinese && $0.countryOfOrigin == "CN")   // applies at once
+            }
             : items
         return ScrollView(.horizontal, showsIndicators: false) {
             LazyHStack(alignment: .top, spacing: 12) {

@@ -316,7 +316,11 @@ struct HorizontalMediaSection: View {
 
     var body: some View {
         // A show marked "Not for me" (e.g. from its long-press menu) leaves the row right away.
-        let shown = items.filter { !model.settings.dismissedPicks.contains($0.id) }
+        // "Hide Chinese animation" applies the moment it's switched on (saved shelves too).
+        let hideCN = model.settings.hideChinese
+        let shown = items.filter {
+            !model.settings.dismissedPicks.contains($0.id) && !(hideCN && $0.countryOfOrigin == "CN")
+        }
         VStack(alignment: .leading, spacing: 10) {
             Text(title).font(.title3.weight(.bold)).padding(.horizontal)
             ScrollView(.horizontal, showsIndicators: false) {
