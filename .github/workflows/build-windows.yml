@@ -62,7 +62,7 @@ jobs:
       - name: On-device AI files (ONNX Runtime + QNN, MiniLM)
         run: ./tools/prepare_ai.ps1
 
-      - name: Tests (Rust: tokenizer, vector store, token encryption)
+      - name: Tests (tokenizer, vector store, token encryption)
         working-directory: windows/src-tauri
         run: cargo test --release --lib
 
