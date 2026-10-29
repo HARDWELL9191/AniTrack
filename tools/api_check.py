@@ -57,6 +57,14 @@ if os.environ.get("ANILIST_USER", "") == "thumbs":
         note("thumbs crash", traceback.format_exc()[-1500:], "error")
     raise SystemExit(0)
 
+if os.environ.get("ANILIST_USER", "") == "fastload":
+    import traceback
+    try:
+        exec(open("tools/fastload_check.py").read(), globals())
+    except Exception:
+        note("fastload crash", traceback.format_exc()[-1500:], "error")
+    raise SystemExit(0)
+
 if os.environ.get("ANILIST_USER", "") == "konosuba":
     import traceback
     try:
