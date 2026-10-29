@@ -254,7 +254,9 @@ struct PickCard: View {
 
                     HStack(spacing: 10) {
                         Button(role: .destructive, action: onDismiss) {
-                            Label("Not for me", systemImage: "hand.thumbsdown").frame(maxWidth: .infinity)
+                            Label("Not for me", systemImage: "hand.thumbsdown")
+                                .foregroundStyle(.red)   // glass buttons don't tint destructive ones
+                                .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.glass)
                         if model.canEdit {
