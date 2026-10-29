@@ -61,6 +61,9 @@ pub struct Engine {
 
 impl Engine {
     pub fn new(paths: Paths) -> Self {
+        // Absolute folders: ONNX Runtime reads a relative plugin path from its own folder.
+        let absolute = |p: PathBuf| std::path::absolute(&p).unwrap_or(p);
+        let paths = Paths { resources: absolute(paths.resources), data: absolute(paths.data) };
         // Files left by the earlier model (all-MiniLM): its vectors don't mix with bge's.
         for old in ["embeddings-minilm-v1.bin", "minilm-qnn-ctx.onnx", "minilm-qnn-mixed-ctx.onnx"] {
             let _ = std::fs::remove_file(paths.data.join(old));

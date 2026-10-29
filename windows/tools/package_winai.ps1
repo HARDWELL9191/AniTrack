@@ -101,5 +101,7 @@ Remove-Item "Cert:\CurrentUser\My\$($cert.Thumbprint)" -Force
 if ($signed -ne 0) { throw "signtool failed:`n$(($signOut | Select-Object -Last 10) -join "`n")" }
 
 Set-Content (Join-Path $winai "version.txt") $version -NoNewline
-$size = (Get-ChildItem $winai, $helperOut -Recurse -File | Measure-Object -Property Length -Sum).Sum
+$files = Get-ChildItem $winai, $helperOut -Recurse -File
+$size = ($files | Measure-Object -Property Length -Sum).Sum
+Note ("Largest Windows AI files:`n" + (($files | Sort-Object Length -Descending | Select-Object -First 25 | ForEach-Object { "{0,8:N1} MB  {1}" -f ($_.Length / 1MB), $_.Name }) -join "`n") + "`n" + ("{0} files in ai-helper" -f (Get-ChildItem $helperOut -Recurse -File).Count))
 Note ("Windows AI files: {0:N1} MB, identity package {1}" -f ($size / 1MB), $version)

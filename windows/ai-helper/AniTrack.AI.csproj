@@ -11,6 +11,12 @@
     <RuntimeIdentifier>win-arm64</RuntimeIdentifier>
     <Platforms>ARM64</Platforms>
     <SelfContained>true</SelfContained>
+    <!-- Native AOT: one small native exe with only the code it uses, instead of the whole .NET
+         runtime and SDK projection libraries; also starts faster. -->
+    <PublishAot>true</PublishAot>
+    <OptimizationPreference>Size</OptimizationPreference>
+    <StackTraceSupport>false</StackTraceSupport>
+    <DebugType>none</DebugType>
     <AssemblyName>AniTrack.AI</AssemblyName>
     <RootNamespace>AniTrack.AI</RootNamespace>
     <Nullable>enable</Nullable>
