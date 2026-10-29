@@ -1,3 +1,4 @@
+import ImageIO
 import SwiftUI
 import UIKit
 
@@ -53,6 +54,12 @@ struct ShowActionsMenu: ViewModifier {
                                 age: model.ages.rating(for: media.id)?.label)
             }
             .padding(-Self.highlightPadding)
+            // Shown for a moment (not just scrolled past): get its preview image ready.
+            .task(id: media.id) {
+                try? await Task.sleep(nanoseconds: 600_000_000)
+                guard !Task.isCancelled else { return }
+                await PreviewImageStore.prepare([media.coverURL, media.thumbURL])
+            }
     }
 
     private static let highlightPadding: CGFloat = 8
@@ -147,22 +154,49 @@ struct ShowMenuPreview: View {
     }
 }
 
-/// Covers the phone already downloaded, read straight from the app's image cache (no
-/// network, no waiting). Only used when a long-press preview opens; the last few are kept
-/// decoded so pressing the same show again costs nothing.
+/// Ready-to-draw covers for long-press previews, so the preview never has to read or decode
+/// an image while it opens (that work used to stall the lift for a moment).
+/// A row or cover that stays on screen briefly gets its image prepared in the background,
+/// from the app's own image cache (never the network). Downsized to what the preview draws.
 enum PreviewImageStore {
     nonisolated(unsafe) private static let decoded: NSCache<NSString, UIImage> = {
         let cache = NSCache<NSString, UIImage>()
-        cache.countLimit = 20
+        cache.totalCostLimit = 48 * 1024 * 1024   // ~25 big covers or ~150 thumbnails
         return cache
     }()
+    /// The preview is 200 × 290 pt: 870 px tall at 3× is all it ever shows.
+    private static let maxPixels = 870
 
+    /// What's ready right now. Falls back to reading the cache directly (still no network)
+    /// for a show that was pressed before it was prepared.
     static func image(_ urlString: String?) -> UIImage? {
-        guard let urlString, let url = URL(string: urlString) else { return nil }
+        guard let urlString else { return nil }
         if let hit = decoded.object(forKey: urlString as NSString) { return hit }
-        guard let data = URLCache.shared.cachedResponse(for: URLRequest(url: url))?.data,
-              let image = UIImage(data: data) else { return nil }
-        decoded.setObject(image, forKey: urlString as NSString)
+        return load(urlString)
+    }
+
+    /// Prepares these images off the main thread (whichever are already downloaded).
+    static func prepare(_ urlStrings: [String?]) async {
+        let wanted = urlStrings.compactMap { $0 }.filter { decoded.object(forKey: $0 as NSString) == nil }
+        guard !wanted.isEmpty else { return }
+        await Task.detached(priority: .utility) {
+            for urlString in wanted where !Task.isCancelled { _ = load(urlString) }
+        }.value
+    }
+
+    private static func load(_ urlString: String) -> UIImage? {
+        guard let url = URL(string: urlString),
+              let data = URLCache.shared.cachedResponse(for: URLRequest(url: url))?.data,
+              let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,   // decoded here, not while drawing
+            kCGImageSourceThumbnailMaxPixelSize: maxPixels
+        ]
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+        let image = UIImage(cgImage: cgImage)
+        decoded.setObject(image, forKey: urlString as NSString, cost: cgImage.bytesPerRow * cgImage.height)
         return image
     }
 }
