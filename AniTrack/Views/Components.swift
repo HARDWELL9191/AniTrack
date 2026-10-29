@@ -334,6 +334,7 @@ struct HorizontalMediaSection: View {
                 }
                 .padding(.horizontal)
             }
+            .scrollClipDisabled()   // a pressed cover grows a little: never cut its top off
         }
     }
 }

@@ -34,8 +34,12 @@ struct ShowActionsMenu: ViewModifier {
     func body(content: Content) -> some View {
         // A custom preview, so only the pressed show lifts out (inside a List the system would
         // otherwise lift the whole row of covers).
+        // The highlight while you hold sits a little outside the show (padding added, then taken
+        // back so the layout doesn't move): the cover never touches the highlight's edge.
         content
-            .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .padding(Self.highlightPadding)
+            .contentShape(.contextMenuPreview,
+                          RoundedRectangle(cornerRadius: 10 + Self.highlightPadding, style: .continuous))
             .contextMenu { menuItems } preview: {
                 // iOS renders the preview outside the app's view tree, so it gets plain values
                 // only (reading the app model inside it would crash).
@@ -46,7 +50,10 @@ struct ShowActionsMenu: ViewModifier {
                                 match: model.matcher.match(for: media),
                                 age: model.ages.rating(for: media.id)?.label)
             }
+            .padding(-Self.highlightPadding)
     }
+
+    private static let highlightPadding: CGFloat = 8
 
     @ViewBuilder
     private var menuItems: some View {

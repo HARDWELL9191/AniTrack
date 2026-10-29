@@ -129,6 +129,7 @@ struct ForYouView: View {
                         }
                         .padding(.horizontal)
                     }
+                    .scrollClipDisabled()   // a pressed cover grows a little: never cut its top off
                 }
             }
 

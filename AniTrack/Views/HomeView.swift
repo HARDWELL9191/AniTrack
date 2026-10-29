@@ -210,6 +210,7 @@ extension HomeView {
             .padding(.vertical, 4)
             .animation(.snappy, value: shown.map(\.id))
         }
+        .scrollClipDisabled()   // a pressed cover grows a little: never cut its top off
     }
 
     /// Two light requests, once per launch (or on pull to refresh).
