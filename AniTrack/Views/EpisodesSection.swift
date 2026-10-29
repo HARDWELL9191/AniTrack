@@ -72,6 +72,7 @@ struct EpisodesSection: View {
                 Text(seasonName(seasons.firstIndex { $0.id == selectedId } ?? 0))
                 Image(systemName: "chevron.down").font(.caption.weight(.semibold))
             }
+            .menuButtonHeight()   // same size as every other dropdown
             .font(.subheadline.weight(.semibold))
         }
         .menuStyle(.button)

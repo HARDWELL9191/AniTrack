@@ -190,8 +190,8 @@ struct LibraryView: View {
                 }
             } label: {
                 HStack(spacing: 6) {
-                    // Icons don't add height (the bookmark is taller than the text): the button
-                    // is exactly as tall as Discover's Categories button, whose height is the text's.
+                    // Every status gets the Planning height (see menuButtonHeight): the icons
+                    // themselves don't add height, so no list's icon makes the button taller.
                     if showingNotForMe {
                         Image(systemName: "hand.thumbsdown").frame(height: 0)
                         Text("Not for me (\(model.settings.dismissedPicks.count))")
@@ -201,6 +201,7 @@ struct LibraryView: View {
                     }
                     Image(systemName: "chevron.down").font(.caption.weight(.semibold)).frame(height: 0)
                 }
+                .menuButtonHeight()
                 .font(.subheadline.weight(.semibold))
             }
             .menuStyle(.button)

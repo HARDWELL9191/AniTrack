@@ -66,7 +66,20 @@ struct CategoryMenuLabel: View {
             Image(systemName: "chevron.down")
                 .font(.caption.weight(.semibold))
         }
+        .menuButtonHeight()
         .font(.subheadline.weight(.semibold))
+    }
+}
+
+extension View {
+    /// The one height for the glass dropdown buttons (Lists' status, Discover's and For You's
+    /// categories, the details page's seasons): the height of the Planning button, i.e. its bookmark icon, whatever the
+    /// label shows. Use with the label's icons kept from adding height of their own.
+    func menuButtonHeight() -> some View {
+        ZStack {
+            Image(systemName: "bookmark.fill").hidden()
+            self
+        }
     }
 }
 
