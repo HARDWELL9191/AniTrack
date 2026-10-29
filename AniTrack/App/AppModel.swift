@@ -17,6 +17,7 @@ final class AppModel {
             entryIndex = Dictionary(entries.indices.map { (entries[$0].mediaId, $0) }, uniquingKeysWith: { a, _ in a })
             matcher.update(entries: entries)
             franchises = ListFranchises(entries.map(\.media))
+            grouping = nil   // worked out again on next use
         }
     }
     /// mediaId → position in `entries`, so every cover/badge lookup is O(1) instead of a scan.
@@ -326,9 +327,25 @@ final class AppModel {
     /// Your list as shows, not seasons: every later season is folded into the show's earliest
     /// season on your list, whichever list each one is in, so a show appears once, in the
     /// list of that row ("8 seasons"). AniList still keeps one entry per season.
+    private struct Grouping {
+        var folded: Set<Int> = []              // later seasons folded into another row
+        var extra: [Int: Int] = [:]            // shown mediaId → seasons folded under it
+        var titles: [Int: [MediaTitle]] = [:]
+    }
+    /// Worked out once per list change (Lists asks for it many times per redraw: every
+    /// status count in its dropdown, the rows, Home's rows).
+    @ObservationIgnored private var grouping: Grouping?
+
     func shows(in statuses: [ListStatus]) -> [ShowRow] {
         let wanted = Set(statuses)
-        var extra: [Int: Int] = [:]          // shown mediaId → seasons folded under it
+        let g = grouping ?? makeGrouping()
+        return entries
+            .filter { wanted.contains($0.status) && !g.folded.contains($0.mediaId) }
+            .map { ShowRow(entry: $0, extraSeasons: g.extra[$0.mediaId] ?? 0, foldedTitles: g.titles[$0.mediaId] ?? []) }
+    }
+
+    private func makeGrouping() -> Grouping {
+        var extra: [Int: Int] = [:]
         var titles: [Int: [MediaTitle]] = [:]
         var folded: Set<Int> = []
         for e in entries where e.media.isLaterSeason {
@@ -347,9 +364,9 @@ final class AppModel {
                 titles[anchor, default: []].append(e.media.title)
             }
         }
-        return entries
-            .filter { wanted.contains($0.status) && !folded.contains($0.mediaId) }
-            .map { ShowRow(entry: $0, extraSeasons: extra[$0.mediaId] ?? 0, foldedTitles: titles[$0.mediaId] ?? []) }
+        let result = Grouping(folded: folded, extra: extra, titles: titles)
+        grouping = result
+        return result
     }
 
     /// Shows (not seasons) in one list.

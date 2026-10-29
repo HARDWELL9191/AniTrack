@@ -67,8 +67,10 @@ struct LibraryView: View {
             }
         case .match:
             // Rated/finished shows have no match; fall back to your score for those.
-            let key: (ListEntry) -> Int = { model.matcher.match(for: $0.media) ?? Int($0.scoreValue) }
-            list.sort { key($0) > key($1) }
+            // Each show's % worked out once (not twice per comparison while sorting).
+            let keys = Dictionary(list.map { ($0.id, model.matcher.match(for: $0.media) ?? Int($0.scoreValue)) },
+                                  uniquingKeysWith: { a, _ in a })
+            list.sort { (keys[$0.id] ?? 0) > (keys[$1.id] ?? 0) }
         }
         return list
     }
@@ -164,6 +166,7 @@ struct LibraryView: View {
     /// Status dropdown: one glass button showing the current list and its count.
     private var statusBar: some View {
         HStack {
+            Spacer()   // on the right, within thumb reach
             Menu {
                 ForEach(ListStatus.allCases) { s in
                     Button {
@@ -201,7 +204,6 @@ struct LibraryView: View {
             }
             .menuStyle(.button)
             .buttonStyle(.glass)
-            Spacer()
         }
     }
 

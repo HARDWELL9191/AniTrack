@@ -268,7 +268,6 @@ struct EntryEditorView: View {
     @State private var progress = 0
     @State private var score: Double = 0
     @State private var isSaving = false
-    @State private var confirmDelete = false
     @State private var didLoad = false
     /// Set when you pick a status yourself (not when the episode stepper changes it), so
     /// "Completed"/"Planning" picked here applies to the whole show.
@@ -293,7 +292,9 @@ struct EntryEditorView: View {
                     Slider(value: $score, in: 0...10, step: 0.5)
                 }
                 if entryId != nil {
-                    Button("Remove from list", role: .destructive) { confirmDelete = true }
+                    // Removes the whole show (every season), no question asked.
+                    Button("Remove from list", role: .destructive) { remove() }
+                        .disabled(isSaving)
                 }
             }
             .navigationTitle(media.displayTitle(model.settings.titleLanguage))
@@ -303,11 +304,6 @@ struct EntryEditorView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") { Task { await save() } }.disabled(isSaving)
                 }
-            }
-            .confirmationDialog("Remove from your list?", isPresented: $confirmDelete, titleVisibility: .visible) {
-                Button("Remove", role: .destructive) { Task { await remove() } }
-            } message: {
-                Text("Its other seasons are removed too.")
             }
             .onChange(of: progress) { _, newValue in
                 guard didLoad else { return }   // ignore the initial fill from your existing entry
@@ -346,13 +342,18 @@ struct EntryEditorView: View {
         }
     }
 
-    private func remove() async {
+    /// Closes at once: the show leaves your list straight away, AniList follows in the
+    /// background (it comes back with a message only if AniList refuses).
+    private func remove() {
         guard let entryId else { return }
-        do {
-            try await model.removeShow(media, entryId: entryId)
-            dismiss()
-        } catch {
-            model.errorMessage = error.localizedDescription
+        let model = model, media = media
+        dismiss()
+        Task {
+            do {
+                try await model.removeShow(media, entryId: entryId)
+            } catch {
+                model.errorMessage = error.localizedDescription
+            }
         }
     }
 }
