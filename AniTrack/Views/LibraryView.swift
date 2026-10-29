@@ -95,7 +95,7 @@ struct LibraryView: View {
                 // Status picker lives inside the list (a top safe-area inset was hidden
                 // behind the large navigation title on iOS 27).
                 statusBar
-                    .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 8, trailing: 16))   // same height under the search bar as Discover's Categories button
+                    .listRowInsets(EdgeInsets(top: 16, leading: 16, bottom: 12, trailing: 16))   // same height under the search bar as Discover's Categories button
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
 
