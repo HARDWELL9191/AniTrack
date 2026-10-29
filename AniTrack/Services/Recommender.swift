@@ -475,6 +475,14 @@ actor SeasonCache {
         }
     }
 
+    /// Writes saved first seasons now (the background job ends before the usual delayed write).
+    func flush() {
+        guard rootsLoaded, saveTask != nil else { return }
+        saveTask?.cancel()
+        saveTask = nil
+        DiskCache.save(roots, name: Self.rootsFile)
+    }
+
     private func loadRoots() async {
         guard !rootsLoaded else { return }
         rootsLoaded = true

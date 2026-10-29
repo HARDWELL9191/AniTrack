@@ -1,17 +1,27 @@
 import BackgroundTasks
 import Foundation
 
-/// Charging-time pre-analysis. iOS runs this only while the iPhone is on external power and
-/// idle (typically overnight). It embeds synopses of shows you're likely to see (your list, your
-/// picks, this season's trending and popular shows, and fan recommendations for your favorites)
-/// so match badges and For You already have full AI accuracy during the day.
+/// Two background jobs that get the app ready before you open it.
+///
+/// 1) Season lookups (light, also on battery): fetches the four Discover shelves and works out
+///    the first season of every Season 2+ in them, saving the answers. Discover's first load then
+///    has no lookups left to do. About 10 small requests, no AI. Runs in the light "background
+///    refresh" slot iOS hands out on battery (~30 seconds), and again at the start of the
+///    charging job.
+/// 2) AI pre-analysis (charging only): embeds synopses of shows you're likely to see (your list,
+///    your picks, this season's trending and popular shows, and fan recommendations for your
+///    favorites) so match badges and For You already have full AI accuracy during the day.
 ///
 /// Kept deliberately light: at most `maxNewPerRun` new shows per charge, in small chunks at
 /// background priority, stopping immediately if iOS asks, the phone gets hot, or power is unplugged.
 enum BackgroundPrefetch {
     static let identifier = "com.tim.anitrack.prefetch"
+    static let seasonsIdentifier = "com.tim.anitrack.seasons"
     private static let maxNewPerRun = 250
     private static let chunkSize = 25
+    /// Season lookups at most this often (both jobs share it, so they never repeat each other).
+    private static let lookupInterval: TimeInterval = 4 * 3600
+    private static let lookupKey = "seasonLookupAt"
 
     /// Call once, before the app finishes launching.
     static func register() {
@@ -22,14 +32,28 @@ enum BackgroundPrefetch {
             }
             handle(task)
         }
+        BGTaskScheduler.shared.register(forTaskWithIdentifier: seasonsIdentifier, using: nil) { task in
+            guard let task = task as? BGAppRefreshTask else {
+                task.setTaskCompleted(success: false)
+                return
+            }
+            handleSeasons(task)
+        }
     }
 
-    /// Ask iOS for the next charging window (at most every few hours).
+    /// Ask iOS for the next charging window and the next light refresh (at most every few hours).
     static func schedule() {
         let request = BGProcessingTaskRequest(identifier: identifier)
         request.requiresExternalPower = true
         request.requiresNetworkConnectivity = true
         request.earliestBeginDate = Date(timeIntervalSinceNow: 3 * 3600)
+        try? BGTaskScheduler.shared.submit(request)
+        scheduleSeasons()
+    }
+
+    private static func scheduleSeasons() {
+        let request = BGAppRefreshTaskRequest(identifier: seasonsIdentifier)
+        request.earliestBeginDate = Date(timeIntervalSinceNow: lookupInterval)
         try? BGTaskScheduler.shared.submit(request)
     }
 
@@ -45,6 +69,60 @@ enum BackgroundPrefetch {
         }
     }
 
+    private static func handleSeasons(_ task: BGAppRefreshTask) {
+        scheduleSeasons()   // keep the cycle going
+        let work = Task.detached(priority: .background) {
+            await lookUpSeasons()
+        }
+        task.expirationHandler = { work.cancel() }
+        Task.detached(priority: .background) {
+            let ok = await work.value
+            task.setTaskCompleted(success: ok)
+        }
+    }
+
+    /// Discover's four shelves, fetched the way Discover fetches them, and the first season of
+    /// every later season in them looked up and saved. Answers already saved cost nothing; only
+    /// complete answers are saved, so anything cut short is simply redone next time.
+    @discardableResult
+    static func lookUpSeasons() async -> Bool {
+        let defaults = UserDefaults.standard
+        if let last = defaults.object(forKey: lookupKey) as? Date,
+           Date().timeIntervalSince(last) < lookupInterval { return true }
+        let client = AniListClient()   // public data: no account needed
+        let current = currentSeason()
+        let upcoming = currentSeason(offset: 1)
+        let shelves: [[String: Any]] = [
+            ["sort": ["TRENDING_DESC", "POPULARITY_DESC"]],
+            ["sort": ["POPULARITY_DESC"], "season": current.0, "seasonYear": current.1],
+            ["sort": ["POPULARITY_DESC"], "season": upcoming.0, "seasonYear": upcoming.1],
+            ["sort": ["SCORE_DESC"]]
+        ]
+        var known: [Int: Media] = [:]
+        var fetchedAll = true
+        for shelf in shelves {
+            guard shouldContinue() else { return false }
+            var vars: [String: Any] = ["page": 1, "perPage": 25, "isAdult": false, "formatNot": ["MOVIE"]]
+            vars.merge(shelf) { _, new in new }
+            if let data = try? await client.run(Queries.browseWithRelations, variables: vars,
+                                                as: PageData.self, waitOnRateLimit: false) {
+                for m in data.page.media { known[m.id] = m }
+            } else {
+                fetchedAll = false
+            }
+        }
+        guard shouldContinue() else { return false }
+        let later = known.values.filter(\.isLaterSeason)
+        var complete = true
+        if !later.isEmpty {
+            let found = await SeasonRoots.resolve(Array(later), known: known, client: client, waitOnRateLimit: false)
+            complete = later.allSatisfy { found[$0.id]?.complete == true }
+        }
+        await SeasonCache.shared.flush()
+        if fetchedAll && complete && !Task.isCancelled { defaults.set(Date(), forKey: lookupKey) }
+        return !Task.isCancelled
+    }
+
     private static func shouldContinue() -> Bool {
         if Task.isCancelled { return false }
         switch ProcessInfo.processInfo.thermalState {
@@ -56,6 +134,8 @@ enum BackgroundPrefetch {
     /// Returns true when it finished normally.
     @discardableResult
     static func run() async -> Bool {
+        // Season lookups first (cheap), then the AI part.
+        guard await lookUpSeasons() else { return false }
         guard UserDefaults.standard.object(forKey: "useOnDeviceAI") as? Bool ?? true else { return true }
         guard let viewer = DiskCache.load(Viewer.self, name: "viewer") else { return true }
 
@@ -119,10 +199,12 @@ enum BackgroundPrefetch {
         return true
     }
 
-    private static func currentSeason() -> (String, Int) {
+    private static func currentSeason(offset: Int = 0) -> (String, Int) {
         let cal = Calendar(identifier: .gregorian)
         let month = cal.component(.month, from: Date())
-        let year = cal.component(.year, from: Date())
-        return (["WINTER", "SPRING", "SUMMER", "FALL"][(month - 1) / 3], year)
+        var year = cal.component(.year, from: Date())
+        var index = (month - 1) / 3 + offset
+        while index > 3 { index -= 4; year += 1 }
+        return (["WINTER", "SPRING", "SUMMER", "FALL"][index], year)
     }
 }

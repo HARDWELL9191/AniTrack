@@ -41,9 +41,11 @@ targets:
               - anitrack
         ITSAppUsesNonExemptEncryption: false
         UIBackgroundModes:
+          - fetch
           - processing
         BGTaskSchedulerPermittedIdentifiers:
           - com.tim.anitrack.prefetch
+          - com.tim.anitrack.seasons
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.tim.anitrack
