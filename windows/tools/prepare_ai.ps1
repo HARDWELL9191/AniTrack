@@ -5,6 +5,9 @@
 #  - BAAI bge-small-en-v1.5 as ONNX plus its vocab.txt, with its input fixed to 1 x 128 tokens
 #    (the NPU needs fixed shapes).
 $ErrorActionPreference = "Stop"
+# Results and errors as GitHub annotations (readable from the run page and the API).
+function Note($message) { Write-Host "::notice::$(($message | Out-String).Trim() -replace "`r?`n", '%0A')" }
+trap { Write-Host "::error::$($_.Exception.Message -replace "`r?`n", '%0A')"; break }
 $OrtVersion = "1.31.1"
 $QnnVersion = "2.7.0"
 $ModelRepo = "https://huggingface.co/BAAI/bge-small-en-v1.5/resolve/main"

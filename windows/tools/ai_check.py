@@ -47,8 +47,9 @@ def main(exe, res, scratch):
     for (i, j), s in sims.items():
         print(f"similarity {i}-{j}: {s:.3f}")
     if not (sims[(0, 1)] > sims[(0, 2)] and sims[(0, 1)] > sims[(0, 3)] and sims[(0, 1)] > sims[(1, 2)]):
-        sys.exit("the two isekai shows should be the closest pair")
-    print("AI check passed")
+        sys.exit("::error::the two isekai shows should be the closest pair: " + str(sims))
+    summary = ", ".join(f"{i}-{j} {s:.3f}" for (i, j), s in sims.items())
+    print(f"::notice::AI check passed ({out['backend']}: {out['detail']}). Similarities: {summary}")
 
 
 if __name__ == "__main__":

@@ -8,6 +8,7 @@ import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import { getCurrent, onOpenUrl } from "@tauri-apps/plugin-deep-link";
 import { setFetch } from "./core/anilist";
 import { type EngineStatus, setEmbedder } from "./core/ai";
+import { type ExplainerStatus, setExplainer } from "./core/explainer";
 import { AppModel, type TokenStore } from "./core/model";
 import { App } from "./ui/app";
 import { Provider } from "./ui/state";
@@ -22,6 +23,10 @@ if (native) {
     status: () => invoke<EngineStatus>("ai_status"),
     cached: async (ids) => (ids.length ? toVectors(await invoke("ai_cached", { ids })) : new Map()),
     vectors: async (items) => (items.length ? toVectors(await invoke("ai_vectors", { items })) : new Map()),
+  });
+  setExplainer({
+    status: () => invoke<ExplainerStatus>("winai_status"),
+    write: (prompt) => invoke<string>("winai_explain", { prompt }),
   });
 }
 

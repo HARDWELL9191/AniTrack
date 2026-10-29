@@ -2,3 +2,5 @@
 /gen/schemas
 /resources/ai/*
 !/resources/ai/README.txt
+/resources/ai-helper/
+/resources/winai/

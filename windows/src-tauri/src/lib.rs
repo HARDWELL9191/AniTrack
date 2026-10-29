@@ -4,6 +4,7 @@
 
 pub mod ai;
 mod secure;
+mod winai;
 
 use base64::Engine as _;
 use serde::Deserialize;
@@ -13,6 +14,7 @@ use tauri::{Emitter, Manager};
 
 struct AppState {
     ai: Arc<ai::Engine>,
+    winai: Arc<winai::WinAi>,
 }
 
 #[derive(Deserialize)]
@@ -44,6 +46,34 @@ async fn ai_vectors(items: Vec<EmbedItem>, state: tauri::State<'_, AppState>) ->
         .await
         .map_err(|e| e.to_string())?
         .map(keyed)
+}
+
+/// Whether "Why would I like this?" can be written by Windows' on-device language model.
+#[tauri::command]
+async fn winai_status(state: tauri::State<'_, AppState>) -> Result<winai::Status, String> {
+    let w = state.winai.clone();
+    let status = tauri::async_runtime::spawn_blocking(move || w.status()).await.map_err(|e| e.to_string())?;
+    close_later(&state.winai);
+    Ok(status)
+}
+
+/// Writes the explanation (off the UI thread; takes a few seconds on the NPU).
+#[tauri::command]
+async fn winai_explain(prompt: String, state: tauri::State<'_, AppState>) -> Result<String, String> {
+    let w = state.winai.clone();
+    let text = tauri::async_runtime::spawn_blocking(move || w.explain(&prompt)).await.map_err(|e| e.to_string())?;
+    close_later(&state.winai);
+    text
+}
+
+/// The helper (and the model in it) is closed a minute after the last request; nothing runs
+/// in between, so it costs no battery while unused.
+fn close_later(w: &Arc<winai::WinAi>) {
+    let w = w.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(61));
+        w.close_if_idle();
+    });
 }
 
 #[tauri::command]
@@ -104,12 +134,14 @@ pub fn run() {
                 use tauri_plugin_deep_link::DeepLinkExt;
                 let _ = app.deep_link().register("anitrack");
             }
-            let resources = app.path().resource_dir().unwrap_or_default().join("ai");
+            let root = app.path().resource_dir().unwrap_or_default();
             let data = app.path().app_data_dir().unwrap_or_default();
-            app.manage(AppState { ai: Arc::new(ai::Engine::new(ai::Paths { resources, data })) });
+            let ai = Arc::new(ai::Engine::new(ai::Paths { resources: root.join("ai"), data: data.clone() }));
+            let winai = Arc::new(winai::WinAi::new(root, data));
+            app.manage(AppState { ai, winai });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![ai_status, ai_cached, ai_vectors, token_get, token_set, power_saver, write_file])
+        .invoke_handler(tauri::generate_handler![ai_status, ai_cached, ai_vectors, winai_status, winai_explain, token_get, token_set, power_saver, write_file])
         .run(tauri::generate_context!())
         .expect("error while running AniTrack");
 }

@@ -64,15 +64,18 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "resources/ai/": "ai/"
+      "resources/ai/": "ai/",
+      "resources/ai-helper/": "ai-helper/",
+      "resources/winai/": "winai/"
     },
     "shortDescription": "AniTrack",
     "longDescription": "Track, discover and get personal picks from your AniList.",
     "copyright": "Unofficial AniList client",
     "windows": {
       "nsis": {
-        "installMode": "currentUser",
-        "displayLanguageSelector": false
+        "installMode": "perMachine",
+        "displayLanguageSelector": false,
+        "installerHooks": "./windows/hooks.nsh"
       }
     }
   },

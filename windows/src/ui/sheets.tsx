@@ -7,6 +7,7 @@ import {
   type AnimeCategory, categoryId, displayTitle, type EntryLite, formatLabel, LIST_STATUSES, type ListStatus, type Media, progressValue, scoreValue,
   seasonLabel, statusIcon, statusName, statusLabel, thumbURL, coverURL, visibleTags, isMovie,
 } from "../core/models";
+import { cachedExplanation, explainerStatus, explainPick } from "../core/explainer";
 import { entryWeight, scoreStats, TasteProfile } from "../core/recommender";
 import { SeasonRoots } from "../core/seasons";
 import * as X from "../core/xlsx";
@@ -208,7 +209,8 @@ function MoreLikeThis({ media, onClose }: { media: Media; onClose: () => void })
 // MARK: Why would I like this?
 
 /** Written from your list (fans' links, shared genres and tags, the shows it's closest to). */
-function explain(media: Media, model: ReturnType<typeof useModel>): string {
+/** What the explanation is built from (shared by the instant one and Windows AI's). */
+function reasons(media: Media, model: ReturnType<typeof useModel>) {
   const lang = model.settings.titleLanguage;
   const entries = model.entries;
   const { mean, spread } = scoreStats(entries);
@@ -233,6 +235,14 @@ function explain(media: Media, model: ReturnType<typeof useModel>): string {
     .slice(0, 2)
     .map((x) => displayTitle(x.e.media, lang));
   const because = [...model.feeds.values()].flatMap((f) => f.picks).find((p) => p.id === media.id)?.because ?? [];
+  // Like the iPhone: your eight highest-rated shows.
+  const likedTitles = [...liked].sort((a, b) => scoreValue(b) - scoreValue(a)).slice(0, 8).map((e) => displayTitle(e.media, lang));
+  return { shared, closest, because, likedTitles };
+}
+
+/** The instant explanation, put together from your list (no language model). */
+function explain(media: Media, model: ReturnType<typeof useModel>): string {
+  const { shared, closest, because } = reasons(media, model);
   const sentences: string[] = [];
   if (because.length) sentences.push(`Fans of ${because.slice(0, 2).join(" and ")} recommend it.`);
   if (shared.length) sentences.push(`It leans on what you rate highly: ${shared.slice(0, 3).join(", ")}.`);
@@ -242,9 +252,36 @@ function explain(media: Media, model: ReturnType<typeof useModel>): string {
   return sentences.join(" ") || "Rate a few shows on your list and this gets more specific.";
 }
 
+type Written = { kind: "checking" } | { kind: "writing" } | { kind: "done"; text: string } | { kind: "instant"; note?: string };
+
 function WhyThis({ media, onClose }: { media: Media; onClose: () => void }) {
   const model = useModel();
-  const text = useMemo(() => explain(media, model), [media, model]);
+  const instant = useMemo(() => explain(media, model), [media, model]);
+  const cached = cachedExplanation(media.id);
+  const [written, setWritten] = useState<Written>(cached ? { kind: "done", text: cached } : { kind: "checking" });
+
+  // Like the iPhone's sheet: opening it asks the on-device model right away.
+  useEffect(() => {
+    if (cached) return;
+    let live = true;
+    void (async () => {
+      const status = await explainerStatus();
+      if (!live) return;
+      if (!status.available) return setWritten({ kind: "instant", note: status.detail });
+      setWritten({ kind: "writing" });
+      const r = reasons(media, model);
+      try {
+        const text = await explainPick(media, {
+          because: r.because, likedTitles: r.likedTitles, sharedHighlights: r.shared, language: model.settings.titleLanguage,
+        });
+        if (live) setWritten({ kind: "done", text });
+      } catch (e) {
+        if (live) setWritten({ kind: "instant", note: `Windows AI couldn't write this one (${(e as Error).message ?? String(e)}).` });
+      }
+    })();
+    return () => { live = false; };
+  }, [media, model, cached]);
+
   return (
     <Modal title="Why you might like it" onClose={onClose} width={520}>
       <div className="why-head">
@@ -254,8 +291,19 @@ function WhyThis({ media, onClose }: { media: Media; onClose: () => void }) {
           <MatchBadge media={media} word />
         </div>
       </div>
-      <div className="why-text"><Icon name="sparkles" size={18} /><p>{text}</p></div>
-      <p className="footnote">Based on your list: fan recommendations, shared genres and tags, and the shows it's closest to.</p>
+      {written.kind === "checking" || written.kind === "writing" ? (
+        <div className="why-text"><span className="spinner small" /><p className="muted">Thinking on-device…</p></div>
+      ) : written.kind === "done" ? (
+        <>
+          <div className="why-text"><Icon name="sparkles" size={18} /><p>{written.text}</p></div>
+          <p className="footnote">Written on this PC by Windows' on-device language model.</p>
+        </>
+      ) : (
+        <>
+          <div className="why-text"><Icon name="sparkles" size={18} /><p>{instant}</p></div>
+          <p className="footnote">Based on your list: fan recommendations, shared genres and tags, and the shows it's closest to.{written.note ? ` ${written.note}` : ""}</p>
+        </>
+      )}
     </Modal>
   );
 }

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { type EngineStatus, getEmbedder } from "../core/ai";
+import { type ExplainerStatus, explainerStatus } from "../core/explainer";
 import { TITLE_LANGUAGES, type TitleLanguage } from "../core/models";
 import { REDIRECT_URL } from "./welcome";
 import { PageHeader } from "./components";
@@ -31,6 +32,8 @@ export function ProfilePage() {
   const [token, setToken] = useState("");
   const [confirmLogout, setConfirmLogout] = useState(false);
   const [engine, setEngine] = useState<EngineStatus | null>(null);
+  const [writer, setWriter] = useState<ExplainerStatus | null>(null);
+  useEffect(() => { void explainerStatus().then(setWriter); }, []);
   useEffect(() => {
     let live = true;
     const poll = () => void getEmbedder().status().then((st) => live && setEngine(st));
@@ -87,6 +90,11 @@ export function ProfilePage() {
           <span className="muted" title={engine?.detail}>{engine ? backendText[engine.backend] : "…"}</span>
         </div>
         {engine && <p className="footnote">{engine.detail}</p>}
+        <div className="toggle-row">
+          <span><Icon name="sparkles" size={16} /> AI explanations</span>
+          <span className="muted" title={writer?.detail}>{writer ? (writer.available ? "Windows AI ready" : "Unavailable") : "…"}</span>
+        </div>
+        {writer && !writer.available && <p className="footnote">{writer.detail}</p>}
         <Toggle label="Include unreleased shows" checked={s.includeUnreleased} onChange={(v) => { s.includeUnreleased = v; model.invalidatePicks(); }} />
         <button className="text-button" disabled={model.isLoadingFeed(null)} onClick={() => void model.generateRecommendations(null, true)}>Rebuild picks now</button>
         <button className="text-button" disabled={!s.dismissedPicks.size || model.isResettingNotForMe} onClick={() => model.resetDismissedPicks()}>

@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- AniTrack's Windows AI helper: runs Windows' on-device language model (Phi Silica today,
+       Aion Instruct from January 2027, same API) for "Why would I like this?". Windows only
+       lets apps with a package identity use it, so this small program is the part of AniTrack
+       that has one (see ../winai). The app talks to it over stdin/stdout, one JSON per line. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.26100.0</TargetPlatformMinVersion>
+    <RuntimeIdentifier>win-arm64</RuntimeIdentifier>
+    <Platforms>ARM64</Platforms>
+    <SelfContained>true</SelfContained>
+    <AssemblyName>AniTrack.AI</AssemblyName>
+    <RootNamespace>AniTrack.AI</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- Identity comes from the AniTrack.WindowsAI package (packaged with external location),
+         whose manifest also declares the Windows App SDK runtime dependency. -->
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>false</WindowsAppSDKSelfContained>
+    <WindowsAppSdkBootstrapInitialize>false</WindowsAppSdkBootstrapInitialize>
+    <WindowsAppSdkDeploymentManagerInitialize>false</WindowsAppSdkDeploymentManagerInitialize>
+    <UseWinUI>false</UseWinUI>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Experimental channel: the language model works there without a Limited Access token. -->
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.5.4-experimental" />
+  </ItemGroup>
+
+</Project>
