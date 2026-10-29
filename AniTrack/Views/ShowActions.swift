@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // MARK: - Navigation from menus
 
@@ -44,6 +45,7 @@ struct ShowActionsMenu: ViewModifier {
                 // iOS renders the preview outside the app's view tree, so it gets plain values
                 // only (reading the app model inside it would crash).
                 ShowMenuPreview(coverURL: media.coverURL,
+                                thumbURL: media.thumbURL,
                                 coverColor: media.coverImage?.color,
                                 title: media.displayTitle(model.settings.titleLanguage),
                                 score: media.averageScore,
@@ -94,6 +96,7 @@ struct ShowActionsMenu: ViewModifier {
 /// What lifts out when you long-press a show: just that show's cover, title and bubbles.
 struct ShowMenuPreview: View {
     let coverURL: String?
+    let thumbURL: String?
     let coverColor: String?
     let title: String
     let score: Int?
@@ -102,7 +105,7 @@ struct ShowMenuPreview: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            CoverImageView(url: coverURL, color: coverColor, width: 200, height: 290, cornerRadius: 12)
+            cover
                 .overlay(alignment: .topLeading) {
                     if let age { AgeBubble(label: age).padding(6) }
                 }
@@ -117,6 +120,50 @@ struct ShowMenuPreview: View {
             ScoreBadge(score: score)
         }
         .padding(12)
+    }
+
+    /// The cover is there from the very first frame (an image that's still loading used to
+    /// show an empty card for a moment as the preview lifted): the big cover if the phone has
+    /// it, otherwise the thumbnail the row is already showing, with the big one fading in on top.
+    @ViewBuilder
+    private var cover: some View {
+        let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
+        if let stored = PreviewImageStore.image(coverURL) {
+            Image(uiImage: stored).resizable().scaledToFill()
+                .frame(width: 200, height: 290)
+                .clipShape(shape)
+        } else if let thumb = PreviewImageStore.image(thumbURL) {
+            Image(uiImage: thumb).resizable().scaledToFill()
+                .frame(width: 200, height: 290)
+                .overlay {
+                    AsyncImage(url: coverURL.flatMap(URL.init(string:))) { phase in
+                        if case .success(let image) = phase { image.resizable().scaledToFill() }
+                    }
+                }
+                .clipShape(shape)
+        } else {
+            CoverImageView(url: coverURL, color: coverColor, width: 200, height: 290, cornerRadius: 12)
+        }
+    }
+}
+
+/// Covers the phone already downloaded, read straight from the app's image cache (no
+/// network, no waiting). Only used when a long-press preview opens; the last few are kept
+/// decoded so pressing the same show again costs nothing.
+enum PreviewImageStore {
+    nonisolated(unsafe) private static let decoded: NSCache<NSString, UIImage> = {
+        let cache = NSCache<NSString, UIImage>()
+        cache.countLimit = 20
+        return cache
+    }()
+
+    static func image(_ urlString: String?) -> UIImage? {
+        guard let urlString, let url = URL(string: urlString) else { return nil }
+        if let hit = decoded.object(forKey: urlString as NSString) { return hit }
+        guard let data = URLCache.shared.cachedResponse(for: URLRequest(url: url))?.data,
+              let image = UIImage(data: data) else { return nil }
+        decoded.setObject(image, forKey: urlString as NSString)
+        return image
     }
 }
 
