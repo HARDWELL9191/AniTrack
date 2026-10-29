@@ -203,7 +203,7 @@ extension HomeView {
                     NavigationLink(value: MediaLink(id: media.id)) {
                         MediaCard(media: media, width: width)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(ShowPressStyle())
                 }
             }
             .padding(.horizontal, 16)

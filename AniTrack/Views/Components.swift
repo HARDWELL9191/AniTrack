@@ -330,16 +330,18 @@ struct MediaRowLink: View {
             Button { pushDetail(media.id) } label: {
                 MediaRow(media: media, subtitle: subtitle, chevron: true)
             }
-            .buttonStyle(RowPressStyle())
+            .buttonStyle(ShowPressStyle())
         } else {
             NavigationLink(value: MediaLink(id: media.id)) { MediaRow(media: media, subtitle: subtitle) }
         }
     }
 }
 
-/// Pressed rows: the same rounded grey highlight the long-press menu shows (8 pt around the
-/// row, matching corners), never the list's own full-width one.
-struct RowPressStyle: ButtonStyle {
+/// Pressed rows and covers: the same rounded grey highlight the long-press menu shows (8 pt
+/// around the show, matching corners). Never a dimmed show (the plain style's pressed look):
+/// on a show's first long-press iOS takes over the touch a few frames later, so that dimming
+/// showed and then switched off just before the lift, a blink.
+struct ShowPressStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .background {
@@ -372,7 +374,7 @@ struct HorizontalMediaSection: View {
                         NavigationLink(value: MediaLink(id: media.id)) {
                             MediaCard(media: media)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(ShowPressStyle())
                     }
                 }
                 .padding(.horizontal)

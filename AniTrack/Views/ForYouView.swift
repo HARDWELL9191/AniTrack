@@ -120,7 +120,7 @@ struct ForYouView: View {
                                 } label: {
                                     MediaCard(media: rec.media, width: 96)
                                 }
-                                .buttonStyle(.plain)
+                                .buttonStyle(ShowPressStyle())
                                 .onAppear { if offset >= picks.count - 3 { preloadIfNeeded(at: offset) } }
                             }
                             if model.isLoadingMore(category) {
