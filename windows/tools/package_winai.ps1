@@ -30,7 +30,7 @@ Invoke-WebRequest $RuntimeUrl -OutFile $runtimeExe
 
 # 3. Which framework package that runtime provides (name + version for the manifest): read from
 #    the Windows App SDK NuGet packages' MSIX inventory, or else from Windows after installing it.
-$pattern = "(Microsoft\.WindowsAppRuntime\.\d[^_\s]*)_([0-9.]+)_arm64__"
+$pattern = "(Microsoft\.WindowsAppRuntime\.\d[^_\s=]*)_([0-9.]+)_arm64__"
 $nugetRoot = if ($env:NUGET_PACKAGES) { $env:NUGET_PACKAGES } else { Join-Path $env:USERPROFILE ".nuget/packages" }
 $framework = $null
 $inventories = Get-ChildItem $nugetRoot -Directory -Filter "microsoft.windowsappsdk*" |
@@ -83,8 +83,8 @@ $signtool = Find-SdkTool "signtool.exe"
 Write-Host "makeappx: $makeappx`nsigntool: $signtool"
 
 $msix = Join-Path $winai "AniTrack.AI.msix"
-& $makeappx pack /d $stage /p $msix /nv /o
-if ($LASTEXITCODE -ne 0) { throw "makeappx failed" }
+$packed = & $makeappx pack /d $stage /p $msix /nv /o 2>&1
+if ($LASTEXITCODE -ne 0) { throw "makeappx failed:`n$(($packed | Select-Object -Last 15) -join "`n")" }
 
 # 5. Sign it with a certificate made just for this build.
 $cert = New-SelfSignedCertificate -Type Custom -Subject "CN=AniTrack" -FriendlyName "AniTrack Windows AI" `
@@ -94,11 +94,11 @@ $password = [System.Guid]::NewGuid().ToString()
 $pfx = Join-Path ([System.IO.Path]::GetTempPath()) "anitrack-winai.pfx"
 Export-PfxCertificate -Cert $cert -FilePath $pfx -Password (ConvertTo-SecureString $password -AsPlainText -Force) | Out-Null
 Export-Certificate -Cert $cert -FilePath (Join-Path $winai "AniTrack.cer") | Out-Null
-& $signtool sign /fd SHA256 /f $pfx /p $password $msix
+$signOut = & $signtool sign /fd SHA256 /f $pfx /p $password $msix 2>&1
 $signed = $LASTEXITCODE
 Remove-Item $pfx -Force
 Remove-Item "Cert:\CurrentUser\My\$($cert.Thumbprint)" -Force
-if ($signed -ne 0) { throw "signtool failed" }
+if ($signed -ne 0) { throw "signtool failed:`n$(($signOut | Select-Object -Last 10) -join "`n")" }
 
 Set-Content (Join-Path $winai "version.txt") $version -NoNewline
 $size = (Get-ChildItem $winai, $helperOut -Recurse -File | Measure-Object -Property Length -Sum).Sum
