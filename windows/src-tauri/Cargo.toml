@@ -1,0 +1,39 @@
+[package]
+name = "anitrack"
+version = "1.0.0"
+description = "AniTrack for Windows: track, discover and get personal picks from your AniList"
+edition = "2021"
+rust-version = "1.92"
+
+[lib]
+name = "anitrack_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7", features = [] }
+
+[dependencies]
+tauri = { version = "2.12", features = [] }
+tauri-plugin-http = "2.8"
+tauri-plugin-opener = "2.7"
+tauri-plugin-dialog = "2.8"
+tauri-plugin-deep-link = "2.6"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.23"
+unicode-normalization = "0.1"
+# ONNX Runtime, loaded at run time from the app's folder (the build that includes Qualcomm's
+# QNN execution provider for the Snapdragon NPU). API 23 = ONNX Runtime 1.23.
+ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "load-dynamic", "api-24", "qnn"] }
+
+[target.'cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))'.dependencies]
+tauri-plugin-single-instance = { version = "2.5", features = ["deep-link"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Cryptography", "Win32_System_Power"] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

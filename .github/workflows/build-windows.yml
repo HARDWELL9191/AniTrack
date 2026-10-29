@@ -1,0 +1,85 @@
+name: Build Windows (ARM64)
+
+on:
+  push:
+    branches: [windows]
+    paths:
+      - "windows/**"
+      - ".github/workflows/build-windows.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: build-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    # Windows 11 on ARM (Snapdragon-class Arm64 machine), so everything builds natively for ARM64.
+    runs-on: windows-11-arm
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: windows
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: windows/package-lock.json
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Rust (aarch64-pc-windows-msvc)
+        run: |
+          if (-not (Get-Command rustup -ErrorAction SilentlyContinue)) {
+            Invoke-WebRequest https://static.rust-lang.org/rustup/dist/aarch64-pc-windows-msvc/rustup-init.exe -OutFile rustup-init.exe
+            ./rustup-init.exe -y --profile minimal --default-toolchain stable
+            "$env:USERPROFILE\.cargo\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+            $env:PATH = "$env:USERPROFILE\.cargo\bin;$env:PATH"
+          }
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add aarch64-pc-windows-msvc
+          rustc -vV
+          node -v
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            windows/src-tauri/target
+          key: cargo-win-arm64-${{ hashFiles('windows/src-tauri/Cargo.lock') }}
+          restore-keys: cargo-win-arm64-
+
+      - name: Install packages
+        run: npm ci
+
+      - name: On-device AI files (ONNX Runtime + QNN, MiniLM)
+        run: ./tools/prepare_ai.ps1
+
+      - name: Tests (Rust: tokenizer, vector store, token encryption)
+        working-directory: windows/src-tauri
+        run: cargo test --release --lib
+
+      - name: Build the installer
+        run: npx tauri build --target aarch64-pc-windows-msvc --bundles nsis
+
+      - name: Collect the .exe
+        id: exe
+        run: |
+          $setup = Get-ChildItem src-tauri/target/aarch64-pc-windows-msvc/release/bundle/nsis -Filter *.exe | Select-Object -First 1
+          if (-not $setup) { throw "No installer was produced" }
+          New-Item -ItemType Directory -Force out | Out-Null
+          Copy-Item $setup.FullName out/AniTrack-Setup-arm64.exe
+          Get-ChildItem out | Format-Table Name, Length
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: AniTrack-Windows-ARM64
+          path: windows/out/AniTrack-Setup-arm64.exe
+          if-no-files-found: error
