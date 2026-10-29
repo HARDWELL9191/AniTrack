@@ -112,5 +112,8 @@ for _ in range(10):
     for m in ((json.loads(raw).get("data") or {}).get("Page") or {}).get("media") or []: kk[m["id"]] = m
     time.sleep(0.7)
 lines.append(f"C) overnight job: {len(pool)} shows, {len(lat)} sequels, {reqs} requests total in {time.time()-t0:.1f}s, remaining {rem}")
-lines.append(f"   → next Discover open: 4 shelf requests, 0 lookups (all {len(lat)} sequels already answered)")
+unresolved = [m for m in lat if not root_2levels(m) and (root_of(m, kk)[1] is not None or root_of(m, kk)[0] is None)]
+lines.append(f"   sequels still without a first season after the job: {len(unresolved)} "
+             + ("(" + "; ".join((x['title'].get('english') or x['title'].get('romaji') or '')[:30] for x in unresolved[:8]) + ")" if unresolved else "")
+             + f" | solved by deeper links {len(lat) - len(need)}, by lookups {len(need) - len(unresolved)}")
 note("fastload", "\n".join(lines))
