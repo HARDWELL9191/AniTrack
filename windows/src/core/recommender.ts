@@ -5,10 +5,10 @@
 import { accumulate, cosine, normalized, vectorsFor } from "./ai";
 import { AniListClient, Queries } from "./anilist";
 import {
-  AnimeCategory, categoryId, categoryMatches, categoryVariables, displayTitle, isAdultOnly, isLaterSeason, isMovie,
-  ListEntry, ListFranchises, Media, scoreValue, TitleLanguage,
+  type AnimeCategory, categoryId, categoryMatches, categoryVariables, displayTitle, isAdultOnly, isLaterSeason, isMovie,
+  type ListEntry, ListFranchises, type Media, scoreValue, type TitleLanguage,
 } from "./models";
-import { Found, SeasonRoots } from "./seasons";
+import { type Found, SeasonRoots } from "./seasons";
 
 export interface Recommendation {
   id: number;

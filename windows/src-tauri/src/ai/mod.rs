@@ -1,13 +1,15 @@
 //! On-device synopsis embeddings (the Windows twin of the iPhone's SemanticEngine).
 //!
-//! Model: all-MiniLM-L6-v2 (sentence embeddings, 384 numbers per show), run with ONNX Runtime.
-//! Snapdragon NPU first (Qualcomm's QNN execution provider, HTP backend, fp16), then the NPU with
+//! Model: BAAI bge-small-en-v1.5 (sentence embeddings, 384 numbers per show; MTEB 62.2 against
+//! all-MiniLM-L6-v2's 56.3 at a similar size), run with ONNX Runtime.
+//! Snapdragon NPU first (Qualcomm's QNN execution provider plugin, HTP backend), then the NPU with
 //! the CPU covering any layer the NPU can't run, then the CPU alone. Every show is embedded once
 //! and kept in a small binary file, so the model only runs for shows it hasn't seen.
 
 mod store;
 pub mod tokenizer;
 
+use ort::memory::DeviceType;
 use ort::session::builder::GraphOptimizationLevel;
 use ort::session::Session;
 use ort::value::Tensor;
@@ -20,6 +22,12 @@ use tokenizer::WordPiece;
 
 /// Fixed shape: the NPU needs static shapes, and ~500 characters of synopsis fit in 128 tokens.
 pub const SEQ_LEN: usize = 128;
+
+/// Saved vectors; the name changes with the model, so a new model starts fresh.
+const STORE_FILE: &str = "embeddings-bge-small-v1.bin";
+
+/// Qualcomm's QNN execution provider (the onnxruntime-qnn plugin).
+const QNN_EP: &str = "QNNExecutionProvider";
 
 #[derive(Clone, Serialize)]
 pub struct Status {
@@ -53,7 +61,11 @@ pub struct Engine {
 
 impl Engine {
     pub fn new(paths: Paths) -> Self {
-        let store = VectorStore::open(paths.data.join("embeddings-minilm-v1.bin"));
+        // Files left by the earlier model (all-MiniLM): its vectors don't mix with bge's.
+        for old in ["embeddings-minilm-v1.bin", "minilm-qnn-ctx.onnx", "minilm-qnn-mixed-ctx.onnx"] {
+            let _ = std::fs::remove_file(paths.data.join(old));
+        }
+        let store = VectorStore::open(paths.data.join(STORE_FILE));
         let ready = paths.resources.join("model.onnx").exists();
         Self {
             status: Mutex::new(Status {
@@ -129,20 +141,26 @@ impl Engine {
         let vocab = std::fs::read_to_string(dir.join("vocab.txt")).map_err(|e| format!("vocab.txt: {e}"))?;
         let tokenizer = WordPiece::from_vocab(&vocab)?;
 
+        // Snapdragon NPU: Qualcomm's QNN execution provider, a plugin next to onnxruntime.dll.
+        let qnn_plugin = dir.join("onnxruntime_providers_qnn.dll");
         let qnn_backend = dir.join("QnnHtp.dll");
-        let mut attempts: Vec<(&str, bool)> = Vec::new();
-        if cfg!(windows) && qnn_backend.exists() {
-            attempts.push(("npu", true)); // whole model on the NPU
-            attempts.push(("npu+cpu", false)); // NPU, CPU covers the rest
-        }
         let mut notes = Vec::new();
-        for (backend, npu_only) in attempts {
-            match self.npu_session(&env, &model, &qnn_backend, npu_only) {
-                Ok(session) => {
-                    let detail = if npu_only { "Snapdragon NPU (QNN, fp16)".to_string() } else { "Snapdragon NPU with CPU help (QNN)".to_string() };
-                    return Ok((finish(session, tokenizer, env)?, Status { backend: backend.into(), detail }));
+        if cfg!(windows) && qnn_plugin.exists() && qnn_backend.exists() {
+            match env.register_ep_library(QNN_EP, &qnn_plugin) {
+                Ok(()) => {
+                    // Whole model on the NPU first; then the NPU with the CPU covering any layer
+                    // the NPU can't run.
+                    for (backend, npu_only) in [("npu", true), ("npu+cpu", false)] {
+                        match self.npu_session(&env, &model, &qnn_backend, npu_only) {
+                            Ok(session) => {
+                                let detail = if npu_only { "Snapdragon NPU (QNN)" } else { "Snapdragon NPU with CPU help (QNN)" };
+                                return Ok((finish(session, tokenizer, env)?, Status { backend: backend.into(), detail: detail.into() }));
+                            }
+                            Err(e) => notes.push(format!("{backend}: {e}")),
+                        }
+                    }
                 }
-                Err(e) => notes.push(format!("{backend}: {e}")),
+                Err(e) => notes.push(format!("QNN plugin: {e}")),
             }
         }
         let session = base_builder(&env)?
@@ -153,40 +171,48 @@ impl Engine {
     }
 
     fn npu_session(&self, env: &ort::environment::Environment, model: &Path, backend: &Path, npu_only: bool) -> Result<Session, String> {
+        let is_npu = |d: &ort::device::Device<'_>| d.ep().is_ok_and(|ep| ep == QNN_EP) && d.hardware_device().ty() == DeviceType::NPU;
+        if !env.devices().any(|d| is_npu(&d)) {
+            return Err("no Snapdragon NPU found".into());
+        }
+        let options = vec![
+            (format!("{QNN_EP}.backend_path"), backend.display().to_string()),
+            // Balanced: fast enough for one synopsis at a time, easier on the battery than burst.
+            (format!("{QNN_EP}.htp_performance_mode"), "balanced".to_string()),
+        ];
         // The NPU compiles the model the first time (a few seconds); the compiled graph is saved
         // and reused on later launches.
-        let ctx = self.paths.data.join(if npu_only { "minilm-qnn-ctx.onnx" } else { "minilm-qnn-mixed-ctx.onnx" });
-        let qnn = || {
-            ort::ep::QNN::default()
-                .with_backend_path(backend.display().to_string())
-                .with_htp_fp16_precision(true)
-                .with_performance_mode(ort::ep::qnn::PerformanceMode::Balanced)
-                .build()
-                .error_on_failure()
-        };
-        let builder = |use_ctx: bool| -> Result<ort::session::builder::SessionBuilder, String> {
+        let ctx = self.paths.data.join(if npu_only { "bge-small-qnn-ctx.onnx" } else { "bge-small-qnn-mixed-ctx.onnx" });
+        let builder = |save_ctx: bool| -> Result<ort::session::builder::SessionBuilder, String> {
             let mut b = base_builder(env)?;
             if npu_only {
                 b = b.with_config_entry("session.disable_cpu_ep_fallback", "1").map_err(|e| e.to_string())?;
             }
-            if !use_ctx {
+            if save_ctx {
                 b = b
                     .with_config_entry("ep.context_enable", "1")
                     .and_then(|b| b.with_config_entry("ep.context_file_path", ctx.display().to_string()))
                     .and_then(|b| b.with_config_entry("ep.context_embed_mode", "1"))
                     .map_err(|e| e.to_string())?;
             }
-            b.with_execution_providers([qnn()]).map_err(|e| e.to_string())
+            b.with_devices(env.devices().filter(|d| is_npu(d)), Some(&options)).map_err(|e| e.to_string())
         };
         if ctx.exists() {
-            match builder(true)?.commit_from_file(&ctx) {
+            match builder(false)?.commit_from_file(&ctx) {
                 Ok(s) => return Ok(s),
                 Err(_) => {
                     let _ = std::fs::remove_file(&ctx); // stale (driver update): compile again
                 }
             }
         }
-        builder(false)?.commit_from_file(model).map_err(|e| e.to_string())
+        match builder(true)?.commit_from_file(model) {
+            Ok(s) => Ok(s),
+            // Saving the compiled graph isn't essential: run without it rather than lose the NPU.
+            Err(first) => {
+                let _ = std::fs::remove_file(&ctx);
+                builder(false)?.commit_from_file(model).map_err(|e| format!("{e} (first try: {first})"))
+            }
+        }
     }
 }
 
@@ -213,7 +239,7 @@ fn finish(session: Session, tokenizer: WordPiece, env: ort::environment::Environ
     Ok(Loaded { session, tokenizer, inputs, output, _env: env })
 }
 
-/// Mean of the token vectors (padding left out), scaled to unit length.
+/// bge's sentence vector: the output at the first token ([CLS]), scaled to unit length.
 fn embed(l: &mut Loaded, text: &str) -> Result<Vec<f32>, String> {
     let enc = l.tokenizer.encode(text, SEQ_LEN);
     let shape = [1i64, SEQ_LEN as i64];
@@ -232,21 +258,7 @@ fn embed(l: &mut Loaded, text: &str) -> Result<Vec<f32>, String> {
     let (out_shape, data) = outputs[l.output.as_str()].try_extract_tensor::<f32>().map_err(|e| e.to_string())?;
     let dims: Vec<i64> = out_shape.iter().copied().collect();
     let pooled: Vec<f32> = match dims.as_slice() {
-        [1, seq, dim] => {
-            let (seq, dim) = (*seq as usize, *dim as usize);
-            let mut sum = vec![0f32; dim];
-            let mut count = 0f32;
-            for t in 0..seq.min(SEQ_LEN) {
-                if enc.attention_mask[t] == 0 {
-                    continue;
-                }
-                count += 1.0;
-                for (s, x) in sum.iter_mut().zip(&data[t * dim..(t + 1) * dim]) {
-                    *s += *x;
-                }
-            }
-            sum.iter().map(|s| s / count.max(1.0)).collect()
-        }
+        [1, seq, dim] if *seq >= 1 => data[..*dim as usize].to_vec(),
         [1, _dim] => data.to_vec(),
         other => return Err(format!("unexpected output shape {other:?}")),
     };

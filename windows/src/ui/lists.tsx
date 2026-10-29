@@ -2,9 +2,9 @@
 // filter, and "Not for me". Rows sit in columns on a wide window; right-click replaces the swipes.
 
 import { useEffect, useMemo, useState } from "react";
-import { AppModel, ShowRow } from "../core/model";
+import { AppModel, type ShowRow } from "../core/model";
 import { ageLabel } from "../core/kitsu";
-import { displayTitle, formatLabel, LIST_STATUSES, ListEntry, ListStatus, Media, scoreValue, seasonLabel, statusIcon, statusName } from "../core/models";
+import { displayTitle, formatLabel, LIST_STATUSES, type ListEntry, type ListStatus, type Media, scoreValue, seasonLabel, statusIcon, statusName } from "../core/models";
 import { Dropdown, Empty, MediaRow, PageHeader, SearchField, Spinner } from "./components";
 import { myScore } from "./fmt";
 import { useModel } from "./state";

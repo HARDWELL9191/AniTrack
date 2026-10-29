@@ -2,7 +2,7 @@
 // the right-click menu and the error alert.
 
 import { useEffect, useState } from "react";
-import { AppTab } from "../core/model";
+import { type AppTab } from "../core/model";
 import appIcon from "../assets/app-icon.png";
 import { DetailPage } from "./detail";
 import { CategoryPage, DiscoverPage } from "./discover";

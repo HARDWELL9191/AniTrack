@@ -25,13 +25,13 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: 24
+          node-version: 26
           cache: npm
           cache-dependency-path: windows/package-lock.json
 
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: "3.14"
 
       - name: Rust (aarch64-pc-windows-msvc)
         run: |
@@ -47,7 +47,7 @@ jobs:
           rustc -vV
           node -v
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -59,15 +59,23 @@ jobs:
       - name: Install packages
         run: npm ci
 
-      - name: On-device AI files (ONNX Runtime + QNN, MiniLM)
+      - name: On-device AI files (ONNX Runtime + QNN plugin, bge-small)
         run: ./tools/prepare_ai.ps1
-
-      - name: Tests (tokenizer, vector store, token encryption)
-        working-directory: windows/src-tauri
-        run: cargo test --release --lib
 
       - name: Build the installer
         run: npx tauri build --target aarch64-pc-windows-msvc --bundles nsis
+
+      # Same target and profile as the installer build, so these reuse what it compiled.
+      - name: Tests (tokenizer, vector store, token encryption)
+        working-directory: windows/src-tauri
+        run: cargo test --release --lib --target aarch64-pc-windows-msvc
+
+      - name: AI check (real model, this runner has no NPU so it runs on the CPU)
+        working-directory: windows/src-tauri
+        run: |
+          cargo build --release --example embed_check --target aarch64-pc-windows-msvc
+          python -I ../tools/ai_check.py target/aarch64-pc-windows-msvc/release/examples/embed_check.exe resources/ai "$env:RUNNER_TEMP/ai-check"
+          if ($LASTEXITCODE -ne 0) { throw "AI check failed" }
 
       - name: Collect the .exe
         id: exe

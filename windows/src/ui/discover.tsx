@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from "react";
 import { isCancellation } from "../core/anilist";
 import { DiskCache } from "../core/cache";
-import { AnimeCategory, categoryId, currentSeason, Media } from "../core/models";
+import { type AnimeCategory, categoryId, currentSeason, type Media } from "../core/models";
 import { Dropdown, Empty, LoadMore, MediaCard, MediaRow, PageHeader, SearchField, Shelf, Spinner } from "./components";
 import { capitalized } from "./fmt";
 import { ui, useModel } from "./state";

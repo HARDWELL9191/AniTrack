@@ -1,4 +1,4 @@
-import { AiringEpisode } from "../core/models";
+import { type AiringEpisode } from "../core/models";
 
 export function countdown(seconds: number): string {
   const days = Math.floor(seconds / 86_400);

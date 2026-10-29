@@ -2,7 +2,7 @@
 // iPhone app, plus the actions the iPhone's swipes do (Remove from list, Completed, Bring back).
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { displayTitle, Media } from "../core/models";
+import { displayTitle, type Media } from "../core/models";
 import { Icon } from "./icons";
 import { ui, useModel, useUI } from "./state";
 

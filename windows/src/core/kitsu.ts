@@ -2,7 +2,7 @@
 
 import { AniListClient, getFetch, Queries } from "./anilist";
 import { DiskCache } from "./cache";
-import { Media } from "./models";
+import { type Media } from "./models";
 
 export interface AgeRating { code?: string | null; guide?: string | null }
 

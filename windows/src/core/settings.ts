@@ -1,7 +1,7 @@
 // User preferences (port of AppSettings.swift), saved like UserDefaults.
 
 import { Defaults } from "./cache";
-import { TitleLanguage } from "./models";
+import { type TitleLanguage } from "./models";
 
 export class AppSettings {
   onChange: () => void = () => {};

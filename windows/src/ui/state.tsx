@@ -1,8 +1,8 @@
 // Shared UI state: the app model hook, per-tab navigation and the sheets that can open anywhere.
 
-import { createContext, ReactNode, useContext, useSyncExternalStore } from "react";
-import { AppModel, AppTab } from "../core/model";
-import { AnimeCategory, Media } from "../core/models";
+import { createContext, type ReactNode, useContext, useSyncExternalStore } from "react";
+import { AppModel, type AppTab } from "../core/model";
+import { type AnimeCategory, type Media } from "../core/models";
 
 export const ModelContext = createContext<AppModel | null>(null);
 

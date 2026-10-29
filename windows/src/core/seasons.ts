@@ -3,7 +3,7 @@
 
 import { AniListClient, Queries } from "./anilist";
 import { DiskCache } from "./cache";
-import { isLaterSeason, isSeason, Media, prequelId, Seasons } from "./models";
+import { isLaterSeason, isSeason, type Media, prequelId, Seasons } from "./models";
 
 type PageData = { Page: { media: Media[]; pageInfo?: { hasNextPage?: boolean } } };
 

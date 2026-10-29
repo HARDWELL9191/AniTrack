@@ -3,7 +3,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppModel } from "../core/model";
-import { currentSeason, FEATURED_CATEGORIES, Media } from "../core/models";
+import { currentSeason, FEATURED_CATEGORIES, type Media } from "../core/models";
 import { MediaCard, PageHeader, Shelf, Spinner } from "./components";
 import { capitalized } from "./fmt";
 import { Icon } from "./icons";

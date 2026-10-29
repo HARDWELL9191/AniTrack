@@ -1,8 +1,8 @@
 // Profile / settings (port of SettingsView.swift).
 
 import { useEffect, useState } from "react";
-import { EngineStatus, getEmbedder } from "../core/ai";
-import { TITLE_LANGUAGES, TitleLanguage } from "../core/models";
+import { type EngineStatus, getEmbedder } from "../core/ai";
+import { TITLE_LANGUAGES, type TitleLanguage } from "../core/models";
 import { REDIRECT_URL } from "./welcome";
 import { PageHeader } from "./components";
 import { ProfileHeader } from "./home";

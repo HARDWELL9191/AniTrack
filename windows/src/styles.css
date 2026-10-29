@@ -389,3 +389,5 @@ input[type="checkbox"]:not(.switch) { width: 18px; height: 18px; accent-color: v
   .pick { grid-template-columns: 180px 1fr; }
   .pick-actions { grid-template-columns: repeat(2, 1fr); }
 }
+.export-row > span:first-child { flex: 1; }
+.export-row > .tabular { min-width: 3ch; text-align: right; margin-right: 6px; }

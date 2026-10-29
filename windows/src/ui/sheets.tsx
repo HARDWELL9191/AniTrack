@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { isCancellation } from "../core/anilist";
 import {
-  AnimeCategory, categoryId, displayTitle, EntryLite, formatLabel, LIST_STATUSES, ListStatus, Media, progressValue, scoreValue,
+  type AnimeCategory, categoryId, displayTitle, type EntryLite, formatLabel, LIST_STATUSES, type ListStatus, type Media, progressValue, scoreValue,
   seasonLabel, statusIcon, statusName, statusLabel, thumbURL, coverURL, visibleTags, isMovie,
 } from "../core/models";
 import { entryWeight, scoreStats, TasteProfile } from "../core/recommender";
@@ -354,7 +354,7 @@ function ExportSheet({ onClose }: { onClose: () => void }) {
       <div className="group">
         <div className="group-title">Lists to include</div>
         {CHOICES.map((c) => (
-          <label key={c.id} className="toggle-row">
+          <label key={c.id} className="toggle-row export-row">
             <span><Icon name={c.icon} size={16} /> {c.label}</span>
             <span className="muted tabular">{count(c)}</span>
             <input type="checkbox" checked={selected.has(c.id)} onChange={(e) => {

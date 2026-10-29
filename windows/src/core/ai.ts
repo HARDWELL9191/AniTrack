@@ -2,7 +2,7 @@
 // same job runs in the app's Rust side with ONNX Runtime, on the Snapdragon NPU (QNN) when it
 // can, otherwise the CPU. This file is the TypeScript side: what to embed and the vector math.
 
-import { Media, plainDescription, visibleTags } from "./models";
+import { type Media, plainDescription, visibleTags } from "./models";
 
 export interface EngineStatus {
   /** "npu" (every layer on the Snapdragon NPU), "npu+cpu" (NPU with CPU help), "cpu", or "off". */

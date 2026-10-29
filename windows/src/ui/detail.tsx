@@ -3,9 +3,9 @@
 import { useEffect, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { isCancellation } from "../core/anilist";
-import { EpisodePage, EpisodeService } from "../core/kitsu";
+import { type EpisodePage, EpisodeService } from "../core/kitsu";
 import {
-  coverURL, displayTitle, EntryLite, formatLabel, isLaterSeason, isMovie, Media, MediaDetail, plainDescription, relationLabel,
+  coverURL, displayTitle, type EntryLite, formatLabel, isLaterSeason, isMovie, type Media, type MediaDetail, plainDescription, relationLabel,
   scoreValue, seasonLabel, Seasons, statusIcon, statusLabel, statusName,
 } from "../core/models";
 import { SeasonChain, SeasonRoots } from "../core/seasons";

@@ -1,8 +1,8 @@
 // Building blocks shared by every screen (port of Components.swift / ShowActions.swift bubbles).
 
-import { ReactNode, useEffect, useLayoutEffect, useRef, useState, MouseEvent as RMouseEvent } from "react";
+import { type ReactNode, useEffect, useLayoutEffect, useRef, useState, type MouseEvent as RMouseEvent } from "react";
 import { ageExplanation, ageLabel } from "../core/kitsu";
-import { coverURL, displayTitle, formatLabel, Media, seasonLabel, statusIcon, thumbURL } from "../core/models";
+import { coverURL, displayTitle, formatLabel, type Media, seasonLabel, statusIcon, thumbURL } from "../core/models";
 import { hexColor, outOfTen, smiley } from "./fmt";
 import { Icon } from "./icons";
 import { ui, useModel, useOpenDetail } from "./state";

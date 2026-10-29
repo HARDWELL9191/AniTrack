@@ -4,7 +4,7 @@
 // blended in. Unseen shows are queued and analyzed in one small batch after scrolling settles.
 
 import { accumulate, cosine, getEmbedder, leaveOneOutCosine, normalized, vectorsFor } from "./ai";
-import { ListEntry, Media, scoreValue } from "./models";
+import { type ListEntry, type Media, scoreValue } from "./models";
 import { entryWeight, scoreStats, TasteProfile } from "./recommender";
 
 export class MatchEngine {

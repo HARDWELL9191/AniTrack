@@ -1,4 +1,4 @@
-//! BERT "uncased" WordPiece tokenizer (what all-MiniLM-L6-v2 was trained with): lower-case,
+//! BERT "uncased" WordPiece tokenizer (what bge-small-en-v1.5 uses): lower-case,
 //! accents stripped, punctuation and CJK characters split off, then greedy longest-match
 //! word pieces from `vocab.txt`.
 

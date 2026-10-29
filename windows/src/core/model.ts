@@ -5,12 +5,12 @@ import { clearPersonal, Defaults, DiskCache } from "./cache";
 import { AgeRatings } from "./kitsu";
 import { MatchEngine } from "./match";
 import {
-  AnimeCategory, availableEpisodes, categoryId, categoryVariables, displayTitle, EntryLite, FEATURED_CATEGORIES, genre,
-  isAdultOnly, isLaterSeason, isMovie, isSeason, ListEntry, ListFranchises, ListStatus, Media, MediaDetail, MediaTitle,
-  prequelId, progressValue, Seasons, scoreValue, tag, Viewer,
+  type AnimeCategory, availableEpisodes, categoryId, categoryVariables, displayTitle, type EntryLite, FEATURED_CATEGORIES, genre,
+  isAdultOnly, isLaterSeason, isMovie, isSeason, type ListEntry, ListFranchises, type ListStatus, type Media, type MediaDetail, type MediaTitle,
+  prequelId, progressValue, Seasons, scoreValue, tag, type Viewer,
 } from "./models";
-import { fingerprint, RecOptions, RecommendationResult, runRecommender } from "./recommender";
-import { Found, SeasonChain, SeasonRoots } from "./seasons";
+import { fingerprint, type RecOptions, type RecommendationResult, runRecommender } from "./recommender";
+import { type Found, SeasonChain, SeasonRoots } from "./seasons";
 import { AppSettings } from "./settings";
 
 export type AccountMode = { kind: "none" } | { kind: "loggedIn" } | { kind: "username"; name: string };
@@ -72,7 +72,12 @@ export class AppModel {
   private showSync: Promise<void> = Promise.resolve();
   private accountGeneration = 0;
 
-  constructor(private tokens: TokenStore, private aiAllowedNow: () => boolean = () => true) {
+  private readonly tokens: TokenStore;
+  private readonly aiAllowedNow: () => boolean;
+
+  constructor(tokens: TokenStore, aiAllowedNow: () => boolean = () => true) {
+    this.tokens = tokens;
+    this.aiAllowedNow = aiAllowedNow;
     const changed = () => this.notify();
     this.settings.onChange = changed;
     this.matcher.onChange = changed;

@@ -12,8 +12,13 @@ export function setFetch(f: FetchLike) {
 export const getFetch = () => httpFetch;
 
 export class APIError extends Error {
-  constructor(message: string, readonly kind: "graphql" | "http" | "empty" | "rateLimited", readonly status = 0) {
+  readonly kind: "graphql" | "http" | "empty" | "rateLimited";
+  readonly status: number;
+
+  constructor(message: string, kind: APIError["kind"], status = 0) {
     super(message);
+    this.kind = kind;
+    this.status = status;
   }
 }
 

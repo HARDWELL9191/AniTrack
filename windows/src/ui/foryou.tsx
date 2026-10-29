@@ -1,9 +1,9 @@
 // For You (port of ForYouView.swift): one personal pick at a time; the feed digs deeper near the end.
 
 import { useEffect, useState } from "react";
-import { AnimeCategory, coverURL, displayTitle, formatLabel, plainDescription, seasonLabel } from "../core/models";
+import { type AnimeCategory, coverURL, displayTitle, formatLabel, plainDescription, seasonLabel } from "../core/models";
 import { AppModel } from "../core/model";
-import { Recommendation, RecommendationResult } from "../core/recommender";
+import { type Recommendation, type RecommendationResult } from "../core/recommender";
 import { AgeBadge, Chip, Cover, Empty, MediaCard, PageHeader, ScoreBadge, Shelf, Spinner } from "./components";
 import { CategoryMenu } from "./discover";
 import { hexColor, relativeTime } from "./fmt";
