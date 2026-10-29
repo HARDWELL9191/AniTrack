@@ -93,27 +93,39 @@ st, raw2, _, _, rem = post(deep, vars_(shelves[0]))
 lines.append(f"   trending shelf size: one level {len(raw1)//1024}KB vs two levels {len(raw2)//1024}KB")
 
 # --- C) overnight job: this + next season + trending + top rated + popular, all first seasons --
+# Deeper links are trusted only when they show the chain really ends there (the season found at
+# level 1 has no same-show season before it); otherwise lookups continue from where they stop.
 time.sleep(5)
 t0 = time.time(); reqs = 0; pool = {}
 for s in shelves + [{"sort": ["POPULARITY_DESC"], "season": S[si], "seasonYear": yr, "page": 2}]:
     st, raw, dt, _, rem = post(deep, vars_(s)); reqs += 1
     for m in ((json.loads(raw).get("data") or {}).get("Page") or {}).get("media") or []: pool[m["id"]] = m
 lat = [m for m in pool.values() if later_new(m)]
-kn = dict(pool)
-for m in lat:   # nodes from the deeper links count as known (they carry format/title)
+def sure_from_links(m):
     for e in prequels(m):
-        n = e["node"]; kn.setdefault(n["id"], None)
-need = [m for m in lat if not root_2levels(m)]
+        n = e["node"]
+        if not season(n.get("format"), n.get("episodes")): continue
+        before = [e2 for e2 in ((n.get("relations") or {}).get("edges") or [])
+                  if e2.get("relationType") == "PREQUEL" and same_show(n.get("title"), (e2.get("node") or {}).get("title"))]
+        if not before: return n   # level-1 season with nothing of the same show before it: the first season
+    return None
+sure = {m["id"]: sure_from_links(m) for m in lat}
+need = [m for m in lat if not sure[m["id"]]]
 kk = dict(pool)
+rounds = 0
 for _ in range(10):
     miss = list({root_of(m, kk)[1] for m in need if root_of(m, kk)[1]})
     if not miss: break
+    rounds += 1
     st, raw, dt, _, rem = post(query("mediaByIds"), {"ids": miss[:50], "perPage": min(len(miss), 50)}); reqs += 1
     for m in ((json.loads(raw).get("data") or {}).get("Page") or {}).get("media") or []: kk[m["id"]] = m
-    time.sleep(0.7)
-lines.append(f"C) overnight job: {len(pool)} shows, {len(lat)} sequels, {reqs} requests total in {time.time()-t0:.1f}s, remaining {rem}")
-unresolved = [m for m in lat if not root_2levels(m) and (root_of(m, kk)[1] is not None or root_of(m, kk)[0] is None)]
-lines.append(f"   sequels still without a first season after the job: {len(unresolved)} "
-             + ("(" + "; ".join((x['title'].get('english') or x['title'].get('romaji') or '')[:30] for x in unresolved[:8]) + ")" if unresolved else "")
-             + f" | solved by deeper links {len(lat) - len(need)}, by lookups {len(need) - len(unresolved)}")
+answers = {m["id"]: (sure[m["id"]] or root_of(m, kk)[0]) for m in lat}
+unresolved = [m for m in lat if not answers[m["id"]]]
+# check against the full hop-by-hop answers from test A where we have them
+checked = [m for m in lat if m["id"] in first_seasons and first_seasons[m["id"]]]
+wrong = [m for m in checked if answers[m["id"]] and answers[m["id"]]["id"] != first_seasons[m["id"]]["id"]]
+lines.append(f"C) overnight job: {len(pool)} shows, {len(lat)} sequels, {reqs} requests ({rounds} lookup rounds) in {time.time()-t0:.1f}s, remaining {rem}")
+lines.append(f"   first seasons from links alone: {len(lat)-len(need)}, from lookups: {len(need)-len(unresolved)}, not found: {len(unresolved)}")
+lines.append(f"   checked against full lookups: {len(checked)} sequels, wrong answers: {len(wrong)}"
+             + (" (" + "; ".join((x['title'].get('english') or x['title'].get('romaji') or '')[:30] for x in wrong[:6]) + ")" if wrong else ""))
 note("fastload", "\n".join(lines))
