@@ -83,7 +83,7 @@ struct MoreLikeThisSheet: View {
                 }
                 // A show you plan, watch or dismiss here leaves the list right away.
                 ForEach(items.filter { model.entry(for: $0.id) == nil && !model.settings.dismissedPicks.contains($0.id) }) { item in
-                    NavigationLink(value: MediaLink(id: item.id)) { MediaRow(media: item) }
+                    MediaRowLink(media: item)
                 }
             }
             .listStyle(.plain)

@@ -109,10 +109,9 @@ struct LibraryView: View {
                             .foregroundStyle(.secondary)
                     }
                     ForEach(shown) { row in
-                        NavigationLink(value: MediaLink(id: row.entry.mediaId)) {
-                            MediaRow(media: row.entry.media, subtitle: subtitle(for: row.entry, extraSeasons: row.extraSeasons))
-                        }
-                        .removeFromListSwipe(row.entry)
+                        MediaRowLink(media: row.entry.media,
+                                     subtitle: subtitle(for: row.entry, extraSeasons: row.extraSeasons))
+                            .removeFromListSwipe(row.entry)
                     }
                 }
                 }
@@ -223,9 +222,8 @@ struct LibraryView: View {
                 .listRowSeparator(.hidden)
         }
         ForEach(shows) { media in
-            NavigationLink(value: MediaLink(id: media.id)) {
-                MediaRow(media: media, subtitle: [media.formatLabel, media.seasonLabel].compactMap { $0 }.joined(separator: " · "))
-            }
+            MediaRowLink(media: media,
+                         subtitle: [media.formatLabel, media.seasonLabel].compactMap { $0 }.joined(separator: " · "))
             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                 Button {
                     Task { await model.undoNotForMe(media.id) }

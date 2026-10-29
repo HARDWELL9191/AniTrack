@@ -157,7 +157,7 @@ struct CategoryBrowseView: View {
         let visible = search.isEmpty ? items.filter { !model.settings.dismissedPicks.contains($0.id) } : items
         List {
             ForEach(visible) { media in
-                NavigationLink(value: MediaLink(id: media.id)) { MediaRow(media: media) }
+                MediaRowLink(media: media)
                     .onAppear {
                         if media.id == visible.last?.id { Task { await loadPage() } }
                     }

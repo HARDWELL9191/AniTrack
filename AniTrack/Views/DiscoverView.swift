@@ -145,7 +145,7 @@ struct DiscoverView: View {
                 ContentUnavailableView.search(text: query)
             }
             ForEach(results) { media in
-                NavigationLink(value: MediaLink(id: media.id)) { MediaRow(media: media) }
+                MediaRowLink(media: media)
             }
         }
         .listStyle(.plain)

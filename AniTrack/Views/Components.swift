@@ -267,6 +267,8 @@ struct MediaRow: View {
     @Environment(\.zoomNamespace) private var zoom
     let media: Media
     var subtitle: String? = nil
+    /// The ">" a list row shows (drawn here since rows are plain buttons, see MediaRowLink).
+    var chevron = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -295,6 +297,11 @@ struct MediaRow: View {
                 }
             }
             Spacer(minLength: 0)
+            if chevron {
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
         }
         .padding(.vertical, 2)
         .contentShape(Rectangle())
@@ -306,6 +313,42 @@ struct MediaRow: View {
         if let eps = media.episodes { parts.append("\(eps) eps") }
         if let season = media.seasonLabel { parts.append(season) }
         return parts.joined(separator: " · ")
+    }
+}
+
+/// A list row that opens the show's details. A plain button, not a NavigationLink: inside a
+/// List a NavigationLink row first flashes the list's own sharp-cornered grey highlight and
+/// then swaps to the long-press menu's rounded one. Here the pressed look is that same rounded
+/// highlight, so touch → hold → menu is one continuous shape.
+struct MediaRowLink: View {
+    @Environment(\.pushDetail) private var pushDetail
+    let media: Media
+    var subtitle: String? = nil
+
+    var body: some View {
+        if let pushDetail {
+            Button { pushDetail(media.id) } label: {
+                MediaRow(media: media, subtitle: subtitle, chevron: true)
+            }
+            .buttonStyle(RowPressStyle())
+        } else {
+            NavigationLink(value: MediaLink(id: media.id)) { MediaRow(media: media, subtitle: subtitle) }
+        }
+    }
+}
+
+/// Pressed rows: the same rounded grey highlight the long-press menu shows (8 pt around the
+/// row, matching corners), never the list's own full-width one.
+struct RowPressStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background {
+                if configuration.isPressed {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(Color(.systemGray5))
+                        .padding(-8)
+                }
+            }
     }
 }
 
