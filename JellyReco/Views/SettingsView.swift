@@ -325,22 +325,19 @@ struct GestureSettingsView: View {
     @Environment(AppModel.self) private var model
     var body: some View {
         @Bindable var s = model.settings
-        let vertical: [GestureAction] = [.none, .brightness, .volume, .speed, .audioOffset, .subtitleOffset]
+        let vertical: [GestureAction] = [.none, .brightness, .volume]
         Form {
-            Section("Swipe up/down") {
-                Picker("Left side", selection: $s.gestureLeftVertical) { ForEach(vertical) { Text($0.label).tag($0) } }
-                Picker("Right side", selection: $s.gestureRightVertical) { ForEach(vertical) { Text($0.label).tag($0) } }
-            }
-            Section("Swipe left/right") {
-                Picker("Anywhere", selection: $s.gestureHorizontal) {
-                    ForEach([GestureAction.none, .scrub]) { Text($0.label).tag($0) }
-                }
-            }
-            Section("Taps") {
+            Section {
                 Picker("Double tap", selection: $s.doubleTap) { ForEach(DoubleTapAction.allCases) { Text($0.label).tag($0) } }
-                Picker("Long press", selection: $s.longPress) { ForEach(LongPressAction.allCases) { Text($0.label).tag($0) } }
-                Toggle("Pinch to fill the screen", isOn: $s.pinchToFill)
+                Toggle("Pinch to zoom", isOn: $s.pinchToFill)
+            } header: { Text("Like Apple's player") } footer: {
+                Text("Double-tap the left or right side to jump, the middle to zoom; pinch to fill the screen; swipe down to close.")
             }
+            Section {
+                Picker("Swipe up/down on the left", selection: $s.gestureLeftVertical) { ForEach(vertical) { Text($0.label).tag($0) } }
+                Picker("Swipe up/down on the right", selection: $s.gestureRightVertical) { ForEach(vertical) { Text($0.label).tag($0) } }
+                Picker("Touch and hold", selection: $s.longPress) { ForEach(LongPressAction.allCases) { Text($0.label).tag($0) } }
+            } header: { Text("Extras") }
         }
         .navigationTitle("Gestures")
     }

@@ -46,7 +46,10 @@ final class PlaybackController {
     private(set) var statusNote: String?
     private(set) var audioDelay: Double = 0
     private(set) var subtitleDelay: Double = 0
+    /// Fill instead of fit (the surface is scaled up to cover the screen, like Apple's player).
     private(set) var isFilled = false
+    /// Recent engine messages (shown in Playback info) so problems are visible.
+    private(set) var diagnostics: [String] = []
     var trickplay: TrickplayProvider?
 
     @ObservationIgnored private let model: AppModel
@@ -67,6 +70,7 @@ final class PlaybackController {
     @ObservationIgnored private var countdownTask: Task<Void, Never>?
     @ObservationIgnored private var started = false
     @ObservationIgnored private var remoteCommandsInstalled = false
+    @ObservationIgnored private var playingSince: Date?
 
     var settings: AppSettings { model.settings }
 
@@ -78,6 +82,16 @@ final class PlaybackController {
         self.queue = request.queue
         self.player = MPVPlayer(configuration: Self.configuration(settings: model.settings,
                                                                   output: model.settings.playerEngine == .mpv ? .metal : .sampleBuffer))
+        attachLog()
+    }
+
+    private func attachLog() {
+        player.logHandler = { [weak self] msg in
+            guard let self else { return }
+            let line = "[\(msg.prefix)] \(msg.message.trimmingCharacters(in: .whitespacesAndNewlines))"
+            self.diagnostics.append(line)
+            if self.diagnostics.count > 40 { self.diagnostics.removeFirst(self.diagnostics.count - 40) }
+        }
     }
 
     // MARK: Configuration
@@ -125,6 +139,7 @@ final class PlaybackController {
             dolbyVisionPolicy: .strict,
             hardwareDecoding: settings.hardwareDecoding ? .automatic : .disabled,
             initialBufferDuration: .seconds(1),
+            logLevel: .warning,
             networkCacheDuration: .seconds(30),
             playbackRate: settings.defaultSpeed,
             videoOutput: output
@@ -146,6 +161,7 @@ final class PlaybackController {
         phase = .loading
         statusNote = fallback ? "Your server is converting this file…" : nil
         didApplyTracks = false
+        playingSince = nil
         externalSubs = []
         skippedSegments = []
         activeSegment = nil
@@ -198,7 +214,6 @@ final class PlaybackController {
 
             player.load(url, playAutomatically: true, startTime: resumeSeconds > 1 ? .seconds(resumeSeconds) : nil)
             player.setPlaybackRate(settings.defaultSpeed)
-            if isFilled { player.setProperty("panscan", to: "1.0") }
             loadExternalSubtitles(itemId: full.id, source: src)
             prepareTrickplay(full, source: src)
             Task { segments = await client.mediaSegments(itemId: full.id) }
@@ -259,10 +274,17 @@ final class PlaybackController {
             phase = .playing
             statusNote = nil
         }
-        if !didApplyTracks, !player.audioTracks.isEmpty || player.state == .playing {
+        if state == .playing && playingSince == nil { playingSince = Date() }
+        // Track lists arrive in pieces: wait until subtitles are known (or 3 s of playback)
+        // before choosing, otherwise the subtitle choice is made against an empty list.
+        let expectsSubs = streams.contains(where: \.isSubtitle)
+        let subsReady = !expectsSubs || !player.subtitleTracks.isEmpty
+        let waitedEnough = playingSince.map { Date().timeIntervalSince($0) > 3 } ?? false
+        if !didApplyTracks, !player.audioTracks.isEmpty, subsReady || waitedEnough {
             didApplyTracks = true
             applyInitialTracks()
         }
+        checkSubtitleRendering()
         updateSegments()
 
         if state == .ended { await handleEnded() }
@@ -301,6 +323,39 @@ final class PlaybackController {
         player.stop()
         player = MPVPlayer(configuration: Self.configuration(settings: settings, output: output))
         player.pictureInPicture.allowsAutomaticStartFromInline = settings.pipAutomatically
+        attachLog()
+    }
+
+    var usesNativeOutput: Bool { player.configuration.videoOutput == .sampleBuffer }
+
+    /// Switches between the native layer (PiP, Dolby Vision) and the Metal renderer at the same
+    /// spot, keeping the chosen audio and subtitle tracks.
+    func switchRenderer(toMetal: Bool) async {
+        guard toMetal == usesNativeOutput else { return }
+        let at = currentSeconds
+        request.audioIndex = player.audioTracks.first(where: \.isSelected).flatMap { stream(for: $0)?.index }
+        request.subtitleIndex = player.selectedSubtitle().flatMap { stream(for: $0)?.index } ?? -1
+        triedMetal = toMetal
+        rebuildPlayer(output: toMetal ? .metal : .sampleBuffer)
+        await open(item, start: at, fallback: method == .transcode)
+    }
+
+    /// Styled (ASS) and picture (PGS, VobSub, DVB) subtitles are drawn by mpv into the frames.
+    /// If the native layer reports it can't do that for this file, move to the Metal renderer.
+    @ObservationIgnored private var subtitleCheckDone: Set<Int> = []
+    private func checkSubtitleRendering() {
+        guard usesNativeOutput, let sub = player.selectedSubtitle(), !subtitleCheckDone.contains(sub.mpvID) else { return }
+        let codec = (sub.codec ?? "").lowercased()
+        let composed = ["hdmv_pgs_subtitle", "pgssub", "pgs", "dvd_subtitle", "dvdsub", "vobsub", "dvb_subtitle", "dvbsub",
+                        "ass", "ssa", "xsub"].contains(codec)
+        guard composed else { return }
+        let capability = player.videoFeatureCapabilities[.nativeSubtitles]
+        guard capability.availability != .unknown else { return }
+        subtitleCheckDone.insert(sub.mpvID)
+        if capability.availability == .unavailable {
+            statusNote = "Switching renderer to show these subtitles…"
+            Task { await switchRenderer(toMetal: true) }
+        }
     }
 
     private func describeFile() -> String {
@@ -371,6 +426,7 @@ final class PlaybackController {
             player.selectSubtitle(id, for: .secondary)
         } else if let id {
             player.selectSubtitle(id, for: .primary)
+            subtitleCheckDone.remove(id.mpvID)
         } else {
             player.disableTrack(.subtitle)
         }
@@ -444,15 +500,9 @@ final class PlaybackController {
         player.setSubtitleDelay(.milliseconds(Int(s * 1000)))
     }
 
-    func toggleFill() {
-        isFilled.toggle()
-        player.setProperty("panscan", to: isFilled ? "1.0" : "0.0")
-    }
+    func toggleFill() { isFilled.toggle() }
 
-    func setFill(_ on: Bool) {
-        guard on != isFilled else { return }
-        toggleFill()
-    }
+    func setFill(_ on: Bool) { isFilled = on }
 
     var currentSeconds: Double { seconds(player.position) }
     var durationSeconds: Double {
