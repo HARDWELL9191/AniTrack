@@ -16,6 +16,13 @@ struct ItemLink: Hashable {
 
 struct LibraryLink: Hashable {
     let library: BaseItem
+    var sort: LibrarySort = .name
+}
+
+/// Screens reached from the Library tab (all navigation uses values: mixing push styles in one
+/// stack makes iOS pop new pages straight back).
+enum ScreenLink: Hashable {
+    case favorites, collections, myList, notForMe, liveTV
 }
 
 struct PersonLink: Hashable {
@@ -45,7 +52,24 @@ extension View {
                 ItemDetailView(item: link.item)
                     .navigationTransition(.zoom(sourceID: link.item.id, in: zoom))
             }
-            .navigationDestination(for: LibraryLink.self) { LibraryView(library: $0.library) }
+            .navigationDestination(for: LibraryLink.self) { link in
+                if link.library.collectionType == "livetv" {
+                    LiveTVView()
+                } else if FolderBrowserView.isFolderLibrary(link.library) {
+                    FolderBrowserView(folder: link.library)
+                } else {
+                    LibraryView(library: link.library, initialSort: link.sort)
+                }
+            }
+            .navigationDestination(for: ScreenLink.self) { screen in
+                switch screen {
+                case .favorites: FavoritesView()
+                case .collections: CollectionsBrowser()
+                case .myList: MyListView()
+                case .notForMe: NotForMeView()
+                case .liveTV: LiveTVView()
+                }
+            }
             .navigationDestination(for: PersonLink.self) { PersonView(personId: $0.id, name: $0.name) }
             .navigationDestination(for: GenreLink.self) { GenreItemsView(genre: $0.name, parentId: $0.parentId) }
     }
@@ -338,12 +362,12 @@ struct LandscapeCard: View {
 
 // MARK: - Shelves
 
-struct Shelf<Destination: View>: View {
+struct Shelf: View {
     let title: String
     let items: [BaseItem]
     var landscape = false
     var playOnTap = false
-    var seeAll: (() -> Destination)? = nil
+    var seeAll: LibraryLink? = nil
 
     @Environment(AppModel.self) private var model
 
@@ -354,7 +378,7 @@ struct Shelf<Destination: View>: View {
                     Text(title).font(.title3.weight(.bold))
                     Spacer()
                     if let seeAll {
-                        NavigationLink { seeAll() } label: {
+                        NavigationLink(value: seeAll) {
                             Text("See all").font(.subheadline.weight(.semibold))
                         }
                     }
@@ -382,16 +406,6 @@ struct Shelf<Destination: View>: View {
     @ViewBuilder
     private func card(_ item: BaseItem) -> some View {
         if landscape { LandscapeCard(item: item) } else { PosterCard(item: item) }
-    }
-}
-
-extension Shelf where Destination == EmptyView {
-    init(title: String, items: [BaseItem], landscape: Bool = false, playOnTap: Bool = false) {
-        self.title = title
-        self.items = items
-        self.landscape = landscape
-        self.playOnTap = playOnTap
-        self.seeAll = nil
     }
 }
 

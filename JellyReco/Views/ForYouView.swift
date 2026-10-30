@@ -10,7 +10,6 @@ struct ForYouView: View {
     @State private var index = 0
     @State private var handled = 0
     @State private var detail: ExternalTitle?
-    @State private var showMyList = false
 
     private var discovery: DiscoveryEngine { model.discovery }
     private var sourceId: String { model.reco.currentSourceId }
@@ -30,7 +29,7 @@ struct ForYouView: View {
             .toolbarTitleDisplayMode(.inlineLarge)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { showMyList = true } label: {
+                    NavigationLink(value: ScreenLink.myList) {
                         Image(systemName: model.myList.isEmpty ? "bookmark" : "bookmark.fill")
                     }
                     .accessibilityLabel("My List")
@@ -52,7 +51,6 @@ struct ForYouView: View {
                 }
             }
             .sheet(item: $detail) { ExternalDetailSheet(title: $0) }
-            .navigationDestination(isPresented: $showMyList) { MyListView() }
             .appDestinations(zoom: zoom)
             .environment(\.zoomNamespace, zoom)
         }

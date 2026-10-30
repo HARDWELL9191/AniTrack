@@ -261,6 +261,14 @@ final class AppModel {
                     custom["wishlist"] = "[]"
                 }
             }
+            // TMDB key: the phone's copy and the server's copy keep each other filled in.
+            let serverKey = ((prefs.customPrefs?["tmdbkey"] ?? nil) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if settings.tmdbKey.isEmpty && !serverKey.isEmpty {
+                settings.tmdbKey = serverKey
+            } else if !settings.tmdbKey.isEmpty && serverKey != settings.tmdbKey {
+                let key = settings.tmdbKey
+                await saveStorage { custom in custom["tmdbkey"] = key }
+            }
             externalSeen = Self.decodeTitles(prefs.customPrefs?["seenelsewhere"] ?? nil)
             externalNotForMe = Self.decodeTitles(prefs.customPrefs?["notforme"] ?? nil)
             if let json = prefs.customPrefs?["settings"] ?? nil, !json.isEmpty {
@@ -270,6 +278,11 @@ final class AppModel {
             }
         }
         settings.onChange = { [weak self] in self?.scheduleSettingsSync() }
+        settings.onTMDBKeyChange = { [weak self] in
+            guard let self else { return }
+            let key = self.settings.tmdbKey
+            Task { await self.saveStorage { custom in custom["tmdbkey"] = key } }
+        }
     }
 
     @ObservationIgnored private var settingsSyncTask: Task<Void, Never>?

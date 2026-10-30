@@ -199,6 +199,13 @@ final class PlaybackController {
             source = src
             streams = src.mediaStreams ?? full.mediaStreams ?? []
 
+            // The subtitle that will be shown is picture-based: use the Metal renderer from the start.
+            let subIndex = request.subtitleIndex ?? src.defaultSubtitleStreamIndex ?? -1
+            if usesNativeOutput, subIndex >= 0,
+               let sub = streams.first(where: { $0.index == subIndex && $0.isSubtitle }), Self.isPictureSubtitle(sub.codec) {
+                rebuildPlayer(output: .metal)
+            }
+
             let url: URL?
             if fallback, let t = src.transcodingUrl {
                 url = client.absolute(t)
@@ -325,6 +332,14 @@ final class PlaybackController {
 
     var usesNativeOutput: Bool { player.configuration.videoOutput == .sampleBuffer }
 
+    /// Picture-based subtitles (Blu-ray PGS, DVD VobSub, DVB). mpv's Metal renderer always draws
+    /// these; the native video layer doesn't reliably, so they get the Metal renderer.
+    static func isPictureSubtitle(_ codec: String?) -> Bool {
+        let c = (codec ?? "").lowercased()
+        return ["hdmv_pgs_subtitle", "pgssub", "pgs", "sup", "dvd_subtitle", "dvdsub", "vobsub", "dvb_subtitle",
+                "dvbsub", "xsub"].contains(c)
+    }
+
     /// Switches between the native layer (PiP, Dolby Vision) and the Metal renderer at the same
     /// spot, keeping the chosen audio and subtitle tracks.
     func switchRenderer(toMetal: Bool) async {
@@ -337,20 +352,15 @@ final class PlaybackController {
         await open(item, start: at, fallback: method == .transcode)
     }
 
-    /// Styled (ASS) and picture (PGS, VobSub, DVB) subtitles are drawn by mpv into the frames.
-    /// If the native layer reports it can't do that for this file, move to the Metal renderer.
+    /// A picture subtitle selected while the native layer is in use: move to the Metal renderer
+    /// (same spot, same tracks) so it's actually drawn.
     @ObservationIgnored private var subtitleCheckDone: Set<Int> = []
     private func checkSubtitleRendering() {
         guard usesNativeOutput, let sub = player.selectedSubtitle(), !subtitleCheckDone.contains(sub.mpvID) else { return }
-        let codec = (sub.codec ?? "").lowercased()
-        let composed = ["hdmv_pgs_subtitle", "pgssub", "pgs", "dvd_subtitle", "dvdsub", "vobsub", "dvb_subtitle", "dvbsub",
-                        "ass", "ssa", "xsub"].contains(codec)
-        guard composed else { return }
-        let capability = player.videoFeatureCapabilities[.nativeSubtitles]
-        guard capability.availability != .unknown else { return }
         subtitleCheckDone.insert(sub.mpvID)
-        if capability.availability == .unavailable {
-            statusNote = "Switching renderer to show these subtitles…"
+        let codec = stream(for: sub)?.codec ?? sub.codec
+        if Self.isPictureSubtitle(codec) {
+            statusNote = "Switching renderer for picture subtitles…"
             Task { await switchRenderer(toMetal: true) }
         }
     }

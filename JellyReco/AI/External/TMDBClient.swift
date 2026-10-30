@@ -1,12 +1,12 @@
 import Foundation
 
 enum TMDBError: LocalizedError {
-    case noKey, badKey, http(Int)
+    case noKey, badKey(String?), http(Int, String?)
     var errorDescription: String? {
         switch self {
         case .noKey: return "Add your free TMDB API key in Settings → Recommendations."
-        case .badKey: return "TMDB didn't accept the API key. Check it in Settings → Recommendations."
-        case .http(let c): return "TMDB error \(c)."
+        case .badKey(let m): return "TMDB didn't accept the key\(m.map { ": \($0)" } ?? ""). Paste the API Read Access Token (the long one) or the API key."
+        case .http(let c, let m): return "TMDB error \(c)\(m.map { ": \($0)" } ?? "")."
         }
     }
 }
@@ -22,7 +22,9 @@ actor TMDBClient {
     static let imageBase = "https://image.tmdb.org/t/p/"
 
     init(key: String) {
-        self.key = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Pasted keys often carry spaces, line breaks or quotes: keep only the key itself.
+        self.key = key.components(separatedBy: .whitespacesAndNewlines).joined()
+            .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 20
         config.httpMaximumConnectionsPerHost = 8
@@ -49,11 +51,12 @@ actor TMDBClient {
                 try await Task.sleep(nanoseconds: UInt64(min(wait, 10) * 1_000_000_000))
                 continue
             }
-            if code == 401 { throw TMDBError.badKey }
-            guard (200..<300).contains(code) else { throw TMDBError.http(code) }
+            let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["status_message"] as? String
+            if code == 401 { throw TMDBError.badKey(message) }
+            guard (200..<300).contains(code) else { throw TMDBError.http(code, message) }
             return data
         }
-        throw TMDBError.http(429)
+        throw TMDBError.http(429, "Too many requests, try again in a minute")
     }
 
     /// Checks the key (used by Settings).

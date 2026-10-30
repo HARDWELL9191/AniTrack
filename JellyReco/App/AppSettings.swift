@@ -232,7 +232,15 @@ final class AppSettings {
     var includeWatchingAsLiked: Bool { didSet { save(includeWatchingAsLiked, "includeWatchingAsLiked") } }
     /// TMDB API key or read access token (For You looks for new titles there). Synced with your
     /// account's private JellyReco storage on your server, like every other setting.
-    var tmdbKey: String { didSet { save(tmdbKey, "tmdbKey") } }
+    var tmdbKey: String {
+        didSet {
+            // Kept in the Keychain (survives app updates) and saved to your server separately.
+            Keychain.set(tmdbKey.isEmpty ? nil : tmdbKey, for: "tmdb-key")
+            d.removeObject(forKey: "tmdbKey")
+            if !isApplyingRemote { onTMDBKeyChange?() }
+        }
+    }
+    @ObservationIgnored var onTMDBKeyChange: (() -> Void)?
 
     // Security
     var requireFaceID: Bool { didSet { save(requireFaceID, "requireFaceID") } }
@@ -321,7 +329,7 @@ final class AppSettings {
         recoSource = s("recoSource", "")
         dismissedPicks = set("dismissedPicks")
         includeWatchingAsLiked = b("includeWatchingAsLiked", true)
-        tmdbKey = s("tmdbKey", "")
+        tmdbKey = Keychain.get("tmdb-key") ?? s("tmdbKey", "")
 
         requireFaceID = b("requireFaceID", false)
     }
@@ -351,7 +359,7 @@ final class AppSettings {
         "doubleTap", "longPress", "pinchToFill", "preferredAudioLanguage", "preferredSubtitleLanguage",
         "subtitlesByDefault", "preferSignsAndSongs", "subtitleSize", "subtitleColor", "subtitleBackground",
         "subtitleBold", "subtitlePosition", "overrideASSStyles", "stereoDownmix", "transcodeFallback",
-        "useOnDeviceAI", "recoSource", "includeWatchingAsLiked", "tmdbKey",
+        "useOnDeviceAI", "recoSource", "includeWatchingAsLiked",
     ]
 
     /// Current synced settings as JSON.
@@ -404,7 +412,7 @@ final class AppSettings {
         overrideASSStyles = fresh.overrideASSStyles; stereoDownmix = fresh.stereoDownmix
         transcodeFallback = fresh.transcodeFallback
         useOnDeviceAI = fresh.useOnDeviceAI; recoSource = fresh.recoSource; includeWatchingAsLiked = fresh.includeWatchingAsLiked
-        tmdbKey = fresh.tmdbKey
+
     }
 
     func layout(for libraryId: String) -> LibraryLayout {

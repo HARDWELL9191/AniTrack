@@ -11,26 +11,24 @@ struct LibrariesView: View {
             ScrollView {
                 LazyVGrid(columns: [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)], spacing: 14) {
                     ForEach(model.libraries) { lib in
-                        NavigationLink {
-                            destination(for: lib)
-                        } label: {
+                        NavigationLink(value: LibraryLink(library: lib)) {
                             LibraryTile(library: lib)
                         }
                         .buttonStyle(PressStyle())
                     }
-                    NavigationLink { MyListView() } label: {
+                    NavigationLink(value: ScreenLink.myList) {
                         SymbolTile(title: "My List", symbol: "bookmark.fill", tint: Theme.accent)
                     }
                     .buttonStyle(PressStyle())
-                    NavigationLink { NotForMeView() } label: {
+                    NavigationLink(value: ScreenLink.notForMe) {
                         SymbolTile(title: "Not for me", symbol: "hand.thumbsdown.fill", tint: .gray)
                     }
                     .buttonStyle(PressStyle())
-                    NavigationLink { FavoritesView() } label: {
+                    NavigationLink(value: ScreenLink.favorites) {
                         SymbolTile(title: "Favourites", symbol: "heart.fill", tint: Theme.pink)
                     }
                     .buttonStyle(PressStyle())
-                    NavigationLink { CollectionsBrowser() } label: {
+                    NavigationLink(value: ScreenLink.collections) {
                         SymbolTile(title: "Collections", symbol: "square.stack.fill", tint: .purple)
                     }
                     .buttonStyle(PressStyle())
@@ -45,15 +43,6 @@ struct LibrariesView: View {
         }
     }
 
-    @ViewBuilder
-    private func destination(for lib: BaseItem) -> some View {
-        if lib.collectionType == "livetv" {
-            LiveTVView()
-        } else if FolderBrowserView.isFolderLibrary(lib) {
-            FolderBrowserView(folder: lib)
-        } else {
-            LibraryView(library: lib)
-        }
     }
 }
 
@@ -618,7 +607,7 @@ struct FolderBrowserView: View {
         List {
             ForEach(shown) { item in
                 if item.isFolder == true && !(item.kind == .series || item.kind == .season || item.kind == .boxSet) {
-                    NavigationLink { FolderBrowserView(folder: item) } label: { FolderRow(item: item) }
+                    NavigationLink(value: LibraryLink(library: item)) { FolderRow(item: item) }
                 } else if item.kind.isPlayableVideo {
                     FileRow(item: item)
                 } else {

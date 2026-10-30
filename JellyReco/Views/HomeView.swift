@@ -80,21 +80,11 @@ struct HomeView: View {
             Shelf(title: "On Now", items: onNow, landscape: true, playOnTap: true)
         case .latestMedia:
             ForEach(latest) { entry in
-                Shelf(title: "Recently Added in \(entry.library.displayName)", items: entry.items) {
-                    destination(for: entry.library)
-                }
+                Shelf(title: "Recently Added in \(entry.library.displayName)", items: entry.items,
+                      seeAll: LibraryLink(library: entry.library, sort: .dateAdded))
             }
         case .none, .resumeAudio, .resumeBook, .activeRecordings:
             EmptyView()
-        }
-    }
-
-    @ViewBuilder
-    private func destination(for lib: BaseItem) -> some View {
-        if FolderBrowserView.isFolderLibrary(lib) {
-            FolderBrowserView(folder: lib)
-        } else {
-            LibraryView(library: lib, initialSort: .dateAdded)
         }
     }
 
@@ -204,11 +194,7 @@ struct MyMediaRow: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     LazyHStack(spacing: 12) {
                         ForEach(libraries) { lib in
-                            NavigationLink {
-                                if lib.collectionType == "livetv" { LiveTVView() }
-                                else if FolderBrowserView.isFolderLibrary(lib) { FolderBrowserView(folder: lib) }
-                                else { LibraryView(library: lib) }
-                            } label: {
+                            NavigationLink(value: LibraryLink(library: lib)) {
                                 LibraryTile(library: lib).frame(width: 220)
                             }
                             .buttonStyle(PressStyle())
