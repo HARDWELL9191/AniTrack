@@ -8,6 +8,7 @@ struct ItemDetailView: View {
     @State private var detail: BaseItem?
     @State private var seasons: [BaseItem] = []
     @State private var selectedSeason: String?
+    @State private var shownEpisodes = 20
     @State private var episodes: [BaseItem] = []
     @State private var nextUp: BaseItem?
     @State private var similar: [BaseItem] = []
@@ -276,47 +277,85 @@ struct ItemDetailView: View {
 
     // MARK: Seasons & episodes
 
+    /// AniReco's episodes block: "Episodes" header with a glass season dropdown, then the
+    /// episodes 20 at a time with "Show more episodes".
     @ViewBuilder
     private var episodesSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if current.kind == .series && !seasons.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(seasons) { season in
-                            Button {
-                                selectedSeason = season.id
-                            } label: {
-                                Text(season.displayName)
-                                    .font(.subheadline.weight(.semibold))
-                                    .padding(.horizontal, 14).padding(.vertical, 8)
-                                    .foregroundStyle(selectedSeason == season.id ? .white : .primary)
-                                    .background {
-                                        if selectedSeason == season.id { Capsule().fill(Theme.accent) }
-                                    }
-                                    .glassEffect(.regular, in: .capsule)
-                            }
-                            .buttonStyle(.plain)
-                            .contextMenu {
-                                Button(model.isPlayed(season) ? "Mark season unwatched" : "Mark season watched",
-                                       systemImage: "checkmark.circle") {
-                                    Task { await model.togglePlayed(season); await loadEpisodes() }
-                                }
-                            }
-                        }
-                    }
-                    .padding(.horizontal)
-                }
-                .scrollClipDisabled()
+            HStack {
+                Text("Episodes").font(.headline)
+                Spacer()
+                if current.kind == .series && !seasons.isEmpty { seasonMenu }
             }
-            LazyVStack(spacing: 14) {
-                ForEach(episodes) { ep in
+            LazyVStack(alignment: .leading, spacing: 14) {
+                ForEach(episodes.prefix(shownEpisodes)) { ep in
                     EpisodeRow(episode: ep)
                 }
             }
-            .padding(.horizontal)
-            if episodes.isEmpty && !seasons.isEmpty { ProgressView().frame(maxWidth: .infinity) }
+            if episodes.count > shownEpisodes {
+                Button {
+                    withAnimation(.snappy) { shownEpisodes += 20 }
+                } label: {
+                    Text("Show more episodes (\(episodes.count - shownEpisodes) left)").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.glass)
+            }
+            if episodes.isEmpty && !seasons.isEmpty {
+                HStack(spacing: 10) {
+                    ProgressView()
+                    Text("Loading episodes…").foregroundStyle(.secondary)
+                }
+            }
         }
-        .onChange(of: selectedSeason) { _, _ in Task { await loadEpisodes() } }
+        .padding(.horizontal)
+        .onChange(of: selectedSeason) { _, _ in
+            shownEpisodes = 20
+            Task { await loadEpisodes() }
+        }
+    }
+
+    // MARK: Season dropdown (AniReco)
+
+    private var seasonMenu: some View {
+        let selected = seasons.first { $0.id == selectedSeason }
+        return Menu {
+            ForEach(seasons) { season in
+                Button {
+                    selectedSeason = season.id
+                } label: {
+                    if season.id == selectedSeason {
+                        Label(season.displayName, systemImage: "checkmark")
+                    } else {
+                        Text(season.displayName)
+                    }
+                    Text(seasonDetail(season))
+                }
+            }
+            if let selected {
+                Divider()
+                Button(model.isPlayed(selected) ? "Mark \(selected.displayName) unwatched" : "Mark \(selected.displayName) watched",
+                       systemImage: model.isPlayed(selected) ? "circle" : "checkmark.circle") {
+                    Task { await model.togglePlayed(selected); await loadEpisodes() }
+                }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Text(selected?.displayName ?? "Season")
+                Image(systemName: "chevron.down").font(.caption.weight(.semibold))
+            }
+            .menuButtonHeight()   // same size as every other dropdown
+            .font(.subheadline.weight(.semibold))
+        }
+        .menuStyle(.button)
+        .buttonStyle(.glass)
+    }
+
+    private func seasonDetail(_ season: BaseItem) -> String {
+        var parts: [String] = []
+        if let year = season.productionYear { parts.append(String(year)) }
+        if let count = season.childCount { parts.append("\(count) eps") }
+        if model.isPlayed(season) { parts.append("Watched") }
+        return parts.joined(separator: " · ")
     }
 
     @ViewBuilder
@@ -502,6 +541,8 @@ struct ItemDetailView: View {
     }
 }
 
+/// AniReco's episode row: thumbnail, "Episode N" caption, title, description that expands
+/// on tap. Jellyfin extras kept: tap the thumbnail to play, progress bar, watched check.
 struct EpisodeRow: View {
     @Environment(AppModel.self) private var model
     let episode: BaseItem
@@ -512,13 +553,17 @@ struct EpisodeRow: View {
         let hideSpoiler = model.settings.hideSpoilers && !(data?.played ?? false)
         HStack(alignment: .top, spacing: 12) {
             Button { model.play(episode) } label: {
-                RemoteImage(url: model.client?.landscapeURL(episode, width: 480))
-                    .blur(radius: hideSpoiler ? 14 : 0)
-                    .frame(width: 150, height: 84)
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(.fill.tertiary)
+                    .frame(width: 128, height: 72)
+                    .overlay {
+                        RemoteImage(url: model.client?.landscapeURL(episode, width: 400))
+                            .blur(radius: hideSpoiler ? 14 : 0)
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     .overlay { GlassIcon(symbol: "play.fill", tint: .black.opacity(0.3)) }
                     .overlay(alignment: .bottom) {
-                        if let p = data?.playedPercentage, p > 0, p < 100 { ProgressBar(value: p / 100).padding(6) }
+                        if let p = data?.playedPercentage, p > 0, p < 100 { ProgressBar(value: p / 100).padding(5) }
                     }
                     .overlay(alignment: .topTrailing) {
                         if data?.played ?? false { GlassIcon(symbol: "checkmark", tint: Theme.accent.opacity(0.55)).padding(4) }
@@ -526,21 +571,29 @@ struct EpisodeRow: View {
             }
             .buttonStyle(PressStyle())
             VStack(alignment: .leading, spacing: 3) {
-                Text("\(episode.indexNumber.map { "\($0). " } ?? "")\(episode.displayName)")
-                    .font(.subheadline.weight(.semibold)).lineLimit(2)
                 HStack(spacing: 6) {
-                    if let rt = episode.runtimeSeconds { Text(Fmt.runtime(rt)) }
-                    if let d = episode.premiereDate { Text(d.formatted(date: .abbreviated, time: .omitted)) }
+                    Text(episode.indexNumber.map { "Episode \($0)" } ?? "Episode")
+                    if let rt = episode.runtimeSeconds { Text("· \(Fmt.runtime(rt))") }
                 }
-                .font(.caption2).foregroundStyle(.secondary)
-                if !hideSpoiler || expanded {
-                    Text(episode.plainOverview).font(.caption).foregroundStyle(.secondary).lineLimit(expanded ? nil : 3)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                Text(episode.displayName)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(2)
+                if (!hideSpoiler || expanded) && !episode.plainOverview.isEmpty {
+                    Text(episode.plainOverview)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(expanded ? nil : 3)
                 }
             }
-            .onTapGesture { withAnimation(.snappy) { expanded.toggle() } }
             Spacer(minLength: 0)
         }
         .contentShape(Rectangle())
+        .onTapGesture {
+            guard !episode.plainOverview.isEmpty else { return }
+            withAnimation(.snappy) { expanded.toggle() }
+        }
         .itemActions(episode)
     }
 }

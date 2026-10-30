@@ -20,13 +20,7 @@ struct MyListView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                Picker("", selection: $filter) {
-                    Text("All").tag(0)
-                    Text("On your server").tag(1)
-                    Text("Not on server yet").tag(2)
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal)
+                filterBar
 
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 12, alignment: .top)], spacing: 16) {
                     ForEach(entries) { entry in
@@ -51,6 +45,44 @@ struct MyListView: View {
             await loadServerItems()
         }
         .sheet(item: $detail) { ExternalDetailSheet(title: $0) }
+    }
+
+    /// AniReco's list dropdown: one glass button on the right showing the current list and its count.
+    private var filterBar: some View {
+        let options: [(Int, String, String)] = [
+            (0, "All", "bookmark"),
+            (1, "On your server", "server.rack"),
+            (2, "Not on server yet", "icloud.and.arrow.down"),
+        ]
+        func count(_ f: Int) -> Int {
+            switch f {
+            case 1: return model.myList.filter { $0.serverId != nil || isNowOnServer($0) }.count
+            case 2: return model.myList.filter { $0.external != nil && !isNowOnServer($0) }.count
+            default: return model.myList.count
+            }
+        }
+        let current = options.first { $0.0 == filter } ?? options[0]
+        return HStack {
+            Spacer()
+            Menu {
+                ForEach(options.indices, id: \.self) { i in
+                    Button { filter = options[i].0 } label: {
+                        Label("\(options[i].1) (\(count(options[i].0)))", systemImage: options[i].0 == filter ? "checkmark" : options[i].2)
+                    }
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: current.2).frame(height: 0)
+                    Text("\(current.1) (\(count(current.0)))")
+                    Image(systemName: "chevron.down").font(.caption.weight(.semibold)).frame(height: 0)
+                }
+                .menuButtonHeight()
+                .font(.subheadline.weight(.semibold))
+            }
+            .menuStyle(.button)
+            .buttonStyle(.glass)
+        }
+        .padding(.horizontal)
     }
 
     @ViewBuilder
@@ -145,11 +177,29 @@ struct NotForMeView: View {
     var body: some View {
         let list = tab == 0 ? model.externalNotForMe : model.externalSeen
         List {
-            Picker("", selection: $tab) {
-                Text("Not for me (\(model.externalNotForMe.count))").tag(0)
-                Text("Already seen (\(model.externalSeen.count))").tag(1)
+            HStack {
+                Spacer()
+                Menu {
+                    Button { tab = 0 } label: {
+                        Label("Not for me (\(model.externalNotForMe.count))", systemImage: tab == 0 ? "checkmark" : "hand.thumbsdown")
+                    }
+                    Button { tab = 1 } label: {
+                        Label("Already seen (\(model.externalSeen.count))", systemImage: tab == 1 ? "checkmark" : "eye")
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: tab == 0 ? "hand.thumbsdown" : "eye").frame(height: 0)
+                        Text(tab == 0 ? "Not for me (\(model.externalNotForMe.count))" : "Already seen (\(model.externalSeen.count))")
+                        Image(systemName: "chevron.down").font(.caption.weight(.semibold)).frame(height: 0)
+                    }
+                    .menuButtonHeight()
+                    .font(.subheadline.weight(.semibold))
+                }
+                .menuStyle(.button)
+                .buttonStyle(.glass)
             }
-            .pickerStyle(.segmented)
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
             ForEach(list) { t in
                 Button { detail = t } label: {
                     HStack(spacing: 12) {

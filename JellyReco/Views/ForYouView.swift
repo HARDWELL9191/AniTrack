@@ -58,35 +58,52 @@ struct ForYouView: View {
 
     // MARK: Dropdowns
 
+    /// AniReco's dropdown bar: glass dropdown buttons on the right, same height as every other
+    /// dropdown. First the library For You learns from (default Anime, or All), then a category.
     private var filterBar: some View {
         @Bindable var settings = model.settings
         let genres = discovery.genres(for: sourceId)
-        return GlassEffectContainer(spacing: 10) {
-            HStack(spacing: 10) {
-                Menu {
-                    Picker("Library", selection: Binding(get: { sourceId }, set: { settings.recoSource = $0 })) {
-                        ForEach(model.reco.sources) { source in
-                            Label(source.name, systemImage: symbol(for: source)).tag(source.id)
+        return HStack(spacing: 10) {
+            Spacer(minLength: 0)
+            Menu {
+                ForEach(model.reco.sources) { source in
+                    Button { settings.recoSource = source.id } label: {
+                        if source.id == sourceId {
+                            Label(source.name, systemImage: "checkmark")
+                        } else {
+                            Label(source.name, systemImage: symbol(for: source))
                         }
                     }
-                } label: {
-                    dropdownLabel(model.reco.sourceName(sourceId), symbol: symbol(for: model.reco.source(sourceId)))
                 }
-                .buttonStyle(.glass)
-
-                Menu {
-                    Picker("Category", selection: $genre) {
-                        Text("All categories").tag(String?.none)
-                        ForEach(genres, id: \.self) { Text($0).tag(String?.some($0)) }
-                    }
-                } label: {
-                    dropdownLabel(genre ?? "All categories", symbol: "line.3.horizontal.decrease")
-                }
-                .buttonStyle(.glass)
-                .disabled(genres.isEmpty)
+            } label: {
+                DropdownLabel(text: model.reco.sourceName(sourceId), symbol: symbol(for: model.reco.source(sourceId)))
             }
-            .padding(.horizontal)
+            .menuStyle(.button)
+            .buttonStyle(.glass)
+
+            Menu {
+                Button { genre = nil } label: {
+                    if genre == nil { Label("Any category", systemImage: "checkmark") } else { Text("Any category") }
+                }
+                if !genres.isEmpty {
+                    Divider()
+                    Section("Genres") {
+                        ForEach(genres, id: \.self) { g in
+                            Button { genre = g } label: {
+                                if genre == g { Label(g, systemImage: "checkmark") } else { Text(g) }
+                            }
+                        }
+                    }
+                }
+            } label: {
+                DropdownLabel(text: genre ?? "Any category", symbol: "line.3.horizontal.decrease")
+            }
+            .menuStyle(.button)
+            .buttonStyle(.glass)
+            .disabled(genres.isEmpty && genre == nil)
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 4)
     }
 
     private var tryAgainButton: some View {
@@ -96,15 +113,6 @@ struct ForYouView: View {
         .buttonStyle(.glass)
     }
 
-    private func dropdownLabel(_ text: String, symbol: String) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: symbol)
-            Text(text).lineLimit(1)
-            Image(systemName: "chevron.up.chevron.down").font(.caption2.weight(.bold)).foregroundStyle(.secondary)
-        }
-        .font(.subheadline.weight(.semibold))
-        .frame(maxWidth: .infinity)
-    }
 
     private func symbol(for source: RecoEngine.Source?) -> String {
         guard let source, source.id != RecoSource.all else { return "square.grid.2x2" }
