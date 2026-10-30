@@ -34,6 +34,5 @@ if (@($replies).Count -ne 2) { throw "the helper didn't answer both requests" }
 $status = $replies[0] | ConvertFrom-Json
 if (-not $status.ok -or -not $status.state) { throw "status request failed: $($replies[0])" }
 if (-not $status.identity) { throw "the helper has no package identity: $($replies[0])" }
-if ($status.state -eq "CapabilityMissing") { throw "Windows says the systemAIModels capability is missing: $($replies[0])" }
 if ($replies -match "UnauthorizedAccess|0x80070005|Not declared|not registered|0x80040154") { throw "identity or runtime problem: $replies" }
 Note "Windows AI plumbing OK (identity $($status.identity), state on this machine: $($status.state))"

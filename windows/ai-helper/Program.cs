@@ -36,10 +36,22 @@ while (await input.ReadLineAsync() is { } line)
         switch ((string?)request["cmd"])
         {
             case "status":
+                var reported = LanguageModel.GetReadyState();
+                // The readiness check in this experimental SDK can say the model is unavailable
+                // while it actually loads and answers (WindowsAppSDK issue 5982): for
+                // CapabilityMissing, try loading it before believing it.
+                string? probeError = null;
+                if (reported == AIFeatureReadyState.CapabilityMissing)
+                {
+                    try { model ??= await LanguageModel.CreateAsync(); }
+                    catch (Exception e) { probeError = Describe(e); }
+                }
                 reply = new JsonObject
                 {
                     ["ok"] = true,
-                    ["state"] = LanguageModel.GetReadyState().ToString(),
+                    ["state"] = model is not null ? "Ready" : reported.ToString(),
+                    ["reportedState"] = reported.ToString(),
+                    ["probeError"] = probeError,
                     // Which package identity Windows sees for this process (null = none), the
                     // first thing to check when the state is CapabilityMissing.
                     ["identity"] = PackageIdentity.Current(),
@@ -78,8 +90,10 @@ async Task<JsonObject> Explain(string prompt)
             if (ready.ExtendedError is { } failed) return Error($"Windows couldn't prepare its language model: {Describe(failed)}");
             state = LanguageModel.GetReadyState();
         }
-        if (state != AIFeatureReadyState.Ready) return Error($"Windows' language model isn't available ({state}).");
-        model = await LanguageModel.CreateAsync();
+        if (state != AIFeatureReadyState.Ready && state != AIFeatureReadyState.CapabilityMissing)
+            return Error($"Windows' language model isn't available ({state}).");
+        try { model = await LanguageModel.CreateAsync(); }
+        catch (Exception e) { return Error($"Windows refused to load its language model ({state}): {Describe(e)}"); }
     }
     var result = await model.GenerateResponseAsync(prompt);
     var status = result.Status.ToString();

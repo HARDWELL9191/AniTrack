@@ -84,7 +84,10 @@ impl WinAi {
                 "NotSupportedOnCurrentSystem" => off("This PC doesn't have Windows' on-device language model (Copilot+ PCs only)."),
                 "DisabledByUser" => off("Windows' on-device AI is turned off in Settings (Privacy & security)."),
                 "CapabilityMissing" => off(&match reply["identity"].as_str() {
-                    Some(id) => format!("Windows didn't give AniTrack ({id}) permission to use its language model."),
+                    Some(id) => match reply["probeError"].as_str() {
+                        Some(err) => format!("Windows didn't give AniTrack ({id}) permission to use its language model: {err}"),
+                        None => format!("Windows didn't give AniTrack ({id}) permission to use its language model."),
+                    },
                     None => "Windows didn't recognize AniTrack's app identity; reinstall AniTrack.".to_string(),
                 }),
                 other => off(&format!("Windows' language model isn't available ({other}).")),
