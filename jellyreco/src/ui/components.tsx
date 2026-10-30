@@ -34,14 +34,6 @@ export function shapeFor(item: Item): Shape {
     case "Genre":
     case "MusicGenre":
       return "square";
-    case "Folder":
-    case "BoxSet": {
-      // Folders take their picture's shape (a folder without one gets a square tile).
-      const ar = item.PrimaryImageAspectRatio;
-      if (item.Type === "BoxSet" && !ar) return "poster";
-      if (!ar) return "square";
-      return ar > 1.25 ? "landscape" : ar > 0.85 ? "square" : "poster";
-    }
     default:
       return "poster";
   }

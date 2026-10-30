@@ -228,6 +228,7 @@ export function ItemBrowser({ base, scopeKey, types, folders, refreshKey = 0, sh
   };
   const toggle = <T,>(list: T[], x: T) => (list.includes(x) ? list.filter((y) => y !== x) : [...list, x]);
   const f = genFilters.data;
+  const folderShape = useMemo(() => (items.some((x) => x.IsFolder) ? "poster" : mainShape(items)), [items]);
   const activeCount = v.filters.length + v.genres.length + v.years.length + v.ratings.length + v.tags.length + (v.hasSubs ? 1 : 0) + (v.is4K ? 1 : 0) + (v.isHD ? 1 : 0) + (v.seriesStatus ? 1 : 0);
 
   return (
@@ -263,7 +264,8 @@ export function ItemBrowser({ base, scopeKey, types, folders, refreshKey = 0, sh
         : v.layout === "list" ? <div className="rows columns">{items.map((i) => <ItemRow key={i.Id} item={i} />)}</div>
         : folders
           // Folder browsing: small thumbnails in a dense grid.
-          ? <Grid min={gridMin(items, model.settings.libraryCardSize) >= 260 ? 170 : 104} compact>{items.map((i) => <ItemCard key={i.Id} item={i} width={undefined} showPlay={false} />)}</Grid>
+          // Every tile the same shape (posters, like the rest of the library), whatever the folder's picture is.
+          ? <Grid min={104} compact>{items.map((i) => <ItemCard key={i.Id} item={i} width={undefined} shape={folderShape} showPlay={false} />)}</Grid>
           : <Grid min={gridMin(items, model.settings.libraryCardSize)}>{items.map((i) => <ItemCard key={i.Id} item={i} width={undefined} />)}</Grid>}
       <LoadMore onVisible={() => void loadMore()} active={!busy && total !== null && items.length < total} />
       {busy && <Spinner />}
@@ -271,12 +273,17 @@ export function ItemBrowser({ base, scopeKey, types, folders, refreshKey = 0, sh
   );
 }
 
+/** The shape most of these cards have. */
+function mainShape(items: Item[]) {
+  const counts = { poster: 0, landscape: 0, square: 0 };
+  for (const i of items.slice(0, 60)) counts[shapeFor(i)]++;
+  return (Object.keys(counts) as (keyof typeof counts)[]).sort((a, b) => counts[b] - counts[a])[0];
+}
+
 /** Column width for a grid: from the shape most of its cards have. */
 function gridMin(items: Item[], poster: number) {
   if (!items.length) return poster;
-  const counts = { poster: 0, landscape: 0, square: 0 };
-  for (const i of items.slice(0, 60)) counts[shapeFor(i)]++;
-  const top = (Object.keys(counts) as (keyof typeof counts)[]).sort((a, b) => counts[b] - counts[a])[0];
+  const top = mainShape(items);
   return top === "landscape" ? 260 : top === "square" ? Math.max(150, poster) : poster;
 }
 
