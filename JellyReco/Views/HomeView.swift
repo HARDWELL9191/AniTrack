@@ -1,53 +1,39 @@
 import SwiftUI
 
+/// Home, the way Jellyfin builds it: the sections and their order come from your Jellyfin home
+/// settings (Settings → Home on the server, shared with Jellyfin web), with the same queries
+/// Jellyfin web uses. Only the look is JellyReco's.
 struct HomeView: View {
     @Environment(AppModel.self) private var model
     @Namespace private var zoom
     @State private var path = NavigationPath()
 
+    @State private var sections: [HomeSection] = []
     @State private var resume: [BaseItem] = []
     @State private var nextUp: [BaseItem] = []
+    @State private var onNow: [BaseItem] = []
     @State private var latest: [LatestShelf] = []
     @State private var loaded = false
     @State private var loadError: String?
-    @State private var hero: BaseItem?
 
     var body: some View {
         NavigationStack(path: $path) {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 26) {
-                    if let hero { HeroCard(item: hero).padding(.horizontal) }
-
-                    let s = model.settings
-                    if s.homeShowContinue && s.homeMergeNextUp {
-                        Shelf(title: "Continue Watching", items: merged, landscape: true, playOnTap: true)
-                    } else {
-                        if s.homeShowContinue { Shelf(title: "Continue Watching", items: resume, landscape: true, playOnTap: true) }
-                        if s.homeShowNextUp { Shelf(title: "Next Up", items: nextUp, landscape: true, playOnTap: true) }
+                    ForEach(Array(sections.enumerated()), id: \.offset) { _, section in
+                        sectionView(section)
                     }
-
-                    if s.homeShowPicks { PicksShelf() }
-                    WatchlistShelf()
-
-                    if s.homeShowLatest {
-                        ForEach(latest) { entry in
-                            Shelf(title: "Recently added in \(entry.library.displayName)", items: entry.items) {
-                                LibraryView(library: entry.library, initialSort: .dateAdded)
-                            }
-                        }
-                    }
-
-                    if loaded && resume.isEmpty && nextUp.isEmpty && latest.isEmpty {
+                    if loaded && model.libraries.isEmpty {
                         ContentUnavailableView(loadError == nil ? "Nothing here yet" : "Couldn't load",
                                                systemImage: loadError == nil ? "film.stack" : "wifi.exclamationmark",
-                                               description: Text(loadError ?? "Add media to your Jellyfin libraries and it shows up here."))
+                                               description: Text(loadError ?? (model.isAdmin ? "Add a library in the server dashboard." : "Ask your server admin to add a library.")))
                     } else if !loaded {
                         ProgressView().frame(maxWidth: .infinity).padding(40)
                     }
                 }
                 .padding(.vertical)
             }
-            .navigationTitle(model.serverName)
+            .navigationTitle("Home")
             .toolbarTitleDisplayMode(.inlineLarge)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -81,57 +67,124 @@ struct HomeView: View {
         }
     }
 
-    /// Continue Watching + Next Up as one row, most recently watched first.
-    private var merged: [BaseItem] {
-        var seen = Set<String>()
-        var series = Set<String>()
-        var out: [BaseItem] = []
-        for item in resume where seen.insert(item.id).inserted {
-            if let sid = item.seriesId { series.insert(sid) }
-            out.append(item)
+    @ViewBuilder
+    private func sectionView(_ section: HomeSection) -> some View {
+        switch section {
+        case .libraryTiles, .libraryButtons:
+            MyMediaRow(libraries: model.libraries)
+        case .resume:
+            Shelf(title: "Continue Watching", items: resume, landscape: true, playOnTap: true)
+        case .nextUp:
+            Shelf(title: "Next Up", items: nextUp, landscape: true, playOnTap: true)
+        case .liveTV:
+            Shelf(title: "On Now", items: onNow, landscape: true, playOnTap: true)
+        case .latestMedia:
+            ForEach(latest) { entry in
+                Shelf(title: "Recently Added in \(entry.library.displayName)", items: entry.items) {
+                    destination(for: entry.library)
+                }
+            }
+        case .none, .resumeAudio, .resumeBook, .activeRecordings:
+            EmptyView()
         }
-        for item in nextUp where seen.insert(item.id).inserted && !series.contains(item.seriesId ?? "-") {
-            out.append(item)
+    }
+
+    @ViewBuilder
+    private func destination(for lib: BaseItem) -> some View {
+        if FolderBrowserView.isFolderLibrary(lib) {
+            FolderBrowserView(folder: lib)
+        } else {
+            LibraryView(library: lib, initialSort: .dateAdded)
         }
-        return out
     }
 
     private func load() async {
         guard let client = model.client else { return }
-        let s = model.settings
-        async let r = client.resume()
-        async let n = client.nextUp(limit: 24, enableRewatching: s.nextUpRewatching,
-                                    maxDaysOld: s.nextUpMaxDays > 0 ? s.nextUpMaxDays : nil)
-        var lat: [(BaseItem, [BaseItem])] = []
-        var anyError: Error?
         if model.libraries.isEmpty { await model.refreshSession() }
-        // Jellyfin's own "hide from Recently added" choice (Settings → Home on the server) first,
-        // then JellyReco's.
-        let jellyfinHidden = Set((model.user?.configuration?.latestItemsExcludes ?? []).map { $0.lowercased().replacingOccurrences(of: "-", with: "") })
+        let web = await client.loadWebUserSettings()
+        let order = HomeSection.sections(from: web)
+        let settings = model.settings
+
+        async let r = client.resume(limit: 12)
+        let cutoff = settings.nextUpMaxDays   // Jellyfin web's default is 365 days
+        async let n = client.nextUp(limit: 24, enableRewatching: settings.nextUpRewatching,
+                                    maxDaysOld: cutoff > 0 ? cutoff : nil)
+
+        // Recently added: same rules as Jellyfin web (skip these library types and your exclusions).
+        let excludedTypes: Set<String> = ["playlists", "livetv", "boxsets", "channels", "folders"]
+        let excludedIds = Set((model.user?.configuration?.latestItemsExcludes ?? []).map(Self.normalize))
         let shelves = model.libraries.filter {
-            !["music", "books", "photos", "playlists", "livetv", "boxsets"].contains($0.collectionType ?? "")
-                && !s.hiddenLatestLibraries.contains($0.id)
-                && !jellyfinHidden.contains($0.id.lowercased().replacingOccurrences(of: "-", with: ""))
+            !excludedTypes.contains($0.collectionType ?? "") && !excludedIds.contains(Self.normalize($0.id))
         }
-        let hidePlayed = model.user?.configuration?.hidePlayedInLatest ?? false
-        await withTaskGroup(of: (Int, BaseItem, [BaseItem]).self) { group in
-            for (i, lib) in shelves.enumerated() {
-                group.addTask {
-                    let items = (try? await client.latest(parentId: lib.id, limit: 20)) ?? []
-                    return (i, lib, hidePlayed ? items.filter { !($0.userData?.played ?? false) } : items)
+        var lat: [LatestShelf] = []
+        if order.contains(.latestMedia) {
+            await withTaskGroup(of: (Int, BaseItem, [BaseItem]).self) { group in
+                for (i, lib) in shelves.enumerated() {
+                    group.addTask { (i, lib, (try? await client.latest(parentId: lib.id, limit: 16)) ?? []) }
                 }
+                var tmp: [(Int, BaseItem, [BaseItem])] = []
+                for await x in group { tmp.append(x) }
+                lat = tmp.sorted { $0.0 < $1.0 }.filter { !$0.2.isEmpty }.map { LatestShelf(library: $0.1, items: $0.2) }
             }
-            var tmp: [(Int, BaseItem, [BaseItem])] = []
-            for await x in group { tmp.append(x) }
-            lat = tmp.sorted { $0.0 < $1.0 }.filter { !$0.2.isEmpty }.map { ($0.1, $0.2) }
         }
+        var anyError: Error?
         do { resume = try await r } catch { anyError = error }
         do { nextUp = try await n } catch { anyError = anyError ?? error }
-        latest = lat.map { LatestShelf(library: $0.0, items: $0.1) }
-        hero = resume.first ?? nextUp.first
+        if order.contains(.liveTV) && model.hasLiveTV {
+            onNow = (try? await client.recommendedPrograms()) ?? []
+        } else {
+            onNow = []
+        }
+        latest = lat
+        sections = order
         loadError = anyError.flatMap { AppModel.isCancellation($0) ? nil : $0.localizedDescription }
         loaded = true
-        Task { await model.reco.ensureBuilt() }
+    }
+
+    static func normalize(_ id: String) -> String { id.lowercased().replacingOccurrences(of: "-", with: "") }
+}
+
+/// Jellyfin's home section types (jellyfin-web `HomeSectionType`, same defaults and order).
+enum HomeSection: String, CaseIterable, Identifiable {
+    case libraryTiles = "smalllibrarytiles"
+    case libraryButtons = "librarybuttons"
+    case activeRecordings = "activerecordings"
+    case resume = "resume"
+    case resumeAudio = "resumeaudio"
+    case latestMedia = "latestmedia"
+    case nextUp = "nextup"
+    case liveTV = "livetv"
+    case resumeBook = "resumebook"
+    case none = "none"
+
+    var id: String { rawValue }
+
+    static let defaults: [HomeSection] = [.libraryTiles, .resume, .resumeAudio, .resumeBook, .liveTV, .nextUp,
+                                          .latestMedia, .none, .none, .none]
+
+    /// Sections 0–9 from the server, falling back to Jellyfin's defaults (as jellyfin-web does).
+    static func sections(from prefs: [String: String]) -> [HomeSection] {
+        (0..<10).map { i in
+            var raw = prefs["homesection\(i)"] ?? ""
+            if raw.isEmpty { raw = defaults[i].rawValue }
+            if raw == "folders" { raw = defaults[0].rawValue }
+            return HomeSection(rawValue: raw.lowercased()) ?? .none
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .libraryTiles: return "My Media"
+        case .libraryButtons: return "My Media (small)"
+        case .activeRecordings: return "Active Recordings"
+        case .resume: return "Continue Watching"
+        case .resumeAudio: return "Continue Listening"
+        case .latestMedia: return "Recently Added Media"
+        case .nextUp: return "Next Up"
+        case .liveTV: return "Live TV"
+        case .resumeBook: return "Continue Reading"
+        case .none: return "None"
+        }
     }
 }
 
@@ -141,63 +194,30 @@ struct LatestShelf: Identifiable {
     let items: [BaseItem]
 }
 
-/// Big glass "pick up where you left off" card at the top of Home.
-struct HeroCard: View {
-    @Environment(AppModel.self) private var model
-    let item: BaseItem
-
+/// "My Media": your libraries (in your Jellyfin order) as glass tiles.
+struct MyMediaRow: View {
+    let libraries: [BaseItem]
     var body: some View {
-        let data = model.userData(for: item)
-        ZStack(alignment: .bottomLeading) {
-            RemoteImage(url: model.client?.backdropURL(item) ?? model.client?.landscapeURL(item, width: 1280))
-                .frame(height: 220)
-                .frame(maxWidth: .infinity)
-                .clipped()
-                .overlay(LinearGradient(colors: [.clear, .black.opacity(0.75)], startPoint: .top, endPoint: .bottom))
-            VStack(alignment: .leading, spacing: 8) {
-                if let logo = model.client?.logoURL(item) {
-                    RemoteImage(url: logo, contentMode: .fit)
-                        .frame(maxWidth: 200, maxHeight: 60, alignment: .leading)
-                } else {
-                    Text(item.seriesName ?? item.displayName).font(.title2.bold()).foregroundStyle(.white)
-                }
-                Text([item.episodeLabel, item.kind == .episode ? item.name : nil].compactMap { $0 }.joined(separator: " · "))
-                    .font(.subheadline).foregroundStyle(.white.opacity(0.85)).lineLimit(1)
-                HStack(spacing: 10) {
-                    Button { model.play(item) } label: {
-                        Label((data?.playbackPositionTicks ?? 0) > 0 ? "Resume" : "Play", systemImage: "play.fill")
-                            .font(.headline)
+        if !libraries.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("My Media").font(.title3.weight(.bold)).padding(.horizontal)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(spacing: 12) {
+                        ForEach(libraries) { lib in
+                            NavigationLink {
+                                if lib.collectionType == "livetv" { LiveTVView() }
+                                else if FolderBrowserView.isFolderLibrary(lib) { FolderBrowserView(folder: lib) }
+                                else { LibraryView(library: lib) }
+                            } label: {
+                                LibraryTile(library: lib).frame(width: 220)
+                            }
+                            .buttonStyle(PressStyle())
+                        }
                     }
-                    .buttonStyle(.glassProminent)
-                    if let p = data?.playedPercentage, p > 0 { ProgressBar(value: p / 100).frame(width: 90) }
+                    .padding(.horizontal)
                 }
+                .scrollClipDisabled()
             }
-            .padding(16)
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
-        .shadow(color: .black.opacity(0.2), radius: 12, y: 6)
-        .itemActions(item)
-    }
-}
-
-/// My List on Home (stored on the server).
-struct WatchlistShelf: View {
-    @Environment(AppModel.self) private var model
-    @State private var items: [BaseItem] = []
-    var body: some View {
-        Shelf(title: "My List", items: items) { WatchlistView() }
-            .task(id: model.watchlist) { items = await WatchlistView.fetch(model) }
-    }
-}
-
-/// Unwatched titles already on your server that fit you best (local AI picks).
-struct PicksShelf: View {
-    @Environment(AppModel.self) private var model
-    var body: some View {
-        let source = model.reco.currentSourceId
-        let items = model.reco.picks(for: source, genre: nil).prefix(15).map(\.item)
-        if !items.isEmpty {
-            Shelf(title: "Unwatched in \(model.reco.sourceName(source)), for you", items: Array(items))
         }
     }
 }

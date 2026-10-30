@@ -226,8 +226,54 @@ final class JellyfinClient: @unchecked Sendable {
         try await get("/Users/Me")
     }
 
-    func updateUserConfiguration(_ config: UserConfiguration) async throws {
-        try await postVoid("/Users/Configuration", query: ["userId": try requireUser()], json: config)
+    /// Changes some of the user's Jellyfin settings (languages, subtitle mode, home exclusions…)
+    /// while keeping every other field exactly as the server has it (read → change → write back).
+    func updateUserConfiguration(_ changes: [String: Any]) async throws {
+        let data = try await send("GET", "/Users/Me")
+        guard let me = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let configKey = me.keys.first(where: { $0.caseInsensitiveCompare("Configuration") == .orderedSame }),
+              var config = me[configKey] as? [String: Any] else { throw JellyfinError.decoding("user configuration") }
+        for (key, value) in changes {
+            let existing = config.keys.first { $0.caseInsensitiveCompare(key) == .orderedSame } ?? key
+            config[existing] = value
+        }
+        let body = try JSONSerialization.data(withJSONObject: config)
+        try await send("POST", "/Users/Configuration", query: ["userId": try requireUser()], body: body)
+    }
+
+    /// Jellyfin web's own user settings ("usersettings" for client "emby"): home screen sections.
+    func loadWebUserSettings() async -> [String: String] {
+        guard let data = try? await send("GET", "/DisplayPreferences/usersettings", query: ["userId": userId, "client": "emby"]),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [:] }
+        let prefsKey = json.keys.first { $0.caseInsensitiveCompare("CustomPrefs") == .orderedSame } ?? "CustomPrefs"
+        let prefs = json[prefsKey] as? [String: Any] ?? [:]
+        var out: [String: String] = [:]
+        for (k, v) in prefs { if let s = v as? String { out[k.lowercased()] = s } }
+        return out
+    }
+
+    /// Writes home sections back the way Jellyfin web does (same record, other keys untouched).
+    func saveWebUserSettings(_ changes: [String: String]) async throws {
+        let data = try await send("GET", "/DisplayPreferences/usersettings", query: ["userId": userId, "client": "emby"])
+        guard var json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw JellyfinError.decoding("display preferences") }
+        let prefsKey = json.keys.first { $0.caseInsensitiveCompare("CustomPrefs") == .orderedSame } ?? "CustomPrefs"
+        var prefs = json[prefsKey] as? [String: Any] ?? [:]
+        for (k, v) in changes {
+            let existing = prefs.keys.first { $0.caseInsensitiveCompare(k) == .orderedSame } ?? k
+            prefs[existing] = v
+        }
+        json[prefsKey] = prefs
+        let body = try JSONSerialization.data(withJSONObject: json)
+        try await send("POST", "/DisplayPreferences/usersettings", query: ["userId": userId, "client": "emby"], body: body)
+    }
+
+    func recommendedPrograms(limit: Int = 12) async throws -> [BaseItem] {
+        let r: QueryResult<BaseItem> = try await get("/LiveTv/Programs/Recommended", [
+            "userId": try requireUser(), "isAiring": true, "limit": limit, "imageTypeLimit": 1,
+            "enableImageTypes": ["Primary", "Thumb", "Backdrop"], "enableTotalRecordCount": false,
+            "fields": ["ChannelInfo", "PrimaryImageAspectRatio"],
+        ])
+        return r.items ?? []
     }
 
     /// Tell the server what this client can do (needed for remote control and the dashboard).

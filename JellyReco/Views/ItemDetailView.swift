@@ -44,14 +44,6 @@ struct ItemDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
-                if [.movie, .series, .episode, .season].contains(current.kind) {
-                    Button {
-                        Task { await model.toggleWatchlist(current) }
-                    } label: {
-                        Image(systemName: model.isOnWatchlist(current) ? "bookmark.fill" : "bookmark")
-                    }
-                    .accessibilityLabel("My List")
-                }
                 Button {
                     Task { await model.toggleFavorite(current) }
                 } label: {
@@ -66,12 +58,6 @@ struct ItemDetailView: View {
                     if current.kind.isPlayableVideo { Button("Media info", systemImage: "info.circle") { showMediaInfo = true } }
                     ForEach(externalLinks) { link in
                         Button(link.name, systemImage: "safari") { openURL(link.url) }
-                    }
-                    if current.kind == .movie || current.kind == .series {
-                        Button(model.isNotForMe(current) ? "Undo Not for me" : "Not for me",
-                               systemImage: model.isNotForMe(current) ? "hand.thumbsup" : "hand.thumbsdown") {
-                            Task { await model.setNotForMe(current, !model.isNotForMe(current)) }
-                        }
                     }
                     if model.isAdmin {
                         Button("Refresh metadata", systemImage: "arrow.clockwise") { Task { await refreshMetadata() } }

@@ -262,7 +262,7 @@ final class AppSettings {
         homeShowLatest = b("homeShowLatest", true)
         homeShowPicks = b("homeShowPicks", true)
         nextUpRewatching = b("nextUpRewatching", false)
-        nextUpMaxDays = i("nextUpMaxDays", 0)
+        nextUpMaxDays = i("nextUpMaxDays", 365)
         hiddenLatestLibraries = set("hiddenLatestLibraries")
 
         libraryLayout = e("libraryLayout", LibraryLayout.grid)

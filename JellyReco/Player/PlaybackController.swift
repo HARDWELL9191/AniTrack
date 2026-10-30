@@ -100,6 +100,7 @@ final class PlaybackController {
         var options: [String: String] = [
             // Subtitles: mpv/libass renders ASS with its own styles; these shape plain text ones.
             "sub-auto": "no",
+            "sid": "no",
             "sub-codepage": "auto",
             "sub-ass-override": settings.overrideASSStyles ? "force" : "scale",
             "sub-scale": String(format: "%.2f", settings.subtitleSize),
@@ -110,8 +111,6 @@ final class PlaybackController {
             "demuxer-readahead-secs": "30",
             "embeddedfonts": "yes",
             "network-timeout": "30",
-            "slang": settings.preferredSubtitleLanguage,
-            "alang": settings.preferredAudioLanguage,
             "screenshot-format": "png",
         ]
         switch settings.subtitleBackground {
@@ -128,8 +127,6 @@ final class PlaybackController {
             options["sub-back-color"] = "#99000000"
         }
         if settings.stereoDownmix { options["audio-channels"] = "stereo" }
-        if settings.preferredAudioLanguage.isEmpty { options["alang"] = nil }
-        if settings.preferredSubtitleLanguage.isEmpty { options["slang"] = nil }
         return MPVPlayerConfiguration(
             additionalOptions: options,
             audio: MPVAudioConfiguration(audioSession: .automatic, dolbyDecoding: .automatic,
@@ -433,42 +430,19 @@ final class PlaybackController {
         Task { await client.reportProgress(report()) }
     }
 
-    /// Request → Settings language → the server's default (which follows your Jellyfin
-    /// preferences) → whatever mpv picked.
+    /// Like Jellyfin and Swiftfin: the tracks chosen on the item page win; otherwise the server's
+    /// defaults, which follow your Jellyfin settings (preferred languages, subtitle mode,
+    /// "play default audio track", remembered selections). -1 = subtitles off.
     private func applyInitialTracks() {
-        // Audio
-        if let idx = request.audioIndex, let t = track(forJellyfinIndex: idx, type: .audio) {
-            player.selectTrack(t.id)
-        } else if settings.preferredAudioLanguage.isEmpty, let idx = source?.defaultAudioStreamIndex,
-                  let t = track(forJellyfinIndex: idx, type: .audio), !t.isSelected {
+        let audioIndex = request.audioIndex ?? source?.defaultAudioStreamIndex
+        if let idx = audioIndex, let t = track(forJellyfinIndex: idx, type: .audio), !t.isSelected {
             player.selectTrack(t.id)
         }
-        // Subtitles
-        let subs = player.subtitleTracks
-        if let idx = request.subtitleIndex {
-            if idx < 0 { player.disableTrack(.subtitle) }
-            else if let t = track(forJellyfinIndex: idx, type: .subtitle) { player.selectSubtitle(t.id) }
-            return
-        }
-        guard settings.subtitlesByDefault else {
-            if let forced = subs.first(where: \.isForced) { player.selectSubtitle(forced.id) } else { player.disableTrack(.subtitle) }
-            return
-        }
-        let lang = settings.preferredSubtitleLanguage
-        if !lang.isEmpty {
-            let matching = subs.filter { ($0.language ?? stream(for: $0)?.language ?? "").lowercased().hasPrefix(lang.prefix(2).lowercased()) }
-            let isSigns: (MPVMediaTrack) -> Bool = {
-                let t = ((self.stream(for: $0)?.displayTitle ?? "") + " " + ($0.title ?? "")).lowercased()
-                return t.contains("sign") || t.contains("song")
-            }
-            let pick = settings.preferSignsAndSongs ? (matching.first(where: isSigns) ?? matching.first)
-                                                   : (matching.first(where: { !isSigns($0) && !$0.isForced }) ?? matching.first)
-            if let pick { player.selectSubtitle(pick.id); return }
-        }
-        if let idx = source?.defaultSubtitleStreamIndex, idx >= 0, let t = track(forJellyfinIndex: idx, type: .subtitle) {
+        let subIndex = request.subtitleIndex ?? source?.defaultSubtitleStreamIndex ?? -1
+        if subIndex < 0 {
+            player.disableTrack(.subtitle)
+        } else if let t = track(forJellyfinIndex: subIndex, type: .subtitle) {
             player.selectSubtitle(t.id)
-        } else if player.selectedSubtitle() == nil, let first = subs.first(where: { $0.isDefault }) ?? subs.first {
-            player.selectSubtitle(first.id)
         }
     }
 

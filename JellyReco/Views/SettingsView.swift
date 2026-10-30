@@ -346,22 +346,36 @@ struct GestureSettingsView: View {
 struct SubtitleAudioSettingsView: View {
     @Environment(AppModel.self) private var model
     struct Lang: Identifiable { let id: String; let name: String }
-    private let languages: [Lang] = [Lang(id: "", name: "Server default")] + [
-        "eng", "jpn", "slv", "ger", "fre", "spa", "ita", "por", "rus", "chi", "kor", "hrv", "srp", "pol", "dut", "swe",
+    // Jellyfin stores ISO 639-2 codes ("eng", "jpn"); empty = any.
+    private let languages: [Lang] = [Lang(id: "", name: "Any")] + [
+        "eng", "jpn", "slv", "ger", "fre", "spa", "ita", "por", "rus", "chi", "kor", "hrv", "srp", "bos", "pol",
+        "dut", "swe", "nor", "dan", "fin", "hun", "cze", "slo", "tur", "ara", "hin", "tha", "vie",
     ].map { Lang(id: $0, name: Locale.current.localizedString(forLanguageCode: $0) ?? $0) }
+    private let subtitleModes = [("Default", "Default"), ("Smart", "Smart"), ("OnlyForced", "Only forced"),
+                                 ("Always", "Always play"), ("None", "None")]
+    @State private var saving = false
+
+    private var config: UserConfiguration? { model.user?.configuration }
 
     var body: some View {
         @Bindable var s = model.settings
         Form {
-            Section("Languages") {
-                Picker("Audio", selection: $s.preferredAudioLanguage) {
+            Section {
+                Picker("Audio language", selection: binding(\.audioLanguagePreference, key: "AudioLanguagePreference", fallback: "")) {
                     ForEach(languages) { Text($0.name).tag($0.id) }
                 }
-                Picker("Subtitles", selection: $s.preferredSubtitleLanguage) {
+                Toggle("Play default audio track", isOn: boolBinding(\.playDefaultAudioTrack, key: "PlayDefaultAudioTrack", fallback: true))
+                Toggle("Remember audio selections", isOn: boolBinding(\.rememberAudioSelections, key: "RememberAudioSelections", fallback: true))
+                Picker("Subtitle language", selection: binding(\.subtitleLanguagePreference, key: "SubtitleLanguagePreference", fallback: "")) {
                     ForEach(languages) { Text($0.name).tag($0.id) }
                 }
-                Toggle("Subtitles on by default", isOn: $s.subtitlesByDefault)
-                Toggle("Prefer \"Signs & Songs\" tracks", isOn: $s.preferSignsAndSongs)
+                Picker("Subtitle mode", selection: binding(\.subtitleMode, key: "SubtitleMode", fallback: "Default")) {
+                    ForEach(subtitleModes, id: \.0) { Text($0.1).tag($0.0) }
+                }
+                Toggle("Remember subtitle selections", isOn: boolBinding(\.rememberSubtitleSelections, key: "RememberSubtitleSelections", fallback: true))
+                if saving { ProgressView() }
+            } header: { Text("Your Jellyfin playback settings") } footer: {
+                Text("These are your account's settings on the server (the same as in Jellyfin web). The server uses them to pick the audio and subtitle track when you press play, exactly as in Jellyfin and Swiftfin.")
             }
             Section {
                 VStack(alignment: .leading) {
@@ -377,14 +391,33 @@ struct SubtitleAudioSettingsView: View {
                 }
                 Toggle("Override styled (ASS) subtitles", isOn: $s.overrideASSStyles)
                 subtitlePreview(s)
-            } header: { Text("Subtitle style") } footer: {
+            } header: { Text("Subtitle look") } footer: {
                 Text("Styled ASS/SSA subtitles (typical for anime) keep their own fonts and positions unless you override them.")
             }
-            Section("Audio") {
+            Section("Audio output") {
                 Toggle("Downmix to stereo", isOn: $s.stereoDownmix)
             }
         }
         .navigationTitle("Subtitles & audio")
+    }
+
+    private func binding(_ path: KeyPath<UserConfiguration, String?>, key: String, fallback: String) -> Binding<String> {
+        Binding(get: { config?[keyPath: path] ?? fallback }, set: { save(key, $0) })
+    }
+
+    private func boolBinding(_ path: KeyPath<UserConfiguration, Bool?>, key: String, fallback: Bool) -> Binding<Bool> {
+        Binding(get: { config?[keyPath: path] ?? fallback }, set: { save(key, $0) })
+    }
+
+    private func save(_ key: String, _ value: Any) {
+        Task {
+            saving = true
+            defer { saving = false }
+            do {
+                try await model.client?.updateUserConfiguration([key: value])
+                await model.refreshSession()
+            } catch { model.report(error) }
+        }
     }
 
     private func subtitlePreview(_ s: AppSettings) -> some View {
@@ -404,39 +437,85 @@ struct SubtitleAudioSettingsView: View {
     }
 }
 
+/// Jellyfin's home settings (shared with Jellyfin web): section order, and which libraries show in
+/// My Media and Recently Added. Next Up's limits are per device, as in Jellyfin web.
 struct HomeSettingsView: View {
     @Environment(AppModel.self) private var model
+    @State private var sections: [HomeSection] = HomeSection.defaults
+    @State private var loaded = false
+    @State private var saving = false
+    @State private var allViews: [BaseItem] = []
+
+    private let choices: [HomeSection] = [.libraryTiles, .libraryButtons, .resume, .nextUp, .latestMedia, .liveTV,
+                                          .activeRecordings, .resumeAudio, .resumeBook, .none]
+
     var body: some View {
         @Bindable var s = model.settings
         Form {
-            Section("Sections") {
-                Toggle("Continue Watching", isOn: $s.homeShowContinue)
-                Toggle("Next Up", isOn: $s.homeShowNextUp)
-                Toggle("Combine Continue Watching and Next Up", isOn: $s.homeMergeNextUp)
-                Toggle("Picked for you", isOn: $s.homeShowPicks)
-                Toggle("Recently added", isOn: $s.homeShowLatest)
-            }
-            Section("Next Up") {
-                Toggle("Include rewatching", isOn: $s.nextUpRewatching)
-                Picker("Hide shows not watched for", selection: $s.nextUpMaxDays) {
-                    Text("Never hide").tag(0)
-                    ForEach([7, 14, 30, 60, 90, 180, 365], id: \.self) { Text("\($0) days").tag($0) }
+            Section {
+                ForEach(0..<10, id: \.self) { i in
+                    Picker("Section \(i + 1)", selection: Binding(get: { sections[i] }, set: { v in
+                        sections[i] = v
+                        save(["homesection\(i)": v.rawValue])
+                    })) {
+                        ForEach(choices) { Text($0.label).tag($0) }
+                    }
                 }
+            } header: { Text("Home sections") } footer: {
+                Text("Saved on your server, the same as Jellyfin web → Settings → Home. Continue Listening, Continue Reading and Active Recordings are kept for Jellyfin web; JellyReco shows video sections.")
+            }
+            Section("Libraries") {
+                ForEach(allViews) { lib in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(lib.displayName).font(.subheadline.weight(.semibold))
+                        Toggle("Show in My Media", isOn: excludeBinding("MyMediaExcludes", list: model.user?.configuration?.myMediaExcludes, id: lib.id))
+                        Toggle("Show in Recently Added", isOn: excludeBinding("LatestItemsExcludes", list: model.user?.configuration?.latestItemsExcludes, id: lib.id))
+                    }
+                }
+                if saving { ProgressView() }
             }
             Section {
-                ForEach(model.libraries.filter { lib in
-                    !(model.user?.configuration?.latestItemsExcludes ?? []).contains { $0.lowercased().replacingOccurrences(of: "-", with: "") == lib.id.lowercased().replacingOccurrences(of: "-", with: "") }
-                }) { lib in
-                    Toggle(lib.displayName, isOn: Binding(
-                        get: { !s.hiddenLatestLibraries.contains(lib.id) },
-                        set: { on in if on { s.hiddenLatestLibraries.remove(lib.id) } else { s.hiddenLatestLibraries.insert(lib.id) } }))
+                Picker("Max days in Next Up", selection: $s.nextUpMaxDays) {
+                    ForEach([7, 14, 30, 60, 90, 180, 365], id: \.self) { Text("\($0) days").tag($0) }
+                    Text("No limit").tag(0)
                 }
-            } header: { Text("Recently added rows") } footer: {
-                Text("Libraries you hid from the home screen in Jellyfin's own settings stay hidden and aren't listed here.")
+                Toggle("Rewatching in Next Up", isOn: $s.nextUpRewatching)
+            } header: { Text("Next Up (this device)") } footer: {
+                Text("Like Jellyfin web, these are per device. Jellyfin's default is 365 days.")
             }
         }
         .navigationTitle("Home")
+        .task {
+            guard !loaded, let client = model.client else { return }
+            sections = HomeSection.sections(from: await client.loadWebUserSettings())
+            let r: QueryResult<BaseItem>? = try? await client.get("/UserViews", ["userId": client.userId, "includeHidden": true])
+            allViews = r?.items ?? model.libraries
+            loaded = true
+        }
         .onDisappear { model.bumpContent() }
+    }
+
+    private func norm(_ id: String) -> String { id.lowercased().replacingOccurrences(of: "-", with: "") }
+
+    private func excludeBinding(_ key: String, list: [String]?, id: String) -> Binding<Bool> {
+        Binding(get: { !(list ?? []).contains { norm($0) == norm(id) } }, set: { show in
+            var new = (list ?? []).filter { norm($0) != norm(id) }
+            if !show { new.append(id) }
+            Task {
+                saving = true
+                defer { saving = false }
+                do {
+                    try await model.client?.updateUserConfiguration([key: new])
+                    await model.refreshSession()
+                } catch { model.report(error) }
+            }
+        })
+    }
+
+    private func save(_ changes: [String: String]) {
+        Task {
+            do { try await model.client?.saveWebUserSettings(changes) } catch { model.report(error) }
+        }
     }
 }
 
@@ -519,7 +598,6 @@ struct ForYouSettingsView: View {
                     }
                 }
                 .disabled(model.reco.isBuilding)
-                Button("Reset \"Not for me\" on my server titles") { model.reco.resetDismissed() }
                 Button("Reset \"Not for me\" on For You picks") { Task { await model.clearExternal(.notforme) } }
                     .disabled(model.externalNotForMe.isEmpty)
                 LabeledContent("AI explanations", value: explainer)

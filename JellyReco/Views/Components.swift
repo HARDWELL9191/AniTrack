@@ -419,23 +419,8 @@ struct ItemActionsMenu: ViewModifier {
                        systemImage: model.isFavorite(item) ? "heart.slash" : "heart") {
                     Task { await model.toggleFavorite(item) }
                 }
-                if item.kind == .movie || item.kind == .series || item.kind == .episode {
-                    Button(model.isOnWatchlist(item) ? "Remove from My List" : "Add to My List",
-                           systemImage: model.isOnWatchlist(item) ? "bookmark.slash" : "bookmark") {
-                        Task { await model.toggleWatchlist(item) }
-                    }
-                }
                 if item.kind == .movie || item.kind == .series {
                     Button("More like this", systemImage: "square.stack.3d.up") { showMoreLike = true }
-                    if model.isNotForMe(item) {
-                        Button("Undo Not for me", systemImage: "hand.thumbsup") {
-                            Task { await model.setNotForMe(item, false) }
-                        }
-                    } else if !model.isPlayed(item) {
-                        Button("Not for me", systemImage: "hand.thumbsdown", role: .destructive) {
-                            withAnimation(.snappy) { model.reco.dismiss(item) }
-                        }
-                    }
                 }
             }
             .sheet(isPresented: $showMoreLike) {

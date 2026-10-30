@@ -144,7 +144,6 @@ final class RecoEngine {
         let all = picks[sourceId] ?? []
         let visible = all.filter { pick in
             !(model?.isNotForMe(pick.item) ?? false) && !(model?.isPlayed(pick.item) ?? false)
-                && !(model?.watchlist.contains(pick.id) ?? false)
                 && (genre == nil || (pick.item.genres ?? []).contains(genre!))
         }
         guard let genre, visible.count > 1 else { return visible }
@@ -301,7 +300,7 @@ final class RecoEngine {
         guard let model else { return nil }
         if model.isNotForMe(item) { return -1.0 }
         let ud = model.userData(for: item) ?? UserItemData()
-        var w: Double? = model.watchlist.contains(item.id) ? 0.5 : nil   // planned = liked enough to plan
+        var w: Double?
         let daysSince = ud.lastPlayedDate.map { Date().timeIntervalSince($0) / 86_400 } ?? 0
 
         if ud.played == true {
@@ -328,7 +327,7 @@ final class RecoEngine {
 
     private func isCandidate(_ item: BaseItem) -> Bool {
         guard let model else { return false }
-        if model.isNotForMe(item) || model.watchlist.contains(item.id) { return false }
+        if model.isNotForMe(item) { return false }
         let ud = model.userData(for: item)
         if ud?.played == true || ud?.isFavorite == true { return false }
         if (ud?.playedPercentage ?? 0) > 0 { return false }

@@ -48,9 +48,6 @@ final class AppModel {
     private(set) var userDataOverrides: [String: UserItemData] = [:]
     /// Bumped after playback or watched changes so shelves reload.
     private(set) var contentVersion = 0
-    /// My List (plan to watch), newest first. Stored on the server in this user's private
-    /// JellyReco storage, so it follows the account to every device and survives reinstalls.
-    private(set) var watchlist: [String] = []
     /// For You titles (from TMDB, not on the server): want to get / already seen elsewhere /
     /// not for me. Saved on the server like My List.
     private(set) var wishlist: [ExternalTitle] = []
@@ -95,7 +92,7 @@ final class AppModel {
             async let info = try? client.get("/System/Info", as: SystemInfo.self)
             libraries = (try? await views) ?? libraries
             serverInfo = await info
-            await loadWatchlist()
+            await loadAccountStorage()
             await client.reportCapabilities()
         } catch JellyfinError.http(401, _) {
             errorMessage = JellyfinError.http(401, nil).errorDescription
@@ -157,7 +154,6 @@ final class AppModel {
         self.user = nil
         userDataOverrides = [:]
         libraries = []
-        watchlist = []
         storage = nil
         settings.dismissedPicks = []
         wishlist = []; externalSeen = []; externalNotForMe = []
@@ -177,7 +173,6 @@ final class AppModel {
         user = nil
         libraries = []
         userDataOverrides = [:]
-        watchlist = []
         wishlist = []; externalSeen = []; externalNotForMe = []
         storage = nil
         reco.reset()
@@ -218,7 +213,6 @@ final class AppModel {
             userDataOverrides[item.id] = merged
             contentVersion &+= 1
             reco.listChanged()
-            if target { await removeFromWatchlist([listId(item)]) }
         } catch {
             userDataOverrides[item.id] = item.userData
             errorMessage = error.localizedDescription
@@ -243,15 +237,13 @@ final class AppModel {
         }
     }
 
-    // MARK: My List (plan to watch) — saved on the server
+    // MARK: Account storage on the server (For You lists, synced settings)
 
-    /// My List and synced settings, from this account's storage on the server.
-    func loadWatchlist() async {
+    /// For You lists and synced settings, from this account's storage on the server.
+    func loadAccountStorage() async {
         guard let client else { return }
         if let prefs = try? await client.loadAppStorage() {
             storage = prefs
-            let raw = (prefs.customPrefs?["watchlist"] ?? nil) ?? ""
-            watchlist = raw.split(separator: ",").map(String.init).filter { !$0.isEmpty }
             wishlist = Self.decodeTitles(prefs.customPrefs?["wishlist"] ?? nil)
             externalSeen = Self.decodeTitles(prefs.customPrefs?["seenelsewhere"] ?? nil)
             externalNotForMe = Self.decodeTitles(prefs.customPrefs?["notforme"] ?? nil)
@@ -293,37 +285,6 @@ final class AppModel {
         }
     }
 
-    func isOnWatchlist(_ item: BaseItem) -> Bool { watchlist.contains(listId(item)) }
-
-    /// Episodes and seasons go on the list as their show.
-    private func listId(_ item: BaseItem) -> String {
-        (item.kind == .episode || item.kind == .season) ? (item.seriesId ?? item.id) : item.id
-    }
-
-    func toggleWatchlist(_ item: BaseItem) async {
-        let id = listId(item)
-        if watchlist.contains(id) { await setWatchlist(watchlist.filter { $0 != id }) }
-        else { await setWatchlist([id] + watchlist) }
-    }
-
-    func removeFromWatchlist(_ ids: [String]) async {
-        let drop = Set(ids)
-        guard watchlist.contains(where: drop.contains) else { return }
-        await setWatchlist(watchlist.filter { !drop.contains($0) })
-    }
-
-    private func setWatchlist(_ new: [String]) async {
-        guard let client else { return }
-        let old = watchlist
-        watchlist = new
-        reco.listChanged()
-        guard (try? await client.loadAppStorage()) != nil || storage != nil else {
-            watchlist = old
-            errorMessage = "Couldn't reach your server to save My List."
-            return
-        }
-        await saveStorage { custom in custom["watchlist"] = new.prefix(2000).joined(separator: ",") }
-    }
 
     // MARK: For You lists (TMDB titles) — saved on the server
 
@@ -407,7 +368,6 @@ final class AppModel {
             var saved = try await client.setLikes(item.id, on ? false : nil)
             saved.likes = on ? false : nil
             userDataOverrides[item.id] = saved
-            if on { await removeFromWatchlist([item.id]) }
         } catch {
             report(error)
         }
@@ -436,16 +396,7 @@ final class AppModel {
         for id in itemIds { userDataOverrides[id] = nil }
         contentVersion &+= 1
         reco.listChanged()
-        // Finished titles leave My List (checked against fresh server data).
-        Task {
-            guard let client, !watchlist.isEmpty else { return }
-            var q = JellyfinClient.ItemQuery()
-            q.ids = watchlist
-            q.filters = ["IsPlayed"]
-            q.limit = 500
-            let done = (try? await client.items(q).items)?.map(\.id) ?? []
-            await removeFromWatchlist(done)
-        }
+
     }
 
     // MARK: Playback
