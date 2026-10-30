@@ -263,9 +263,9 @@ export function ItemBrowser({ base, scopeKey, types, folders, refreshKey = 0, sh
         : total === 0 ? <Empty icon="search" title="Nothing here" text={activeCount ? "No items match these filters." : undefined} />
         : v.layout === "list" ? <div className="rows columns">{items.map((i) => <ItemRow key={i.Id} item={i} />)}</div>
         : folders
-          // Folder browsing: small thumbnails in a dense grid.
-          // Every tile the same shape (posters, like the rest of the library), whatever the folder's picture is.
-          ? <Grid min={104} compact>{items.map((i) => <ItemCard key={i.Id} item={i} width={undefined} shape={folderShape} showPlay={false} />)}</Grid>
+          // Folder browsing looks like any other library (Anime, Movies): same poster tiles and grid,
+          // every tile the same shape whatever the folder's picture is (cropped to fit).
+          ? <Grid min={folderShape === "landscape" ? 260 : model.settings.libraryCardSize}>{items.map((i) => <ItemCard key={i.Id} item={i} width={undefined} shape={folderShape} />)}</Grid>
           : <Grid min={gridMin(items, model.settings.libraryCardSize)}>{items.map((i) => <ItemCard key={i.Id} item={i} width={undefined} />)}</Grid>}
       <LoadMore onVisible={() => void loadMore()} active={!busy && total !== null && items.length < total} />
       {busy && <Spinner />}
