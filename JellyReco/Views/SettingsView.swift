@@ -263,6 +263,16 @@ struct PlayerSettingsView: View {
         @Bindable var s = model.settings
         Form {
             Section {
+                Picker("Player", selection: $s.applePlayer) {
+                    Text("Apple player when possible").tag(true)
+                    Text("Always JellyReco player").tag(false)
+                }
+            } footer: {
+                Text(s.applePlayer
+                     ? "Files Apple's own player handles perfectly open in it: MP4/MOV as they are, and MKV with H.264/HEVC/AV1 video and AAC/AC3/E-AC3/FLAC/ALAC/MP3 audio repackaged by your server without re-encoding. Everything else (DTS, TrueHD, PGS/VobSub, styled ASS subtitles, several audio tracks in an MKV, 10-bit H.264, VP9…) opens in the JellyReco player, which plays every format. If Apple's player can't open a file, the JellyReco player takes over at the same point."
+                     : "Every file opens in the JellyReco player (mpv), which plays every format directly.")
+            }
+            Section {
                 Picker("Video output", selection: $s.playerEngine) {
                     ForEach(PlayerEngine.allCases) { Text($0.label).tag($0) }
                 }

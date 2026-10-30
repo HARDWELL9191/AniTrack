@@ -42,8 +42,6 @@ struct LibrariesView: View {
             .environment(\.zoomNamespace, zoom)
         }
     }
-
-    }
 }
 
 struct LibraryTile: View {

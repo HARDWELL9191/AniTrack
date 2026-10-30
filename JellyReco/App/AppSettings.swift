@@ -180,6 +180,8 @@ final class AppSettings {
     var hideSpoilers: Bool { didSet { save(hideSpoilers, "hideSpoilers") } }
 
     // Player
+    /// Apple's own player (AVPlayerViewController) for every file it can play properly; mpv for the rest.
+    var applePlayer: Bool { didSet { save(applePlayer, "applePlayer") } }
     var playerEngine: PlayerEngine { didSet { save(playerEngine.rawValue, "playerEngine") } }
     var hardwareDecoding: Bool { didSet { save(hardwareDecoding, "hardwareDecoding") } }
     var resumeOffset: Int { didSet { save(resumeOffset, "resumeOffset") } }          // seconds back on resume
@@ -285,6 +287,7 @@ final class AppSettings {
         landscapeEpisodeThumbs = b("landscapeEpisodeThumbs", true)
         hideSpoilers = b("hideSpoilers", false)
 
+        applePlayer = b("applePlayer", true)
         playerEngine = e("playerEngine", PlayerEngine.automatic)
         hardwareDecoding = b("hardwareDecoding", true)
         resumeOffset = i("resumeOffset", 3)
@@ -352,7 +355,7 @@ final class AppSettings {
         "homeShowLatest", "homeShowPicks", "nextUpRewatching", "nextUpMaxDays", "hiddenLatestLibraries",
         "libraryLayout", "libraryPosterStyle", "gridColumns", "rememberLayoutPerLibrary", "showLetterPicker",
         "showRandomButton", "layoutOverrides", "showMissingEpisodes", "landscapeEpisodeThumbs", "hideSpoilers",
-        "playerEngine", "hardwareDecoding", "resumeOffset", "jumpBackward", "jumpForward", "defaultSpeed",
+        "applePlayer", "playerEngine", "hardwareDecoding", "resumeOffset", "jumpBackward", "jumpForward", "defaultSpeed",
         "autoPlayNext", "nextUpCountdown", "stillWatchingAfter", "autoSkipIntro", "autoSkipRecap", "autoSkipOutro",
         "showSkipButtons", "timestampStyle", "showChaptersOnSlider", "trickplayPreviews", "startInLandscape",
         "pipAutomatically", "backgroundAudio", "gestureLeftVertical", "gestureRightVertical", "gestureHorizontal",
@@ -394,6 +397,7 @@ final class AppSettings {
         showRandomButton = fresh.showRandomButton; layoutOverrides = fresh.layoutOverrides
         showMissingEpisodes = fresh.showMissingEpisodes; landscapeEpisodeThumbs = fresh.landscapeEpisodeThumbs
         hideSpoilers = fresh.hideSpoilers
+        applePlayer = fresh.applePlayer
         playerEngine = fresh.playerEngine; hardwareDecoding = fresh.hardwareDecoding; resumeOffset = fresh.resumeOffset
         jumpBackward = fresh.jumpBackward; jumpForward = fresh.jumpForward; defaultSpeed = fresh.defaultSpeed
         autoPlayNext = fresh.autoPlayNext; nextUpCountdown = fresh.nextUpCountdown; stillWatchingAfter = fresh.stillWatchingAfter
@@ -427,7 +431,7 @@ final class AppSettings {
     }
 
     func resetPlayer() {
-        for key in ["playerEngine", "hardwareDecoding", "resumeOffset", "jumpBackward", "jumpForward", "defaultSpeed",
+        for key in ["applePlayer", "playerEngine", "hardwareDecoding", "resumeOffset", "jumpBackward", "jumpForward", "defaultSpeed",
                     "autoPlayNext", "nextUpCountdown", "stillWatchingAfter", "autoSkipIntro", "autoSkipRecap",
                     "autoSkipOutro", "showSkipButtons", "timestampStyle", "showChaptersOnSlider", "trickplayPreviews",
                     "startInLandscape", "pipAutomatically", "backgroundAudio", "gestureLeftVertical",
@@ -437,6 +441,7 @@ final class AppSettings {
             d.removeObject(forKey: key)
         }
         let fresh = AppSettings()
+        applePlayer = fresh.applePlayer
         playerEngine = fresh.playerEngine; hardwareDecoding = fresh.hardwareDecoding
         resumeOffset = fresh.resumeOffset; jumpBackward = fresh.jumpBackward; jumpForward = fresh.jumpForward
         defaultSpeed = fresh.defaultSpeed; autoPlayNext = fresh.autoPlayNext; nextUpCountdown = fresh.nextUpCountdown

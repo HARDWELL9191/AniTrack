@@ -512,8 +512,8 @@ final class AppModel {
             }
             var queue: [BaseItem] = []
             if target.kind == .episode { queue = await episodesAfter(target) }
-            playback = PlaybackRequest(item: target, startSeconds: start, mediaSourceId: mediaSourceId,
-                                       audioIndex: audio, subtitleIndex: subtitle, queue: queue)
+            await startPlayback(PlaybackRequest(item: target, startSeconds: start, mediaSourceId: mediaSourceId,
+                                                audioIndex: audio, subtitleIndex: subtitle, queue: queue))
         }
     }
 

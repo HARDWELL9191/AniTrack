@@ -4,7 +4,8 @@ A Jellyfin player for iPhone (iOS 26+, built against the iOS 27 SDK) with the sa
 
 ## What's in it
 
-- **Player (mpv via MPVUI 0.8.0):** direct play of MKV, MP4/MOV, AVI, WMV, TS/M2TS, WebM, OGG…; H.264, HEVC 10-bit, AV1 (dav1d), VP8/9, MPEG-2/4, VC-1, ProRes; DTS, TrueHD, AC3/E-AC3 (Atmos passthrough), FLAC, Opus, ALAC, WMA; ASS/SSA with embedded fonts, PGS, VobSub, DVB, SRT, WebVTT.
+- **Apple's player first:** files Apple's own AVPlayerViewController plays perfectly open in it (its controls, menus, Picture in Picture, AirPlay), with Jellyfin's resume point, progress reporting, your server's default audio/subtitle, and Skip Intro / Next Episode as Apple's contextual buttons. MP4/MOV play as they are; MKV with H.264/HEVC/AV1 + AAC/AC3/E-AC3/FLAC/ALAC/MP3 is repackaged by the server without re-encoding. If Apple's player can't open a file, the JellyReco player takes over at the same point. Settings → Video player → Player switches this off.
+- **JellyReco player (mpv via MPVUI 0.8.0)** for everything else: direct play of MKV, MP4/MOV, AVI, WMV, TS/M2TS, WebM, OGG…; H.264, HEVC 10-bit, AV1 (dav1d), VP8/9, MPEG-2/4, VC-1, ProRes; DTS, TrueHD, AC3/E-AC3 (Atmos passthrough), FLAC, Opus, ALAC, WMA; ASS/SSA with embedded fonts, PGS, VobSub, DVB, SRT, WebVTT.
   - Picture in Picture, AirPlay, Dolby Vision / HDR10 on the native output; a libplacebo Metal renderer for anything the native layer can't show (switches by itself).
   - Server conversion only as a last resort (switch in Settings → Video player).
   - Audio/subtitle switching, **two subtitles at once**, audio and subtitle sync, subtitle style, playback speed (0.25–4×), hold for 2×, chapters with thumbnails, trickplay previews while scrubbing, skip intro/recap/credits (media segments), next-episode countdown, "Still watching?", fill/fit, rotation lock, control lock, lock-screen controls, playback info.
