@@ -60,6 +60,9 @@ export function cardImage(api: Jellyfin, item: Item, shape: Shape, width: number
   if (item.Type === "Season" && item.SeriesId && item.SeriesPrimaryImageTag) return api.image(item.SeriesId, "Primary", { tag: item.SeriesPrimaryImageTag, maxWidth: w });
   if (item.AlbumId && item.AlbumPrimaryImageTag) return api.image(item.AlbumId, "Primary", { tag: item.AlbumPrimaryImageTag, maxWidth: w });
   if (item.Type === "Person" || item.Type === "MusicArtist" || item.Type === "Genre" || item.Type === "Studio") return api.image(item.Id, "Primary", { maxWidth: w });
+  // No poster: crop into a wide picture (the tile's object-fit: cover centers it).
+  if (tags.Thumb) return api.image(item.Id, "Thumb", { tag: tags.Thumb, maxWidth: w * 2 });
+  if (item.BackdropImageTags?.length) return api.image(item.Id, "Backdrop", { tag: item.BackdropImageTags[0], maxWidth: w * 2 });
   return undefined;
 }
 
