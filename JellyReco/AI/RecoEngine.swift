@@ -300,7 +300,8 @@ final class RecoEngine {
         guard let model else { return nil }
         if model.isNotForMe(item) { return -1.0 }
         let ud = model.userData(for: item) ?? UserItemData()
-        var w: Double?
+        // On My List = liked enough to plan it (like AniReco's Planning).
+        var w: Double? = model.myList.contains(where: { $0.serverId == item.id }) ? 0.5 : nil
         let daysSince = ud.lastPlayedDate.map { Date().timeIntervalSince($0) / 86_400 } ?? 0
 
         if ud.played == true {
@@ -327,7 +328,7 @@ final class RecoEngine {
 
     private func isCandidate(_ item: BaseItem) -> Bool {
         guard let model else { return false }
-        if model.isNotForMe(item) { return false }
+        if model.isNotForMe(item) || model.myList.contains(where: { $0.serverId == item.id }) { return false }
         let ud = model.userData(for: item)
         if ud?.played == true || ud?.isFavorite == true { return false }
         if (ud?.playedPercentage ?? 0) > 0 { return false }

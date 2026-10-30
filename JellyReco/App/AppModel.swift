@@ -41,6 +41,8 @@ final class AppModel {
     private(set) var libraries: [BaseItem] = []
     var errorMessage: String?
     var playback: PlaybackRequest?
+    /// "More like this" opened from any card's long-press menu (one sheet for the whole app).
+    var moreLikeItem: BaseItem?
     var isLocked = false
 
     /// Played/favorite changes made in this session, applied over any item the app shows,
@@ -48,13 +50,15 @@ final class AppModel {
     private(set) var userDataOverrides: [String: UserItemData] = [:]
     /// Bumped after playback or watched changes so shelves reload.
     private(set) var contentVersion = 0
-    /// For You titles (from TMDB, not on the server): want to get / already seen elsewhere /
-    /// not for me. Saved on the server like My List.
-    private(set) var wishlist: [ExternalTitle] = []
+    /// My List: anything you want to watch — titles on your server and For You picks that
+    /// aren't on it yet — newest first. Saved in your account's JellyReco storage on the server.
+    private(set) var myList: [MyListEntry] = []
+    /// For You picks you said you've already seen elsewhere / don't want.
     private(set) var externalSeen: [ExternalTitle] = []
     private(set) var externalNotForMe: [ExternalTitle] = []
+    /// For You never shows these again.
     var externalHidden: Set<String> {
-        Set(wishlist.map(\.id)).union(externalSeen.map(\.id)).union(externalNotForMe.map(\.id))
+        Set(myList.compactMap { $0.external?.id }).union(externalSeen.map(\.id)).union(externalNotForMe.map(\.id))
     }
     @ObservationIgnored private var storage: DisplayPreferencesDto?
 
@@ -156,7 +160,7 @@ final class AppModel {
         libraries = []
         storage = nil
         settings.dismissedPicks = []
-        wishlist = []; externalSeen = []; externalNotForMe = []
+        myList = []; externalSeen = []; externalNotForMe = []
         reco.reset()
         discovery.reset()
         phase = .ready
@@ -173,7 +177,7 @@ final class AppModel {
         user = nil
         libraries = []
         userDataOverrides = [:]
-        wishlist = []; externalSeen = []; externalNotForMe = []
+        myList = []; externalSeen = []; externalNotForMe = []
         storage = nil
         reco.reset()
         discovery.reset()
@@ -213,6 +217,7 @@ final class AppModel {
             userDataOverrides[item.id] = merged
             contentVersion &+= 1
             reco.listChanged()
+            if target, isOnMyList(item) { await toggleMyList(item) }   // finished = off My List
         } catch {
             userDataOverrides[item.id] = item.userData
             errorMessage = error.localizedDescription
@@ -244,7 +249,18 @@ final class AppModel {
         guard let client else { return }
         if let prefs = try? await client.loadAppStorage() {
             storage = prefs
-            wishlist = Self.decodeTitles(prefs.customPrefs?["wishlist"] ?? nil)
+            myList = Self.decodeList(prefs.customPrefs?["mylist"] ?? nil)
+            // Older builds kept For You picks in a separate "wishlist": fold them into My List.
+            let legacy = Self.decodeTitles(prefs.customPrefs?["wishlist"] ?? nil)
+            if !legacy.isEmpty {
+                for t in legacy where !myList.contains(where: { $0.external?.id == t.id }) {
+                    myList.append(MyListEntry(external: t))
+                }
+                await saveStorage { custom in
+                    custom["mylist"] = Self.encodeList(self.myList)
+                    custom["wishlist"] = "[]"
+                }
+            }
             externalSeen = Self.decodeTitles(prefs.customPrefs?["seenelsewhere"] ?? nil)
             externalNotForMe = Self.decodeTitles(prefs.customPrefs?["notforme"] ?? nil)
             if let json = prefs.customPrefs?["settings"] ?? nil, !json.isEmpty {
@@ -286,54 +302,114 @@ final class AppModel {
     }
 
 
-    // MARK: For You lists (TMDB titles) — saved on the server
+    // MARK: My List & Not for me — saved on the server
 
-    enum ExternalList: String { case wishlist, seenelsewhere, notforme }
+    enum ExternalList: String { case seenelsewhere, notforme }
 
     private static func decodeTitles(_ json: String?) -> [ExternalTitle] {
         guard let json, let data = json.data(using: .utf8) else { return [] }
         return (try? JSONDecoder().decode([ExternalTitle].self, from: data)) ?? []
     }
 
-    private static func encodeTitles(_ list: [ExternalTitle]) -> String {
-        // Overviews trimmed so the stored lists stay small.
-        let slim = list.prefix(500).map { t -> ExternalTitle in
-            var c = t
-            c.overview = String(t.overview.prefix(400))
-            c.tags = Array(t.tags.prefix(8))
-            return c
-        }
-        return String(data: (try? JSONEncoder().encode(Array(slim))) ?? Data(), encoding: .utf8) ?? "[]"
+    private static func slim(_ t: ExternalTitle) -> ExternalTitle {
+        var c = t
+        c.overview = String(t.overview.prefix(400))
+        c.tags = Array(t.tags.prefix(8))
+        return c
     }
 
-    func isOnWishlist(_ t: ExternalTitle) -> Bool { wishlist.contains { $0.id == t.id } }
+    private static func encodeTitles(_ list: [ExternalTitle]) -> String {
+        let slimmed = list.prefix(500).map(slim)
+        return String(data: (try? JSONEncoder().encode(Array(slimmed))) ?? Data(), encoding: .utf8) ?? "[]"
+    }
 
-    func toggleWishlist(_ t: ExternalTitle) async {
-        if isOnWishlist(t) { wishlist.removeAll { $0.id == t.id } } else { wishlist.insert(t, at: 0) }
-        await saveExternal(.wishlist)
+    private static func decodeList(_ json: String?) -> [MyListEntry] {
+        guard let json, let data = json.data(using: .utf8) else { return [] }
+        return (try? JSONDecoder().decode([MyListEntry].self, from: data)) ?? []
+    }
+
+    private static func encodeList(_ list: [MyListEntry]) -> String {
+        let slimmed = list.prefix(1000).map { e -> MyListEntry in
+            var c = e
+            c.external = e.external.map(slim)
+            return c
+        }
+        return String(data: (try? JSONEncoder().encode(Array(slimmed))) ?? Data(), encoding: .utf8) ?? "[]"
+    }
+
+    /// Episodes and seasons go on My List as their show.
+    private func listId(_ item: BaseItem) -> String {
+        (item.kind == .episode || item.kind == .season) ? (item.seriesId ?? item.id) : item.id
+    }
+
+    func isOnMyList(_ item: BaseItem) -> Bool { myList.contains { $0.serverId == listId(item) } }
+    func isOnMyList(_ t: ExternalTitle) -> Bool { myList.contains { $0.external?.id == t.id } }
+
+    func toggleMyList(_ item: BaseItem) async {
+        let id = listId(item)
+        if let i = myList.firstIndex(where: { $0.serverId == id }) {
+            myList.remove(at: i)
+        } else {
+            let name = (item.kind == .episode || item.kind == .season) ? (item.seriesName ?? item.displayName) : item.displayName
+            myList.insert(MyListEntry(serverId: id, name: name), at: 0)
+        }
+        reco.listChanged()
+        await saveMyList()
+    }
+
+    func toggleMyList(_ t: ExternalTitle) async {
+        if let i = myList.firstIndex(where: { $0.external?.id == t.id }) {
+            myList.remove(at: i)
+        } else {
+            myList.insert(MyListEntry(external: t), at: 0)
+            externalNotForMe.removeAll { $0.id == t.id }
+            externalSeen.removeAll { $0.id == t.id }
+            await saveExternal(.notforme)
+            await saveExternal(.seenelsewhere)
+        }
+        await saveMyList()
+    }
+
+    func removeFromMyList(_ entry: MyListEntry) async {
+        myList.removeAll { $0.id == entry.id }
+        reco.listChanged()
+        await saveMyList()
+    }
+
+    private func saveMyList() async {
+        let json = Self.encodeList(myList)
+        await saveStorage { custom in custom["mylist"] = json }
     }
 
     func markSeenElsewhere(_ t: ExternalTitle) async {
         externalSeen.removeAll { $0.id == t.id }
         externalSeen.insert(t, at: 0)
-        wishlist.removeAll { $0.id == t.id }
+        if myList.contains(where: { $0.external?.id == t.id }) {
+            myList.removeAll { $0.external?.id == t.id }
+            await saveMyList()
+        }
         await saveExternal(.seenelsewhere)
-        await saveExternal(.wishlist)
     }
 
     func markExternalNotForMe(_ t: ExternalTitle, _ on: Bool = true) async {
         externalNotForMe.removeAll { $0.id == t.id }
         if on {
             externalNotForMe.insert(t, at: 0)
-            wishlist.removeAll { $0.id == t.id }
-            await saveExternal(.wishlist)
+            if myList.contains(where: { $0.external?.id == t.id }) {
+                myList.removeAll { $0.external?.id == t.id }
+                await saveMyList()
+            }
         }
         await saveExternal(.notforme)
     }
 
+    func unmarkSeen(_ t: ExternalTitle) async {
+        externalSeen.removeAll { $0.id == t.id }
+        await saveExternal(.seenelsewhere)
+    }
+
     func clearExternal(_ list: ExternalList) async {
         switch list {
-        case .wishlist: wishlist = []
         case .seenelsewhere: externalSeen = []
         case .notforme: externalNotForMe = []
         }
@@ -341,13 +417,7 @@ final class AppModel {
     }
 
     private func saveExternal(_ list: ExternalList) async {
-        let value: [ExternalTitle]
-        switch list {
-        case .wishlist: value = wishlist
-        case .seenelsewhere: value = externalSeen
-        case .notforme: value = externalNotForMe
-        }
-        let json = Self.encodeTitles(value)
+        let json = Self.encodeTitles(list == .seenelsewhere ? externalSeen : externalNotForMe)
         await saveStorage { custom in custom[list.rawValue] = json }
     }
 

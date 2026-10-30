@@ -602,7 +602,7 @@ struct ForYouSettingsView: View {
                     .disabled(model.externalNotForMe.isEmpty)
                 LabeledContent("AI explanations", value: explainer)
             } footer: {
-                Text("For You never suggests anything already on your server: titles are matched by the TMDB, IMDb and TVDB ids Jellyfin stored, then by title and year. Your taste comes from what you finished, favourited or are watching on your server (the chosen library counts most), what you gave up on, and what you marked Not for me. The AI reads your library with read-only requests: it can't change, move or delete anything. Wishlist, Seen, Not for me, My List and your settings are saved in your account's private JellyReco storage on your server, so they follow you to every device. The on-device AI step pauses in Low Power Mode or when the phone is hot.")
+                Text("For You never suggests anything already on your server: titles are matched by the TMDB, IMDb and TVDB ids Jellyfin stored, then by title and year. Your taste comes from what you finished, favourited or are watching on your server (the chosen library counts most), what you gave up on, and what you marked Not for me. The AI reads your library with read-only requests: it can't change, move or delete anything. My List, Not for me, Already seen and your settings are saved in your account's private JellyReco storage on your server, so they follow you to every device. The on-device AI step pauses in Low Power Mode or when the phone is hot.")
             }
             Section("Libraries offered") {
                 ForEach(model.reco.sources.filter { $0.id != RecoSource.all }) { src in

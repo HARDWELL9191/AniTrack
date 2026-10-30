@@ -400,7 +400,6 @@ extension Shelf where Destination == EmptyView {
 struct ItemActionsMenu: ViewModifier {
     @Environment(AppModel.self) private var model
     let item: BaseItem
-    @State private var showMoreLike = false
 
     func body(content: Content) -> some View {
         content
@@ -419,12 +418,15 @@ struct ItemActionsMenu: ViewModifier {
                        systemImage: model.isFavorite(item) ? "heart.slash" : "heart") {
                     Task { await model.toggleFavorite(item) }
                 }
-                if item.kind == .movie || item.kind == .series {
-                    Button("More like this", systemImage: "square.stack.3d.up") { showMoreLike = true }
+                if [.movie, .series, .season, .episode, .video].contains(item.kind) {
+                    Button(model.isOnMyList(item) ? "Remove from My List" : "Add to My List",
+                           systemImage: model.isOnMyList(item) ? "bookmark.slash" : "bookmark") {
+                        Task { await model.toggleMyList(item) }
+                    }
                 }
-            }
-            .sheet(isPresented: $showMoreLike) {
-                MoreLikeThisSheet(item: item).presentationDetents([.medium, .large])
+                if item.kind == .movie || item.kind == .series {
+                    Button("More like this", systemImage: "square.stack.3d.up") { model.moreLikeItem = item }
+                }
             }
     }
 }

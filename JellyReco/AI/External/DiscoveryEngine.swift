@@ -21,7 +21,7 @@ struct ExternalPick: Identifiable, Hashable, Codable {
 ///    liked" lists are collected, weighted by how much you liked each one.
 /// 3. Well-rated titles in your favourite genres are added (anime = Animation + Japanese).
 /// 4. Anything already on your server is removed (TMDB/IMDb/TVDB id or title + year), as are
-///    titles on your Wishlist, marked Seen or Not for me.
+///    titles on My List, marked Seen or Not for me.
 /// 5. The short list is re-ranked on the iPhone: genre/keyword match with your taste and
 ///    Apple's on-device language model comparing each overview with your favourites.
 @Observable

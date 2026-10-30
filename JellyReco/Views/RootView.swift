@@ -22,6 +22,9 @@ struct RootView: View {
         .fullScreenCover(item: $model.playback) { request in
             PlayerScreen(request: request)
         }
+        .sheet(item: $model.moreLikeItem) { item in
+            MoreLikeThisSheet(item: item).presentationDetents([.medium, .large])
+        }
         .alert("Something went wrong",
                isPresented: Binding(get: { model.errorMessage != nil },
                                     set: { if !$0 { model.errorMessage = nil } })) {

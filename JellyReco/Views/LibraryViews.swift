@@ -18,6 +18,14 @@ struct LibrariesView: View {
                         }
                         .buttonStyle(PressStyle())
                     }
+                    NavigationLink { MyListView() } label: {
+                        SymbolTile(title: "My List", symbol: "bookmark.fill", tint: Theme.accent)
+                    }
+                    .buttonStyle(PressStyle())
+                    NavigationLink { NotForMeView() } label: {
+                        SymbolTile(title: "Not for me", symbol: "hand.thumbsdown.fill", tint: .gray)
+                    }
+                    .buttonStyle(PressStyle())
                     NavigationLink { FavoritesView() } label: {
                         SymbolTile(title: "Favourites", symbol: "heart.fill", tint: Theme.pink)
                     }
@@ -202,6 +210,7 @@ struct LibraryView: View {
                                        description: Text(filters.isActive ? "Try removing some filters." : ""))
             }
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { gridWidth = $0 }
         .navigationTitle(library.displayName)
         .toolbar { toolbar }
         .refreshable { await reload() }
@@ -226,22 +235,27 @@ struct LibraryView: View {
 
     private var columns: [GridItem] {
         let n = max(2, min(6, model.settings.gridColumns))
-        return Array(repeating: GridItem(.flexible(), spacing: 12), count: model.settings.libraryPosterStyle == .landscape ? max(1, n - 1) : n)
+        return Array(repeating: GridItem(.flexible(), spacing: 12, alignment: .top), count: model.settings.libraryPosterStyle == .landscape ? max(1, n - 1) : n)
+    }
+
+    @State private var gridWidth: CGFloat = 360
+
+    /// Card width from the screen width (fixed sizes inside the links; no layout readers in them).
+    private var cardWidth: CGFloat {
+        let n = CGFloat(columns.count)
+        let letters: CGFloat = model.settings.showLetterPicker && sort == .name ? 24 : 0
+        return max(80, (gridWidth - 32 - letters - 12 * (n - 1)) / n)
     }
 
     private var grid: some View {
-        LazyVGrid(columns: columns, spacing: 18) {
+        LazyVGrid(columns: columns, alignment: .leading, spacing: 18) {
             ForEach(items) { item in
                 NavigationLink(value: ItemLink(item: item)) {
-                    GeometryReader { geo in
-                        if model.settings.libraryPosterStyle == .landscape {
-                            LandscapeCard(item: item, width: geo.size.width)
-                        } else {
-                            PosterCard(item: item, width: geo.size.width)
-                        }
+                    if model.settings.libraryPosterStyle == .landscape {
+                        LandscapeCard(item: item, width: cardWidth)
+                    } else {
+                        PosterCard(item: item, width: cardWidth)
                     }
-                    .aspectRatio(model.settings.libraryPosterStyle == .landscape ? 1.25 : (model.settings.showPosterLabels ? 0.5 : 0.667),
-                                 contentMode: .fit)
                 }
                 .buttonStyle(PressStyle())
                 .onAppear { loadMoreIfNeeded(item) }

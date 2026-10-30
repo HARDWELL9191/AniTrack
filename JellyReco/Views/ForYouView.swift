@@ -9,7 +9,7 @@ struct ForYouView: View {
     @State private var index = 0
     @State private var handled = 0
     @State private var detail: ExternalTitle?
-    @State private var showWishlist = false
+    @State private var showMyList = false
 
     private var discovery: DiscoveryEngine { model.discovery }
     private var sourceId: String { model.reco.currentSourceId }
@@ -29,10 +29,10 @@ struct ForYouView: View {
             .toolbarTitleDisplayMode(.inlineLarge)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { showWishlist = true } label: {
-                        Image(systemName: model.wishlist.isEmpty ? "star" : "star.fill")
+                    Button { showMyList = true } label: {
+                        Image(systemName: model.myList.isEmpty ? "bookmark" : "bookmark.fill")
                     }
-                    .accessibilityLabel("Wishlist")
+                    .accessibilityLabel("My List")
                 }
             }
             .refreshable {
@@ -51,7 +51,7 @@ struct ForYouView: View {
                 }
             }
             .sheet(item: $detail) { ExternalDetailSheet(title: $0) }
-            .sheet(isPresented: $showWishlist) { WishlistSheet() }
+            .navigationDestination(isPresented: $showMyList) { MyListView() }
         }
     }
 
@@ -270,12 +270,14 @@ struct ExternalPickCard: View {
                     HStack(spacing: 10) {
                         Button {
                             Task {
-                                let adding = !model.isOnWishlist(t)
-                                await model.toggleWishlist(t)
-                                if adding { onHandled() }
+                                let adding = !model.isOnMyList(t)
+                                await model.toggleMyList(t)
+                                if adding { onHandled() }   // planned = handled: next pick slides in
                             }
                         } label: {
-                            Label(model.isOnWishlist(t) ? "On Wishlist" : "Want it", systemImage: model.isOnWishlist(t) ? "star.fill" : "star")
+                            Label(model.isOnMyList(t) ? "On My List" : "Add to My List",
+                                  systemImage: model.isOnMyList(t) ? "bookmark.fill" : "bookmark")
+                                .lineLimit(1).minimumScaleFactor(0.8)
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.glassProminent)
@@ -421,9 +423,9 @@ struct ExternalDetailSheet: View {
 
                     GlassEffectContainer(spacing: 10) {
                         HStack(spacing: 10) {
-                            Button { Task { await model.toggleWishlist(title) } } label: {
-                                Label(model.isOnWishlist(title) ? "On Wishlist" : "Want it",
-                                      systemImage: model.isOnWishlist(title) ? "star.fill" : "star").frame(maxWidth: .infinity)
+                            Button { Task { await model.toggleMyList(title) } } label: {
+                                Label(model.isOnMyList(title) ? "On My List" : "Add to My List",
+                                      systemImage: model.isOnMyList(title) ? "bookmark.fill" : "bookmark").frame(maxWidth: .infinity)
                             }
                             .buttonStyle(.glassProminent)
                             Button { showMoreLike = true } label: {
@@ -493,70 +495,6 @@ struct ExternalMoreLikeSheet: View {
             .sheet(item: $detail) { ExternalDetailSheet(title: $0) }
         }
         .task { items = await model.discovery.moreLike(title) }
-    }
-}
-
-/// Things you want to get (saved on your server). Ticks off by itself once a title appears there.
-struct WishlistSheet: View {
-    @Environment(AppModel.self) private var model
-    @Environment(\.dismiss) private var dismiss
-    @State private var detail: ExternalTitle?
-    @State private var tab = 0
-
-    var body: some View {
-        NavigationStack {
-            List {
-                Picker("", selection: $tab) {
-                    Text("Wishlist").tag(0)
-                    Text("Seen").tag(1)
-                    Text("Not for me").tag(2)
-                }
-                .pickerStyle(.segmented)
-                let list = tab == 0 ? model.wishlist : (tab == 1 ? model.externalSeen : model.externalNotForMe)
-                let owned = OwnedIndex(items: model.reco.libraryItems, idMap: [:])
-                ForEach(list) { t in
-                    Button { detail = t } label: {
-                        HStack(spacing: 12) {
-                            RemoteImage(url: t.posterURL).frame(width: 50, height: 75).clipShape(RoundedRectangle(cornerRadius: 6))
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(t.title).font(.subheadline.weight(.semibold))
-                                Text(t.metaLine).font(.caption).foregroundStyle(.secondary)
-                                if tab == 0 && owned.contains(t) {
-                                    Label("Now on your server", systemImage: "checkmark.circle.fill").font(.caption.weight(.semibold)).foregroundStyle(.green)
-                                }
-                            }
-                        }
-                    }
-                    .foregroundStyle(.primary)
-                    .swipeActions {
-                        Button(role: .destructive) {
-                            Task {
-                                switch tab {
-                                case 0: await model.toggleWishlist(t)
-                                case 2: await model.markExternalNotForMe(t, false)
-                                default: break
-                                }
-                            }
-                        } label: { Label("Remove", systemImage: "trash") }
-                    }
-                }
-                if list.isEmpty {
-                    Text(tab == 0 ? "Tap \"Want it\" on a pick to keep it here. Saved on your Jellyfin server." : "Nothing here.")
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .navigationTitle("Wishlist")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
-                if tab > 0 {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Clear") { Task { await model.clearExternal(tab == 1 ? .seenelsewhere : .notforme) } }
-                    }
-                }
-            }
-            .sheet(item: $detail) { ExternalDetailSheet(title: $0) }
-        }
     }
 }
 

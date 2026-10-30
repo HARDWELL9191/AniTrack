@@ -44,6 +44,14 @@ struct ItemDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
+                if [.movie, .series, .season, .episode, .video].contains(current.kind) {
+                    Button {
+                        Task { await model.toggleMyList(current) }
+                    } label: {
+                        Image(systemName: model.isOnMyList(current) ? "bookmark.fill" : "bookmark")
+                    }
+                    .accessibilityLabel("My List")
+                }
                 Button {
                     Task { await model.toggleFavorite(current) }
                 } label: {
