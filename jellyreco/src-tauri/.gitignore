@@ -1,0 +1,6 @@
+/target
+/gen/schemas
+/resources/ai/*
+!/resources/ai/README.txt
+/resources/mpv/*
+!/resources/mpv/README.txt
