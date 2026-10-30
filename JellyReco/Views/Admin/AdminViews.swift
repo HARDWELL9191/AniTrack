@@ -53,6 +53,15 @@ struct AdminDashboardView: View {
                 NavigationLink { DevicesView() } label: { Label("Devices", systemImage: "iphone.gen3") }
                 NavigationLink { APIKeysView() } label: { Label("API keys", systemImage: "key.horizontal.fill") }
                 NavigationLink { PluginsView() } label: { Label("Plugins", systemImage: "puzzlepiece.extension.fill") }
+                NavigationLink { PluginCatalogView() } label: { Label("Plugin catalog", systemImage: "square.grid.2x2.fill") }
+                NavigationLink { PluginRepositoriesView() } label: { Label("Plugin repositories", systemImage: "shippingbox.fill") }
+            }
+
+            Section("Settings") {
+                NavigationLink { ServerSettingsHub() } label: { Label("Server settings", systemImage: "gearshape.2.fill") }
+                ForEach(ServerSettingsCatalog.pages.prefix(4)) { page in
+                    NavigationLink { ConfigPageView(page: page) } label: { Label(page.title, systemImage: page.symbol) }
+                }
             }
 
             Section("Server") {
@@ -872,10 +881,12 @@ struct ActivityLogView: View {
 struct AdminLibrariesView: View {
     @Environment(AppModel.self) private var model
     @State private var folders: [VirtualFolderInfo] = []
+    @State private var adding = false
 
     var body: some View {
         List {
             ForEach(folders) { f in
+                NavigationLink { LibraryAdminDetail(folder: f, reload: reloadFolders) } label: {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
                         Text(f.name ?? "").font(.headline)
@@ -885,18 +896,25 @@ struct AdminLibrariesView: View {
                     ForEach(f.locations ?? [], id: \.self) { Text($0).font(.caption.monospaced()).foregroundStyle(.secondary) }
                     if let p = f.refreshProgress, f.refreshStatus == "Active" { ProgressView(value: p / 100).tint(Theme.accent) }
                 }
+                }
                 .swipeActions {
                     Button { Task { await scan(f) } } label: { Label("Scan", systemImage: "arrow.triangle.2.circlepath") }.tint(.green)
                 }
             }
         }
         .navigationTitle("Libraries")
+        .toolbar { Button("Add library", systemImage: "plus") { adding = true } }
+        .sheet(isPresented: $adding) { AddLibrarySheet(reload: reloadFolders) }
         .task {
             while !Task.isCancelled {
                 folders = (try? await model.client?.get("/Library/VirtualFolders", as: [VirtualFolderInfo].self)) ?? folders
                 try? await Task.sleep(nanoseconds: 5_000_000_000)
             }
         }
+    }
+
+    private func reloadFolders() async {
+        folders = (try? await model.client?.get("/Library/VirtualFolders", as: [VirtualFolderInfo].self)) ?? folders
     }
 
     private func scan(_ f: VirtualFolderInfo) async {
@@ -940,6 +958,12 @@ struct PluginsView: View {
             }
         }
         .navigationTitle("Plugins")
+        .toolbar {
+            Menu {
+                NavigationLink { PluginCatalogView() } label: { Label("Catalog", systemImage: "square.grid.2x2") }
+                NavigationLink { PluginRepositoriesView() } label: { Label("Repositories", systemImage: "shippingbox") }
+            } label: { Image(systemName: "ellipsis.circle") }
+        }
         .task { await load() }
         .refreshable { await load() }
     }

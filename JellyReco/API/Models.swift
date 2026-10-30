@@ -177,6 +177,7 @@ struct UserConfiguration: Codable, Hashable {
     /// Library order set in Jellyfin.
     var orderedViews: [String]?
     var groupedFolders: [String]?
+    var displayCollectionsView: Bool?
 }
 
 struct AuthenticationResult: Codable {

@@ -492,7 +492,7 @@ struct ItemDetailView: View {
             case .series:
                 async let s = client.seasons(seriesId: full.id)
                 async let n = client.nextUp(seriesId: full.id, limit: 1, enableRewatching: true)
-                seasons = ((try? await s) ?? []).filter { model.settings.showMissingEpisodes || $0.locationType != "Virtual" }
+                seasons = ((try? await s) ?? []).filter { (model.user?.configuration?.displayMissingEpisodes ?? false) || $0.locationType != "Virtual" }
                 nextUp = (try? await n)?.first
                 if selectedSeason == nil {
                     selectedSeason = nextUp?.seasonId ?? seasons.first(where: { !model.isPlayed($0) })?.id ?? seasons.first?.id
@@ -527,7 +527,7 @@ struct ItemDetailView: View {
         guard let client = model.client else { return }
         let seriesId = current.kind == .series ? current.id : (current.seriesId ?? current.parentId ?? current.id)
         let eps = (try? await client.episodes(seriesId: seriesId, seasonId: selectedSeason)) ?? []
-        episodes = eps.filter { model.settings.showMissingEpisodes || $0.locationType != "Virtual" }
+        episodes = eps.filter { (model.user?.configuration?.displayMissingEpisodes ?? false) || $0.locationType != "Virtual" }
     }
 
     private func refreshMetadata() async {

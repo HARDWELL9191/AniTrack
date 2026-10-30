@@ -91,6 +91,10 @@ final class AppModel {
         do {
             let me = try await client.me()
             user = me
+            // Autoplay of the next episode is a Jellyfin account setting: follow it.
+            if let auto = me.configuration?.enableNextEpisodeAutoPlay, settings.autoPlayNext != auto {
+                settings.autoPlayNext = auto
+            }
             if let sid = store.currentServerId { store.updateUser(me, on: sid) }
             async let views = client.userViews()
             async let info = try? client.get("/System/Info", as: SystemInfo.self)

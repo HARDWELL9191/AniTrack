@@ -45,6 +45,7 @@ struct SettingsView: View {
 
                 Section("Browsing") {
                     NavigationLink { HomeSettingsView() } label: { Label("Home", systemImage: "house.fill") }
+                    NavigationLink { JellyfinDisplaySettingsView() } label: { Label("Display & My Media (Jellyfin)", systemImage: "rectangle.3.group.fill") }
                     NavigationLink { LibrarySettingsView() } label: { Label("Library & item pages", systemImage: "square.grid.2x2.fill") }
                     NavigationLink { AppearanceSettingsView() } label: { Label("Appearance & indicators", systemImage: "paintbrush.fill") }
                 }
@@ -288,6 +289,10 @@ struct PlayerSettingsView: View {
             }
             Section {
                 Toggle("Play next episode automatically", isOn: $s.autoPlayNext)
+                    .onChange(of: s.autoPlayNext) { _, v in
+                        guard model.user?.configuration?.enableNextEpisodeAutoPlay != v else { return }
+                        Task { try? await model.client?.updateUserConfiguration(["EnableNextEpisodeAutoPlay": v]); await model.refreshSession() }
+                    }
                 if s.autoPlayNext {
                     Stepper("Countdown: \(s.nextUpCountdown) s", value: $s.nextUpCountdown, in: 3...30)
                     Picker("Ask \"Still watching?\"", selection: $s.stillWatchingAfter) {
@@ -539,7 +544,6 @@ struct LibrarySettingsView: View {
                 Toggle("Random button", isOn: $s.showRandomButton)
             }
             Section("Item pages") {
-                Toggle("Show missing episodes", isOn: $s.showMissingEpisodes)
                 Toggle("Hide spoilers of unwatched episodes", isOn: $s.hideSpoilers)
             }
         }
@@ -655,6 +659,62 @@ extension ForYouSettingsView {
             }
         } catch {
             keyStatus = error.localizedDescription
+        }
+    }
+}
+
+
+/// Your Jellyfin account's display settings (the same values jellyfin-web's Display and Home
+/// pages edit, saved on the server for every client).
+struct JellyfinDisplaySettingsView: View {
+    @Environment(AppModel.self) private var model
+    @State private var order: [BaseItem] = []
+    @State private var saving = false
+
+    private var config: UserConfiguration? { model.user?.configuration }
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("Display missing episodes within seasons", isOn: boolBinding(\.displayMissingEpisodes, key: "DisplayMissingEpisodes"))
+                Toggle("Display a Collections view", isOn: boolBinding(\.displayCollectionsView, key: "DisplayCollectionsView"))
+                Toggle("Hide watched content from Recently Added", isOn: boolBinding(\.hidePlayedInLatest, key: "HidePlayedInLatest"))
+                Toggle("Play next episode automatically", isOn: Binding(
+                    get: { config?.enableNextEpisodeAutoPlay ?? true },
+                    set: { v in model.settings.autoPlayNext = v; save("EnableNextEpisodeAutoPlay", v) }))
+            } header: { Text("Display") } footer: {
+                Text("Saved to your Jellyfin account, shared with Jellyfin web and other apps.")
+            }
+            Section {
+                ForEach(order) { lib in
+                    Label(lib.displayName, systemImage: "line.3.horizontal")
+                }
+                .onMove { from, to in
+                    order.move(fromOffsets: from, toOffset: to)
+                    save("OrderedViews", order.map(\.id))
+                }
+            } header: { Text("My Media order") } footer: {
+                Text("Drag to reorder your libraries (Edit).")
+            }
+        }
+        .navigationTitle("Display & My Media")
+        .toolbar { EditButton() }
+        .overlay(alignment: .top) { if saving { ProgressView().padding() } }
+        .task { order = model.libraries }
+    }
+
+    private func boolBinding(_ path: KeyPath<UserConfiguration, Bool?>, key: String) -> Binding<Bool> {
+        Binding(get: { config?[keyPath: path] ?? false }, set: { save(key, $0) })
+    }
+
+    private func save(_ key: String, _ value: Any) {
+        Task {
+            saving = true
+            defer { saving = false }
+            do {
+                try await model.client?.updateUserConfiguration([key: value])
+                await model.refreshSession()
+            } catch { model.report(error) }
         }
     }
 }
