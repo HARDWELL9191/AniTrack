@@ -652,3 +652,15 @@ final class JellyfinClient: @unchecked Sendable {
         return r.items ?? []
     }
 }
+
+/// The only way the AI reaches your server: read requests (GET) only. The recommendation
+/// engines hold this, never the full client, so they cannot change, move or delete anything.
+struct LibraryReader {
+    private let client: JellyfinClient
+    init(_ client: JellyfinClient) { self.client = client }
+
+    var userId: String? { client.userId }
+    func items(_ q: JellyfinClient.ItemQuery) async throws -> QueryResult<BaseItem> { try await client.items(q) }
+    func similar(_ id: String, limit: Int) async throws -> [BaseItem] { try await client.similar(id, limit: limit) }
+    func item(_ id: String) async throws -> BaseItem { try await client.item(id) }
+}

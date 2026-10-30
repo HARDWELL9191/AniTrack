@@ -7,6 +7,9 @@ on:
       - "README.md"
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     # GitHub's Xcode 27 image (macOS 27, Apple Silicon) — iOS 27 SDK.
@@ -84,6 +87,16 @@ jobs:
           path: build.log
           if-no-files-found: ignore
 
+      - name: Publish build errors to the ci-logs branch
+        if: always()
+        run: |
+          mkdir -p /tmp/cilog && cd /tmp/cilog
+          git init -q && git checkout -q -b ci-logs
+          { echo "run ${{ github.run_id }} ${{ github.sha }}"; grep -E "error:|BUILD (SUCCEEDED|FAILED)|fatal" "$GITHUB_WORKSPACE/build.log" | sort -u | head -400; } > build-errors.txt 2>/dev/null || echo "no log" > build-errors.txt
+          tail -150 "$GITHUB_WORKSPACE/build.log" > build-tail.txt 2>/dev/null || true
+          git add -A && git -c user.name=ci -c user.email=ci@local commit -qm "build log ${{ github.run_id }}"
+          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" ci-logs:ci-logs-build
+
   formats:
     # Plays generated test files (HEVC 10-bit, AV1, VP9, DTS, TrueHD, E-AC3, FLAC, Opus, ASS,
     # VobSub, WebVTT, mov_text, AVI, WMV, TS, M2TS…) with the exact libmpv build the app ships.
@@ -102,7 +115,8 @@ jobs:
 
       - name: Build the format tester
         run: |
-          set -euo pipefail
+          set -eo pipefail
+          ls -R libmpv | head -40 | tee link.log
           FW=$(find libmpv -type d -path "*macos*" -name "Libmpv.framework" | head -1)
           echo "Framework: $FW"
           BIN="$FW/Libmpv"; [ -f "$FW/Versions/A/Libmpv" ] && BIN="$FW/Versions/A/Libmpv"
@@ -114,7 +128,8 @@ jobs:
             -framework Metal -framework QuartzCore -framework Security -framework VideoToolbox \
             -framework AppKit -framework OpenGL -framework IOKit -framework Cocoa \
             -lbz2 -liconv -lexpat -lresolv -lxml2 -lz -lc++ \
-            -o formattest
+            -o formattest 2>&1 | tee -a link.log
+          ls -la formattest
 
       - name: Generate test files
         run: |
@@ -124,6 +139,15 @@ jobs:
       - name: Play every file, every audio and subtitle track
         run: |
           ./formattest samples/*.mkv samples/*.mp4 samples/*.avi samples/*.wmv samples/*.ts samples/*.webm samples/*.mov samples/*.m2ts 2>&1 | tee formattest.log
+
+      - name: Publish format test log to the ci-logs branch
+        if: always()
+        run: |
+          mkdir -p /tmp/cilog && cd /tmp/cilog
+          git init -q && git checkout -q -b ci-logs
+          { echo "run ${{ github.run_id }}"; cat "$GITHUB_WORKSPACE/formattest.log" 2>/dev/null; cat "$GITHUB_WORKSPACE/link.log" 2>/dev/null; } > formattest.txt
+          git add -A && git -c user.name=ci -c user.email=ci@local commit -qm "format log ${{ github.run_id }}"
+          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" ci-logs:ci-logs-formats
 
       - name: Upload format test log
         if: always()

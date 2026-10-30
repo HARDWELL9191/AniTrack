@@ -35,7 +35,7 @@ struct ItemDetailView: View {
                 if !(current.chapters ?? []).isEmpty && current.kind.isPlayableVideo { chaptersSection }
                 castSection
                 if !extras.isEmpty { Shelf(title: "Extras", items: extras, landscape: true, playOnTap: true) }
-                if !similar.isEmpty { Shelf(title: "More like this", items: similar) }
+                if !similar.isEmpty { Shelf(title: "More like this on your server", items: similar) }
                 infoSection.padding(.horizontal)
             }
             .padding(.bottom, 30)
@@ -481,10 +481,9 @@ struct ItemDetailView: View {
                 break
             }
             if [.movie, .series, .episode].contains(full.kind) {
-                async let sim = client.similar(full.kind == .episode ? (full.seriesId ?? full.id) : full.id, limit: 16)
-                async let ex = client.specialFeatures(full.id)
-                similar = (try? await sim) ?? []
-                extras = (try? await ex) ?? []
+                extras = (try? await client.specialFeatures(full.id)) ?? []
+                // AI-ranked, local only: unwatched titles on your server closest to this one.
+                similar = Array(await model.reco.moreLike(full).prefix(16))
             }
         } catch {
             if !AppModel.isCancellation(error) { loadError = error.localizedDescription; model.report(error) }

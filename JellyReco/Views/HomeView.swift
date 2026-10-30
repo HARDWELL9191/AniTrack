@@ -182,14 +182,14 @@ struct WatchlistShelf: View {
     }
 }
 
-/// A short shelf of For You picks on Home.
+/// Unwatched titles already on your server that fit you best (local AI picks).
 struct PicksShelf: View {
     @Environment(AppModel.self) private var model
     var body: some View {
         let source = model.reco.currentSourceId
         let items = model.reco.picks(for: source, genre: nil).prefix(15).map(\.item)
         if !items.isEmpty {
-            Shelf(title: "Picked for you · \(model.reco.sourceName(source))", items: Array(items))
+            Shelf(title: "Unwatched in \(model.reco.sourceName(source)), for you", items: Array(items))
         }
     }
 }

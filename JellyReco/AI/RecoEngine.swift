@@ -194,13 +194,13 @@ final class RecoEngine {
     }
 
     private func runBuild() async {
-        guard let model, let client = model.client else { return }
+        guard let model, let reader = model.reader else { return }
         isBuilding = true
         lastError = nil
         defer { isBuilding = false }
 
         // 0) Fast start: last snapshot from disk while the fresh one loads.
-        let cacheName = "reco-\(model.store.currentServerId ?? "s")-\(client.userId ?? "u")"
+        let cacheName = "reco-\(model.store.currentServerId ?? "s")-\(reader.userId ?? "u")"
         if snapshot.isEmpty, let saved = await DiskCache.loadInBackground([String: [BaseItem]].self, name: cacheName) {
             ingest(saved)
             rankAll(aiAllowed: false)
@@ -211,7 +211,7 @@ final class RecoEngine {
             var fresh: [String: [BaseItem]] = [:]
             for source in sources where source.id != RecoSource.all {
                 if Task.isCancelled { return }
-                fresh[source.id] = try await fetchLibrary(source, client: client)
+                fresh[source.id] = try await fetchLibrary(source, reader: reader)
             }
             ingest(fresh)
             DiskCache.saveInBackground(fresh, name: cacheName)
@@ -225,7 +225,7 @@ final class RecoEngine {
 
         // 2) Taste profile + Similar ("fans also liked") from your strongest likes.
         rebuildProfile()
-        await collectSimilar(client: client)
+        await collectSimilar(reader: reader)
         if Task.isCancelled { return }
 
         // 3) Rank every source; then the on-device AI pass.
@@ -241,7 +241,7 @@ final class RecoEngine {
         dirty = false
     }
 
-    private func fetchLibrary(_ source: Source, client: JellyfinClient) async throws -> [BaseItem] {
+    private func fetchLibrary(_ source: Source, reader: LibraryReader) async throws -> [BaseItem] {
         var q = JellyfinClient.ItemQuery()
         q.parentId = source.id
         q.recursive = true
@@ -252,13 +252,13 @@ final class RecoEngine {
         }
         q.fields = ["Overview", "Genres", "Tags", "Studios", "ProductionYear", "CommunityRating", "OfficialRating",
                     "RecursiveItemCount", "ChildCount", "ProductionLocations", "OriginalTitle", "DateCreated",
-                    "PrimaryImageAspectRatio", "Status", "EndDate", "RunTimeTicks"]
+                    "PrimaryImageAspectRatio", "Status", "EndDate", "RunTimeTicks", "ProviderIds"]
         q.sortBy = ["SortName"]
         q.limit = 400
         q.isMissing = nil
         var all: [BaseItem] = []
         while true {
-            let page = try await client.items(q)
+            let page = try await reader.items(q)
             let items = page.items ?? []
             all += items
             q.startIndex += items.count
@@ -359,7 +359,7 @@ final class RecoEngine {
     }
 
     /// Jellyfin's Similar items for your strongest likes = "people who liked X".
-    private func collectSimilar(client: JellyfinClient) async {
+    private func collectSimilar(reader: LibraryReader) async {
         let seeds = weights.filter { $0.value > 0.6 }
             .sorted { a, b in
                 let ra = byId[a.key]?.userData?.lastPlayedDate ?? .distantPast
@@ -381,7 +381,7 @@ final class RecoEngine {
         let fetched = await withTaskGroup(of: (String, [String]).self, returning: [(String, [String])].self) { group in
             for seedId in toFetch {
                 group.addTask {
-                    let ids = (try? await client.similar(seedId, limit: 30))?.map(\.id) ?? []
+                    let ids = (try? await reader.similar(seedId, limit: 30))?.map(\.id) ?? []
                     return (seedId, ids)
                 }
             }
@@ -556,14 +556,73 @@ final class RecoEngine {
         return percent
     }
 
-    /// Unwatched titles like this one, from your library, best match first ("More like this").
+    /// "More like this": unwatched titles on your server close to this specific one.
+    /// Local only. Candidates are Jellyfin's similar items plus the closest titles by genres,
+    /// tags and studio; the on-device AI then compares their overviews with this title's.
     func moreLike(_ item: BaseItem) async -> [BaseItem] {
-        guard let client = model?.client else { return [] }
-        let base = item.kind == .episode ? (item.seriesId ?? item.id) : item.id
-        let similar = (try? await client.similar(base, limit: 40)) ?? []
-        let unwatched = similar.filter { !($0.userData?.played ?? false) && !(model?.isNotForMe($0) ?? false) }
-        return unwatched.sorted { (match(for: $0) ?? 0) > (match(for: $1) ?? 0) }
+        guard let model, let reader = model.reader else { return [] }
+        if snapshot.isEmpty { await ensureBuilt() }
+        let baseId = item.kind == .episode || item.kind == .season ? (item.seriesId ?? item.id) : item.id
+        let base = byId[baseId] ?? ((try? await reader.item(baseId)) ?? item)
+
+        var pool: [String: BaseItem] = [:]
+        for s in (try? await reader.similar(baseId, limit: 40)) ?? [] { pool[s.id] = byId[s.id] ?? s }
+        var single = TasteProfile()
+        single.add(base, weight: 1)
+        single.finalize()
+        let sameKind = byId.values.filter { $0.kind == base.kind && $0.id != base.id }
+        let byTags = sameKind.map { ($0, single.similarity(to: $0, sameLibraryBoost: nil)) }
+            .sorted { $0.1 > $1.1 }
+            .prefix(80)
+        for (c, _) in byTags { pool[c.id] = c }
+        pool[base.id] = nil
+        let candidates = pool.values.filter { !model.isPlayed($0) && !model.isNotForMe($0) }
+        guard !candidates.isEmpty else { return [] }
+
+        var semantic: [String: Float] = [:]
+        if model.settings.useOnDeviceAI && SemanticEngine.shouldRunNow {
+            let inputs = ([base] + candidates).map(Self.embeddingInput)
+            let vectors = await Task.detached(priority: .userInitiated) {
+                await SemanticEngine.shared.vectors(for: inputs)
+            }.value
+            if let bv = vectors[Self.embeddingInput(base).key] {
+                for c in candidates {
+                    if let v = vectors[Self.embeddingInput(c).key] { semantic[c.id] = SemanticEngine.cosine(bv, v) }
+                }
+            }
+        }
+        let sims = semantic.values.sorted()
+        let lo = sims.first ?? 0, hi = sims.last ?? 1
+        let span = max(hi - lo, 0.0001)
+        func score(_ c: BaseItem) -> Double {
+            let tag = single.similarity(to: c, sameLibraryBoost: nil)
+            let mine = Double(match(for: c) ?? 60) / 100
+            if let s = semantic[c.id] {
+                return 0.45 * Double((s - lo) / span) + 0.35 * tag + 0.20 * mine
+            }
+            return 0.65 * tag + 0.35 * mine
+        }
+        return candidates.sorted { score($0) > score($1) }.prefix(30).map { $0 }
     }
+
+    // MARK: For the discovery engine (For You)
+
+    /// Your history as (title, weight) — positive liked, negative disliked. Titles in the given
+    /// library count 1.5×, so "Anime" picks lean on your anime history.
+    func history(boosting sourceId: String) -> [(item: BaseItem, weight: Double)] {
+        weights.compactMap { id, w in
+            guard let item = byId[id] else { return nil }
+            let boost = sourceId == RecoSource.all || itemLibrary[id] == sourceId ? 1.5 : 1.0
+            return (item, w * boost)
+        }
+    }
+
+    /// Every movie and show on the server (for "already in your library" checks).
+    var libraryItems: [BaseItem] { Array(byId.values) }
+
+    func libraryId(of itemId: String) -> String? { itemLibrary[itemId] }
+
+    func source(_ id: String) -> Source? { sources.first { $0.id == id } }
 
     func titleFor(_ id: String) -> String? { byId[id]?.displayName }
 
@@ -636,6 +695,14 @@ struct TasteProfile {
         }
         guard normSq > 1e-9 else { return 0 }
         return dot / (sqrt(normSq) * vNorm)
+    }
+
+    /// Your strongest features of one kind ("g:" genres, "t:" tags).
+    func top(prefix: String, count: Int) -> [String] {
+        features.filter { $0.key.hasPrefix(prefix) && $0.value > 0 }
+            .sorted { $0.value > $1.value }
+            .prefix(count)
+            .map { String($0.key.dropFirst(prefix.count)) }
     }
 
     func highlights(for item: BaseItem, limit: Int = 3) -> [String] {

@@ -31,6 +31,7 @@ final class AppModel {
     let settings = AppSettings()
     let store = ServerStore()
     let reco = RecoEngine()
+    let discovery = DiscoveryEngine()
 
     var phase: AppPhase = .launching
     var selectedTab: AppTab = .home
@@ -50,9 +51,19 @@ final class AppModel {
     /// My List (plan to watch), newest first. Stored on the server in this user's private
     /// JellyReco storage, so it follows the account to every device and survives reinstalls.
     private(set) var watchlist: [String] = []
+    /// For You titles (from TMDB, not on the server): want to get / already seen elsewhere /
+    /// not for me. Saved on the server like My List.
+    private(set) var wishlist: [ExternalTitle] = []
+    private(set) var externalSeen: [ExternalTitle] = []
+    private(set) var externalNotForMe: [ExternalTitle] = []
+    var externalHidden: Set<String> {
+        Set(wishlist.map(\.id)).union(externalSeen.map(\.id)).union(externalNotForMe.map(\.id))
+    }
     @ObservationIgnored private var storage: DisplayPreferencesDto?
 
     var isAdmin: Bool { user?.policy?.isAdministrator ?? false }
+    /// Read-only access for the AI engines (GET requests only).
+    var reader: LibraryReader? { client.map(LibraryReader.init) }
     var serverName: String { store.currentServer?.name ?? serverInfo?.serverName ?? "Jellyfin" }
 
     // MARK: Launch
@@ -69,6 +80,7 @@ final class AppModel {
         self.client = client
         phase = .ready
         reco.attach(model: self)
+        discovery.attach(model: self)
         await refreshSession()
     }
 
@@ -128,7 +140,9 @@ final class AppModel {
         phase = .ready
         selectedTab = .home
         reco.attach(model: self)
+        discovery.attach(model: self)
         reco.reset()
+        discovery.reset()
         Task { await refreshSession() }
     }
 
@@ -146,7 +160,9 @@ final class AppModel {
         watchlist = []
         storage = nil
         settings.dismissedPicks = []
+        wishlist = []; externalSeen = []; externalNotForMe = []
         reco.reset()
+        discovery.reset()
         phase = .ready
         selectedTab = .home
         contentVersion &+= 1
@@ -162,8 +178,10 @@ final class AppModel {
         libraries = []
         userDataOverrides = [:]
         watchlist = []
+        wishlist = []; externalSeen = []; externalNotForMe = []
         storage = nil
         reco.reset()
+        discovery.reset()
         DiskCache.clearPersonal()
         // Another saved account on any server: switch to it; otherwise back to sign-in.
         if let server = store.servers.first(where: { !$0.users.isEmpty }), let next = server.users.first {
@@ -234,6 +252,9 @@ final class AppModel {
             storage = prefs
             let raw = (prefs.customPrefs?["watchlist"] ?? nil) ?? ""
             watchlist = raw.split(separator: ",").map(String.init).filter { !$0.isEmpty }
+            wishlist = Self.decodeTitles(prefs.customPrefs?["wishlist"] ?? nil)
+            externalSeen = Self.decodeTitles(prefs.customPrefs?["seenelsewhere"] ?? nil)
+            externalNotForMe = Self.decodeTitles(prefs.customPrefs?["notforme"] ?? nil)
             if let json = prefs.customPrefs?["settings"] ?? nil, !json.isEmpty {
                 settings.importJSON(json)
             } else {
@@ -302,6 +323,71 @@ final class AppModel {
             return
         }
         await saveStorage { custom in custom["watchlist"] = new.prefix(2000).joined(separator: ",") }
+    }
+
+    // MARK: For You lists (TMDB titles) — saved on the server
+
+    enum ExternalList: String { case wishlist, seenelsewhere, notforme }
+
+    private static func decodeTitles(_ json: String?) -> [ExternalTitle] {
+        guard let json, let data = json.data(using: .utf8) else { return [] }
+        return (try? JSONDecoder().decode([ExternalTitle].self, from: data)) ?? []
+    }
+
+    private static func encodeTitles(_ list: [ExternalTitle]) -> String {
+        // Overviews trimmed so the stored lists stay small.
+        let slim = list.prefix(500).map { t -> ExternalTitle in
+            var c = t
+            c.overview = String(t.overview.prefix(400))
+            c.tags = Array(t.tags.prefix(8))
+            return c
+        }
+        return String(data: (try? JSONEncoder().encode(Array(slim))) ?? Data(), encoding: .utf8) ?? "[]"
+    }
+
+    func isOnWishlist(_ t: ExternalTitle) -> Bool { wishlist.contains { $0.id == t.id } }
+
+    func toggleWishlist(_ t: ExternalTitle) async {
+        if isOnWishlist(t) { wishlist.removeAll { $0.id == t.id } } else { wishlist.insert(t, at: 0) }
+        await saveExternal(.wishlist)
+    }
+
+    func markSeenElsewhere(_ t: ExternalTitle) async {
+        externalSeen.removeAll { $0.id == t.id }
+        externalSeen.insert(t, at: 0)
+        wishlist.removeAll { $0.id == t.id }
+        await saveExternal(.seenelsewhere)
+        await saveExternal(.wishlist)
+    }
+
+    func markExternalNotForMe(_ t: ExternalTitle, _ on: Bool = true) async {
+        externalNotForMe.removeAll { $0.id == t.id }
+        if on {
+            externalNotForMe.insert(t, at: 0)
+            wishlist.removeAll { $0.id == t.id }
+            await saveExternal(.wishlist)
+        }
+        await saveExternal(.notforme)
+    }
+
+    func clearExternal(_ list: ExternalList) async {
+        switch list {
+        case .wishlist: wishlist = []
+        case .seenelsewhere: externalSeen = []
+        case .notforme: externalNotForMe = []
+        }
+        await saveExternal(list)
+    }
+
+    private func saveExternal(_ list: ExternalList) async {
+        let value: [ExternalTitle]
+        switch list {
+        case .wishlist: value = wishlist
+        case .seenelsewhere: value = externalSeen
+        case .notforme: value = externalNotForMe
+        }
+        let json = Self.encodeTitles(value)
+        await saveStorage { custom in custom[list.rawValue] = json }
     }
 
     // MARK: Not for me — Jellyfin's own thumbs-down, saved on the server

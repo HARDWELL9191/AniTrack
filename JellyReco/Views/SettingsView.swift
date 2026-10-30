@@ -487,20 +487,43 @@ struct AppearanceSettingsView: View {
 
 struct ForYouSettingsView: View {
     @Environment(AppModel.self) private var model
+    @State private var keyStatus: String?
     var body: some View {
         @Bindable var s = model.settings
         Form {
+            Section {
+                SecureField("TMDB API key or read access token", text: $s.tmdbKey)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                Button("Check key") {
+                    Task {
+                        do { try await TMDBClient(key: s.tmdbKey).validate(); keyStatus = "Key works." }
+                        catch { keyStatus = error.localizedDescription }
+                    }
+                }
+                .disabled(s.tmdbKey.isEmpty)
+                if let keyStatus { Text(keyStatus).font(.footnote).foregroundStyle(.secondary) }
+            } header: { Text("TMDB") } footer: {
+                Text("For You looks for new titles on TMDB (free key from themoviedb.org → Settings → API). Your library itself keeps using Jellyfin's own metadata.")
+            }
             Section {
                 Toggle("On-device AI ranking", isOn: $s.useOnDeviceAI)
                     .onChange(of: s.useOnDeviceAI) { _, _ in model.reco.listChanged() }
                 Toggle("Count shows I'm watching as liked", isOn: $s.includeWatchingAsLiked)
                     .onChange(of: s.includeWatchingAsLiked) { _, _ in model.reco.listChanged() }
-                Button("Rebuild picks now") { Task { await model.reco.build(force: true) } }
-                    .disabled(model.reco.isBuilding)
-                Button("Reset \"Not for me\"") { model.reco.resetDismissed() }
+                Button("Rebuild picks now") {
+                    Task {
+                        await model.reco.build(force: true)
+                        await model.discovery.build(model.reco.currentSourceId, genre: nil)
+                    }
+                }
+                .disabled(model.reco.isBuilding)
+                Button("Reset \"Not for me\" on my server titles") { model.reco.resetDismissed() }
+                Button("Reset \"Not for me\" on For You picks") { Task { await model.clearExternal(.notforme) } }
+                    .disabled(model.externalNotForMe.isEmpty)
                 LabeledContent("AI explanations", value: explainer)
             } footer: {
-                Text("Picks come only from your own libraries. "Not for me" is saved on your server as Jellyfin's thumbs-down and My List in your account's private JellyReco storage, so both follow you to every device. What you finished, favourited or are watching pulls toward similar titles; what you abandoned or marked \"Not for me\" pushes away. Jellyfin's similar-items data and, when on, Apple's on-device language model comparing each overview are blended in. Nothing leaves your iPhone except normal requests to your server. The AI step pauses in Low Power Mode or when the phone is hot.")
+                Text("For You never suggests anything already on your server: titles are matched by the TMDB, IMDb and TVDB ids Jellyfin stored, then by title and year. Your taste comes from what you finished, favourited or are watching on your server (the chosen library counts most), what you gave up on, and what you marked Not for me. The AI reads your library with read-only requests: it can't change, move or delete anything. Wishlist, Seen, Not for me, My List and your settings are saved in your account's private JellyReco storage on your server, so they follow you to every device. The on-device AI step pauses in Low Power Mode or when the phone is hot.")
             }
             Section("Libraries offered") {
                 ForEach(model.reco.sources.filter { $0.id != RecoSource.all }) { src in

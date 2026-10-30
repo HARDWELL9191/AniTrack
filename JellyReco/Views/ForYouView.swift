@@ -1,21 +1,22 @@
 import SwiftUI
 
-/// One personal pick at a time from your own library (AniReco's For You, for Jellyfin).
-/// First dropdown: which library (default Anime; or All). Second: a genre within it.
+/// For You: new titles to get, from TMDB, picked from what you watched on your server.
+/// First dropdown: which library teaches it (default Anime; or All). Second: a genre.
+/// Never shows anything already on your server.
 struct ForYouView: View {
     @Environment(AppModel.self) private var model
-    @Namespace private var zoom
-    @State private var path = NavigationPath()
     @State private var genre: String?
     @State private var index = 0
     @State private var handled = 0
+    @State private var detail: ExternalTitle?
+    @State private var showWishlist = false
 
-    private var reco: RecoEngine { model.reco }
-    private var sourceId: String { reco.currentSourceId }
-    private var list: [Pick] { reco.picks(for: sourceId, genre: genre) }
+    private var discovery: DiscoveryEngine { model.discovery }
+    private var sourceId: String { model.reco.currentSourceId }
+    private var list: [ExternalPick] { discovery.visiblePicks(for: sourceId, genre: genre) }
 
     var body: some View {
-        NavigationStack(path: $path) {
+        NavigationStack {
             ScrollView {
                 VStack(spacing: 14) {
                     filterBar
@@ -26,16 +27,31 @@ struct ForYouView: View {
             }
             .navigationTitle("For You")
             .toolbarTitleDisplayMode(.inlineLarge)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { showWishlist = true } label: {
+                        Image(systemName: model.wishlist.isEmpty ? "star" : "star.fill")
+                    }
+                    .accessibilityLabel("Wishlist")
+                }
+            }
             .refreshable {
                 index = 0
                 handled = 0
-                await reco.build(force: true)
+                await discovery.build(sourceId, genre: nil)
             }
-            .task { await reco.ensureBuilt() }
+            .task(id: sourceId) { await discovery.ensureBuilt(sourceId) }
             .onChange(of: sourceId) { _, _ in index = 0; handled = 0; genre = nil }
-            .onChange(of: genre) { _, _ in index = 0; handled = 0 }
-            .appDestinations(zoom: zoom)
-            .environment(\.zoomNamespace, zoom)
+            .onChange(of: genre) { _, new in
+                index = 0
+                handled = 0
+                // Few picks in this category yet: dig deeper into it.
+                if let new, discovery.visiblePicks(for: sourceId, genre: new).count < 12 {
+                    Task { await discovery.build(sourceId, genre: new) }
+                }
+            }
+            .sheet(item: $detail) { ExternalDetailSheet(title: $0) }
+            .sheet(isPresented: $showWishlist) { WishlistSheet() }
         }
     }
 
@@ -43,18 +59,17 @@ struct ForYouView: View {
 
     private var filterBar: some View {
         @Bindable var settings = model.settings
-        let genres = reco.genres[sourceId] ?? []
+        let genres = discovery.genres(for: sourceId)
         return GlassEffectContainer(spacing: 10) {
             HStack(spacing: 10) {
                 Menu {
                     Picker("Library", selection: Binding(get: { sourceId }, set: { settings.recoSource = $0 })) {
-                        ForEach(reco.sources) { source in
+                        ForEach(model.reco.sources) { source in
                             Label(source.name, systemImage: symbol(for: source)).tag(source.id)
                         }
                     }
                 } label: {
-                    dropdownLabel(reco.sourceName(sourceId),
-                                  symbol: symbol(for: reco.sources.first { $0.id == sourceId }))
+                    dropdownLabel(model.reco.sourceName(sourceId), symbol: symbol(for: model.reco.source(sourceId)))
                 }
                 .buttonStyle(.glass)
 
@@ -84,8 +99,7 @@ struct ForYouView: View {
     }
 
     private func symbol(for source: RecoEngine.Source?) -> String {
-        guard let source else { return "square.grid.2x2" }
-        if source.id == RecoSource.all { return "square.grid.2x2" }
+        guard let source, source.id != RecoSource.all else { return "square.grid.2x2" }
         let name = source.name.lowercased()
         if name.contains("anime") { return name.contains("movie") ? "sparkles.rectangle.stack" : "sparkles.tv" }
         switch source.collectionType {
@@ -100,34 +114,32 @@ struct ForYouView: View {
     @ViewBuilder
     private var content: some View {
         let picks = list
-        if picks.isEmpty && reco.isBuilding {
+        if !discovery.hasKey {
+            TMDBKeyCard()
+                .padding(.horizontal)
+        } else if picks.isEmpty && discovery.isBuilding.contains(sourceId) {
             VStack(spacing: 14) {
                 ProgressView()
-                Text("Reading \(reco.sourceName(sourceId))…").font(.headline)
-                Text(model.settings.useOnDeviceAI
-                     ? "Comparing what you've finished with everything you haven't watched yet, with on-device AI."
-                     : "Comparing what you've finished with everything you haven't watched yet.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
+                Text("Learning from \(model.reco.sourceName(sourceId))…").font(.headline)
+                Text("Comparing what you finished on your server with what's out there\(model.settings.useOnDeviceAI ? ", with on-device AI" : "").")
+                    .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
             }
             .padding(40)
-        } else if picks.isEmpty, let error = reco.lastError {
+        } else if picks.isEmpty, let error = discovery.errors[sourceId] {
             ContentUnavailableView("Couldn't build picks", systemImage: "exclamationmark.triangle", description: Text(error))
         } else if picks.isEmpty {
             ContentUnavailableView("No picks yet", systemImage: "wand.and.stars",
-                                   description: Text(genre == nil
-                                                     ? "Finish or favourite a few titles in \(reco.sourceName(sourceId)), then pull to refresh."
-                                                     : "Nothing unwatched in \(genre!) right now. Try another category."))
+                                   description: Text(genre == nil ? "Pull down to look again." : "Nothing new in \(genre!) right now."))
         } else {
             let safe = min(index, picks.count - 1)
             let pick = picks[safe]
-            PickCard(pick: pick,
-                     position: safe + 1 + handled,
-                     total: picks.count + handled,
-                     noun: reco.noun(for: sourceId),
-                     onNext: { withAnimation(.snappy) { index = safe + 1 >= picks.count ? 0 : safe + 1 } },
-                     onHandled: { handled += 1 })
+            ExternalPickCard(pick: pick,
+                             position: safe + 1 + handled,
+                             total: picks.count + handled,
+                             noun: noun,
+                             onNext: { withAnimation(.snappy) { index = safe + 1 >= picks.count ? 0 : safe + 1 } },
+                             onHandled: { handled += 1 },
+                             onDetails: { detail = pick.title })
                 .id(pick.id)
                 .transition(.asymmetric(insertion: .move(edge: .trailing).combined(with: .opacity),
                                         removal: .move(edge: .leading).combined(with: .opacity)))
@@ -138,17 +150,9 @@ struct ForYouView: View {
                     Text("More picks").font(.title3.bold()).padding(.horizontal)
                     ScrollView(.horizontal, showsIndicators: false) {
                         LazyHStack(alignment: .top, spacing: 12) {
-                            ForEach(Array(picks.prefix(60).enumerated()), id: \.element.id) { offset, p in
+                            ForEach(Array(picks.enumerated()), id: \.element.id) { offset, p in
                                 Button { withAnimation(.snappy) { index = offset } } label: {
-                                    PosterCard(item: p.item, width: 96)
-                                        .overlay {
-                                            if offset == safe {
-                                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                                    .strokeBorder(Theme.pink, lineWidth: 2)
-                                                    .frame(width: 96, height: 144)
-                                                    .frame(maxHeight: .infinity, alignment: .top)
-                                            }
-                                        }
+                                    ExternalPosterCard(title: p.title, match: p.match, width: 96, highlighted: offset == safe)
                                 }
                                 .buttonStyle(PressStyle())
                             }
@@ -158,7 +162,6 @@ struct ForYouView: View {
                     .scrollClipDisabled()
                 }
             }
-
             Text(footer)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
@@ -167,22 +170,59 @@ struct ForYouView: View {
         }
     }
 
+    private var noun: String {
+        switch discovery.kind(of: sourceId) {
+        case .animeShows: return "anime"
+        case .animeMovies: return "anime movie"
+        case .movies: return "movie"
+        case .shows: return "TV show"
+        default: return "title"
+        }
+    }
+
     private var footer: String {
-        let when = reco.builtAt.map { $0.formatted(.relative(presentation: .named)) } ?? "just now"
-        let how = reco.usedAI ? "your history, similar titles and on-device AI" : "your history and similar titles"
-        return "Built \(when) from \(how). Only titles on your server, never ones you've finished."
+        let when = discovery.builtAt[sourceId].map { $0.formatted(.relative(presentation: .named)) } ?? "just now"
+        return "Built \(when) from what you watched in \(model.reco.sourceName(sourceId)), TMDB's also-liked lists\(discovery.usedAI ? " and on-device AI" : ""). Nothing here is on your server yet."
     }
 }
 
-struct PickCard: View {
+// MARK: - Cards
+
+struct ExternalPosterCard: View {
+    let title: ExternalTitle
+    var match: Int?
+    var width: CGFloat = 110
+    var highlighted = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            RemoteImage(url: title.posterURL, placeholderSymbol: title.isMovie ? "film" : "tv")
+                .frame(width: width, height: width * 1.5)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(alignment: .bottomLeading) {
+                    if let match { MatchBubble(value: match).padding(5) }
+                }
+                .overlay {
+                    if highlighted {
+                        RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Theme.pink, lineWidth: 2)
+                    }
+                }
+            Text(title.title).font(.caption.weight(.semibold)).lineLimit(2).frame(width: width, alignment: .leading)
+            Text(title.year.map(String.init) ?? " ").font(.caption2).foregroundStyle(.secondary)
+        }
+        .foregroundStyle(.primary)
+    }
+}
+
+struct ExternalPickCard: View {
     @Environment(AppModel.self) private var model
-    @Environment(\.zoomNamespace) private var zoom
-    let pick: Pick
+    let pick: ExternalPick
     let position: Int
     let total: Int
     let noun: String
     let onNext: () -> Void
     let onHandled: () -> Void
+    let onDetails: () -> Void
 
     @State private var explanation: String?
     @State private var isExplaining = false
@@ -190,31 +230,30 @@ struct PickCard: View {
     @State private var showMoreLike = false
 
     var body: some View {
-        let item = pick.item
+        let t = pick.title
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top, spacing: 14) {
-                RemoteImage(url: model.client?.posterURL(item, width: 400))
-                    .frame(width: 120, height: 180)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay(alignment: .topLeading) {
-                        if let r = item.officialRating { GlassLabel(text: r).padding(6) }
-                    }
-                    .zoomSource(id: item.id, in: zoom)
-                    .shadow(color: .black.opacity(0.2), radius: 8, y: 4)
+                Button(action: onDetails) {
+                    RemoteImage(url: t.posterURL)
+                        .frame(width: 120, height: 180)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .shadow(color: .black.opacity(0.2), radius: 8, y: 4)
+                }
+                .buttonStyle(PressStyle())
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Pick \(position) of \(total)").font(.caption).foregroundStyle(.secondary)
-                    Text(item.displayName).font(.title3.bold()).lineLimit(3)
-                    if let m = model.reco.match(for: item) {
-                        Text("\(m)% match").font(.headline).foregroundStyle(Theme.pink)
+                    Text(t.title).font(.title3.bold()).lineLimit(3)
+                    Text("\(pick.match)% match").font(.headline).foregroundStyle(Theme.pink)
+                    Text(t.metaLine).font(.caption).foregroundStyle(.secondary)
+                    if let score = t.score, score > 0 {
+                        Label(String(format: "%.1f TMDB", score), systemImage: "star.fill")
+                            .font(.caption.weight(.semibold)).foregroundStyle(.yellow)
                     }
-                    Text(item.subtitleLine).font(.caption).foregroundStyle(.secondary)
-                    RatingLabel(item: item)
                 }
             }
-
             if !pick.because.isEmpty {
                 Label {
-                    Text("Because you liked \(Text(pick.because.joined(separator: ", ")).bold())").font(.subheadline)
+                    Text("Because you watched \(Text(pick.because.joined(separator: ", ")).bold())").font(.subheadline)
                 } icon: {
                     Image(systemName: "heart.fill").foregroundStyle(Theme.pink)
                 }
@@ -222,48 +261,42 @@ struct PickCard: View {
             if !pick.highlights.isEmpty {
                 FlowLayout { ForEach(pick.highlights, id: \.self) { Chip(text: $0) } }
             }
-            Text(item.plainOverview).font(.subheadline).lineLimit(6).foregroundStyle(.secondary)
+            Text(t.overview).font(.subheadline).lineLimit(6).foregroundStyle(.secondary)
 
             aiExplanation
 
             GlassEffectContainer(spacing: 10) {
                 VStack(spacing: 10) {
                     HStack(spacing: 10) {
-                        Button { model.play(item) } label: {
-                            Label("Play", systemImage: "play.fill").frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.glassProminent)
                         Button {
                             Task {
-                                await model.toggleWatchlist(item)
-                                if model.isOnWatchlist(item) { onHandled() }   // planned = handled: next pick
+                                let adding = !model.isOnWishlist(t)
+                                await model.toggleWishlist(t)
+                                if adding { onHandled() }
                             }
                         } label: {
-                            Label("My List", systemImage: model.isOnWatchlist(item) ? "bookmark.fill" : "bookmark")
+                            Label(model.isOnWishlist(t) ? "On Wishlist" : "Want it", systemImage: model.isOnWishlist(t) ? "star.fill" : "star")
                                 .frame(maxWidth: .infinity)
                         }
-                        .buttonStyle(.glass)
-                        NavigationLink(value: ItemLink(item: item)) {
-                            Label("Details", systemImage: "info.circle").labelStyle(.iconOnly).frame(width: 44)
+                        .buttonStyle(.glassProminent)
+                        Button(action: onDetails) {
+                            Label("Details", systemImage: "info.circle").frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.glass)
                     }
                     HStack(spacing: 10) {
                         Button(role: .destructive) {
                             onHandled()
-                            withAnimation(.snappy) { model.reco.dismiss(item) }
+                            Task { await model.markExternalNotForMe(t) }
                         } label: {
                             Label("Not for me", systemImage: "hand.thumbsdown").foregroundStyle(.red).frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.glass)
                         Button {
-                            Task {
-                                await model.togglePlayed(item)
-                                onHandled()
-                            }
+                            onHandled()
+                            Task { await model.markSeenElsewhere(t) }
                         } label: {
-                            Label("Already watched", systemImage: "eye.fill").lineLimit(1).minimumScaleFactor(0.8)
-                                .frame(maxWidth: .infinity)
+                            Label("Already seen", systemImage: "eye.fill").lineLimit(1).minimumScaleFactor(0.8).frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.glass)
                     }
@@ -291,10 +324,8 @@ struct PickCard: View {
                                              startPoint: .top, endPoint: .bottom))
                 }
         }
-        .onAppear { explanation = PickExplainer.shared.cached(item.id) }
-        .sheet(isPresented: $showMoreLike) {
-            MoreLikeThisSheet(item: item).presentationDetents([.medium, .large])
-        }
+        .onAppear { explanation = PickExplainer.shared.cached(t.id) }
+        .sheet(isPresented: $showMoreLike) { ExternalMoreLikeSheet(title: t).presentationDetents([.medium, .large]) }
     }
 
     @ViewBuilder
@@ -313,11 +344,8 @@ struct PickCard: View {
                 Button {
                     Task { await explain() }
                 } label: {
-                    if isExplaining {
-                        HStack { ProgressView(); Text("Thinking on-device…") }
-                    } else {
-                        Label("Why would I like this?", systemImage: "apple.intelligence")
-                    }
+                    if isExplaining { HStack { ProgressView(); Text("Thinking on-device…") } }
+                    else { Label("Why would I like this?", systemImage: "apple.intelligence") }
                 }
                 .buttonStyle(.glass)
                 .disabled(isExplaining)
@@ -334,11 +362,254 @@ struct PickCard: View {
         defer { isExplaining = false }
         do {
             explanation = try await PickExplainer.shared.explain(
-                pick.item, because: pick.because,
-                liked: model.reco.topLiked(in: model.reco.currentSourceId),
+                DiscoveryEngine.pseudoItem(pick.title).withOverview(pick.title.overview),
+                because: pick.because, liked: model.reco.topLiked(in: model.reco.currentSourceId),
                 highlights: pick.highlights, noun: noun)
         } catch {
             explainError = "Apple Intelligence couldn't write this one (\(error.localizedDescription))."
+        }
+    }
+}
+
+extension BaseItem {
+    func withOverview(_ text: String) -> BaseItem {
+        var copy = self
+        copy.overview = text
+        return copy
+    }
+}
+
+/// A TMDB title (not on your server): poster, overview, links, actions.
+struct ExternalDetailSheet: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
+    @State var title: ExternalTitle
+    @State private var showMoreLike = false
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    ZStack(alignment: .bottomLeading) {
+                        RemoteImage(url: title.backdropURL ?? title.posterURL)
+                            .frame(height: 210).frame(maxWidth: .infinity).clipped()
+                            .overlay(LinearGradient(colors: [.clear, Color(.systemBackground)], startPoint: .center, endPoint: .bottom))
+                        HStack(alignment: .bottom, spacing: 14) {
+                            RemoteImage(url: title.posterURL)
+                                .frame(width: 96, height: 144)
+                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                .shadow(radius: 8)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(title.title).font(.title3.bold()).lineLimit(3)
+                                if let o = title.originalTitle, o != title.title { Text(o).font(.caption).foregroundStyle(.secondary) }
+                                Text(title.metaLine).font(.caption).foregroundStyle(.secondary)
+                                if let s = title.score, s > 0 {
+                                    Label(String(format: "%.1f · %d votes", s, title.voteCount ?? 0), systemImage: "star.fill")
+                                        .font(.caption.weight(.semibold)).foregroundStyle(.yellow)
+                                }
+                            }
+                        }
+                        .padding(.horizontal)
+                        .offset(y: 40)
+                    }
+                    .padding(.bottom, 40)
+
+                    Label("Not on your server", systemImage: "icloud.and.arrow.down")
+                        .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                        .padding(.horizontal)
+
+                    GlassEffectContainer(spacing: 10) {
+                        HStack(spacing: 10) {
+                            Button { Task { await model.toggleWishlist(title) } } label: {
+                                Label(model.isOnWishlist(title) ? "On Wishlist" : "Want it",
+                                      systemImage: model.isOnWishlist(title) ? "star.fill" : "star").frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.glassProminent)
+                            Button { showMoreLike = true } label: {
+                                Label("More like this", systemImage: "square.stack.3d.up").frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.glass)
+                        }
+                        .controlSize(.large)
+                    }
+                    .padding(.horizontal)
+
+                    Text(title.overview).font(.subheadline).foregroundStyle(.secondary).padding(.horizontal)
+                    if !title.genres.isEmpty {
+                        FlowLayout { ForEach(title.genres, id: \.self) { Chip(text: $0) } }.padding(.horizontal)
+                    }
+                    if !title.tags.isEmpty {
+                        FlowLayout { ForEach(title.tags.prefix(12), id: \.self) { Chip(text: $0, tint: .gray) } }.padding(.horizontal)
+                    }
+                    HStack(spacing: 10) {
+                        if let url = title.webURL { Button("TMDB", systemImage: "safari") { openURL(url) }.buttonStyle(.glass) }
+                        if let url = title.imdbURL { Button("IMDb", systemImage: "safari") { openURL(url) }.buttonStyle(.glass) }
+                    }
+                    .padding(.horizontal)
+                    HStack(spacing: 10) {
+                        Button("Already seen") { Task { await model.markSeenElsewhere(title); dismiss() } }.buttonStyle(.glass)
+                        Button("Not for me", role: .destructive) { Task { await model.markExternalNotForMe(title); dismiss() } }.buttonStyle(.glass)
+                    }
+                    .padding(.horizontal)
+                }
+                .padding(.bottom, 24)
+            }
+            .ignoresSafeArea(edges: .top)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .task { title = await model.discovery.details(title) }
+            .sheet(isPresented: $showMoreLike) { ExternalMoreLikeSheet(title: title).presentationDetents([.medium, .large]) }
+        }
+    }
+}
+
+struct ExternalMoreLikeSheet: View {
+    @Environment(AppModel.self) private var model
+    let title: ExternalTitle
+    @State private var items: [ExternalTitle]?
+    @State private var detail: ExternalTitle?
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if let items, items.isEmpty {
+                    ContentUnavailableView("Nothing new", systemImage: "square.stack.3d.up.slash",
+                                           description: Text("Everything like \(title.title) is already on your server or hidden."))
+                } else if let items {
+                    ScrollView {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 12)], spacing: 16) {
+                            ForEach(items) { t in
+                                Button { detail = t } label: { ExternalPosterCard(title: t, width: 104) }.buttonStyle(PressStyle())
+                            }
+                        }
+                        .padding()
+                    }
+                } else {
+                    ProgressView()
+                }
+            }
+            .navigationTitle("Like \(title.title)")
+            .navigationBarTitleDisplayMode(.inline)
+            .sheet(item: $detail) { ExternalDetailSheet(title: $0) }
+        }
+        .task { items = await model.discovery.moreLike(title) }
+    }
+}
+
+/// Things you want to get (saved on your server). Ticks off by itself once a title appears there.
+struct WishlistSheet: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    @State private var detail: ExternalTitle?
+    @State private var tab = 0
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Picker("", selection: $tab) {
+                    Text("Wishlist").tag(0)
+                    Text("Seen").tag(1)
+                    Text("Not for me").tag(2)
+                }
+                .pickerStyle(.segmented)
+                let list = tab == 0 ? model.wishlist : (tab == 1 ? model.externalSeen : model.externalNotForMe)
+                let owned = OwnedIndex(items: model.reco.libraryItems, idMap: [:])
+                ForEach(list) { t in
+                    Button { detail = t } label: {
+                        HStack(spacing: 12) {
+                            RemoteImage(url: t.posterURL).frame(width: 50, height: 75).clipShape(RoundedRectangle(cornerRadius: 6))
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(t.title).font(.subheadline.weight(.semibold))
+                                Text(t.metaLine).font(.caption).foregroundStyle(.secondary)
+                                if tab == 0 && owned.contains(t) {
+                                    Label("Now on your server", systemImage: "checkmark.circle.fill").font(.caption.weight(.semibold)).foregroundStyle(.green)
+                                }
+                            }
+                        }
+                    }
+                    .foregroundStyle(.primary)
+                    .swipeActions {
+                        Button(role: .destructive) {
+                            Task {
+                                switch tab {
+                                case 0: await model.toggleWishlist(t)
+                                case 2: await model.markExternalNotForMe(t, false)
+                                default: break
+                                }
+                            }
+                        } label: { Label("Remove", systemImage: "trash") }
+                    }
+                }
+                if list.isEmpty {
+                    Text(tab == 0 ? "Tap \"Want it\" on a pick to keep it here. Saved on your Jellyfin server." : "Nothing here.")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("Wishlist")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+                if tab > 0 {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Clear") { Task { await model.clearExternal(tab == 1 ? .seenelsewhere : .notforme) } }
+                    }
+                }
+            }
+            .sheet(item: $detail) { ExternalDetailSheet(title: $0) }
+        }
+    }
+}
+
+/// Shown until a TMDB key is added (one-time, ~2 minutes).
+struct TMDBKeyCard: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.openURL) private var openURL
+    @State private var key = ""
+    @State private var checking = false
+    @State private var error: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label("Connect TMDB", systemImage: "sparkle.magnifyingglass").font(.title3.bold())
+            Text("For You finds new movies, shows and anime on TMDB, based on what you watched on your server, and never suggests anything you already have. It needs a free TMDB API key (once).")
+                .font(.subheadline).foregroundStyle(.secondary)
+            Text("1. Sign up at themoviedb.org\n2. Settings → API → create a key (Developer, personal use)\n3. Copy the \"API Read Access Token\" (or the API key) and paste it here")
+                .font(.footnote)
+            Button("Open TMDB API settings", systemImage: "safari") {
+                if let url = URL(string: "https://www.themoviedb.org/settings/api") { openURL(url) }
+            }
+            .buttonStyle(.glass)
+            SecureField("TMDB API key or read access token", text: $key)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .padding(12)
+                .background(.fill.tertiary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            if let error { Text(error).font(.footnote).foregroundStyle(.red) }
+            Button {
+                Task { await save() }
+            } label: {
+                HStack { if checking { ProgressView() }; Text("Save and find picks").fontWeight(.semibold) }.frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.glassProminent)
+            .controlSize(.large)
+            .disabled(key.trimmingCharacters(in: .whitespaces).isEmpty || checking)
+            Text("Saved in your account's private JellyReco storage on your server, so your other devices have it too.")
+                .font(.caption2).foregroundStyle(.secondary)
+        }
+        .padding()
+        .background(RoundedRectangle(cornerRadius: 28, style: .continuous).fill(.background.secondary))
+    }
+
+    private func save() async {
+        checking = true
+        error = nil
+        defer { checking = false }
+        do {
+            try await TMDBClient(key: key).validate()
+            model.settings.tmdbKey = key.trimmingCharacters(in: .whitespacesAndNewlines)
+            await model.discovery.build(model.reco.currentSourceId, genre: nil)
+        } catch {
+            self.error = error.localizedDescription
         }
     }
 }
