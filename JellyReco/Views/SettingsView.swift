@@ -40,7 +40,6 @@ struct SettingsView: View {
                 Section("Playback") {
                     NavigationLink { PlayerSettingsView() } label: { Label("Video player", systemImage: "play.rectangle.fill") }
                     NavigationLink { SubtitleAudioSettingsView() } label: { Label("Subtitles & audio", systemImage: "captions.bubble.fill") }
-                    NavigationLink { QualitySettingsView() } label: { Label("Streaming quality", systemImage: "antenna.radiowaves.left.and.right") }
                     NavigationLink { GestureSettingsView() } label: { Label("Gestures", systemImage: "hand.draw.fill") }
                 }
 
@@ -65,7 +64,7 @@ struct SettingsView: View {
                 Section("About") {
                     LabeledContent("JellyReco", value: JellyfinClient.appVersion)
                     if let v = model.serverInfo?.version ?? model.store.currentServer?.version { LabeledContent("Server", value: "Jellyfin \(v)") }
-                    LabeledContent("Player", value: "mpv (FFmpeg + libass) & AVPlayer")
+                    LabeledContent("Playback", value: "Direct play first")
                 }
             }
             .navigationTitle("Settings")
@@ -264,12 +263,13 @@ struct PlayerSettingsView: View {
         @Bindable var s = model.settings
         Form {
             Section {
-                Picker("Player", selection: $s.playerEngine) {
+                Picker("Video output", selection: $s.playerEngine) {
                     ForEach(PlayerEngine.allCases) { Text($0.label).tag($0) }
                 }
                 Toggle("Hardware decoding", isOn: $s.hardwareDecoding)
+                Toggle("Server conversion as a fallback", isOn: $s.transcodeFallback)
             } footer: {
-                Text(s.playerEngine.footnote)
+                Text(s.playerEngine.footnote + " If a file still can't play on your iPhone, \(s.transcodeFallback ? "your server converts it as a last resort" : "you'll see why instead (the server never converts)").")
             }
             Section("Resume & jumping") {
                 Stepper("Rewind on resume: \(s.resumeOffset) s", value: $s.resumeOffset, in: 0...30)
@@ -384,7 +384,6 @@ struct SubtitleAudioSettingsView: View {
                 Text("Styled ASS/SSA subtitles (typical for anime) keep their own fonts and positions unless you override them.")
             }
             Section("Audio") {
-                Toggle("Normalize loudness", isOn: $s.audioNormalization)
                 Toggle("Downmix to stereo", isOn: $s.stereoDownmix)
             }
         }
@@ -405,30 +404,6 @@ struct SubtitleAudioSettingsView: View {
         .frame(height: 110)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .listRowInsets(EdgeInsets())
-    }
-}
-
-struct QualitySettingsView: View {
-    @Environment(AppModel.self) private var model
-    var body: some View {
-        @Bindable var s = model.settings
-        Form {
-            Section {
-                Picker("On Wi-Fi", selection: $s.maxBitrate) { ForEach(MaxBitrate.allCases) { Text($0.label).tag($0) } }
-                Picker("On cellular", selection: $s.cellularBitrate) { ForEach(MaxBitrate.allCases) { Text($0.label).tag($0) } }
-            } header: { Text("Maximum bitrate") } footer: {
-                Text("Files above the limit are converted by your server. \"Maximum\" always plays the original file.")
-            }
-            Section {
-                Picker("Compatibility", selection: $s.compatibility) {
-                    ForEach(CompatibilityProfile.allCases) { Text($0.label).tag($0) }
-                }
-                Toggle("Allow server conversion", isOn: $s.allowTranscoding)
-            } footer: {
-                Text("With the mpv player almost nothing needs converting. \"Most compatible\" asks the server for H.264/AAC; \"Direct play only\" never converts.")
-            }
-        }
-        .navigationTitle("Streaming quality")
     }
 }
 
@@ -522,11 +497,10 @@ struct ForYouSettingsView: View {
                     .onChange(of: s.includeWatchingAsLiked) { _, _ in model.reco.listChanged() }
                 Button("Rebuild picks now") { Task { await model.reco.build(force: true) } }
                     .disabled(model.reco.isBuilding)
-                Button("Reset \"Not for me\" (\(s.dismissedPicks.count))") { model.reco.resetDismissed() }
-                    .disabled(s.dismissedPicks.isEmpty)
+                Button("Reset \"Not for me\"") { model.reco.resetDismissed() }
                 LabeledContent("AI explanations", value: explainer)
             } footer: {
-                Text("Picks come only from your own libraries. What you finished, favourited or are watching pulls toward similar titles; what you abandoned or marked \"Not for me\" pushes away. Jellyfin's similar-items data and, when on, Apple's on-device language model comparing each overview are blended in. Nothing leaves your iPhone except normal requests to your server. The AI step pauses in Low Power Mode or when the phone is hot.")
+                Text("Picks come only from your own libraries. "Not for me" is saved on your server as Jellyfin's thumbs-down and My List in your account's private JellyReco storage, so both follow you to every device. What you finished, favourited or are watching pulls toward similar titles; what you abandoned or marked \"Not for me\" pushes away. Jellyfin's similar-items data and, when on, Apple's on-device language model comparing each overview are blended in. Nothing leaves your iPhone except normal requests to your server. The AI step pauses in Low Power Mode or when the phone is hot.")
             }
             Section("Libraries offered") {
                 ForEach(model.reco.sources.filter { $0.id != RecoSource.all }) { src in

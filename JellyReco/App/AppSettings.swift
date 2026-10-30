@@ -4,64 +4,24 @@ import SwiftUI
 
 // MARK: - Option enums
 
+/// How mpv draws the picture. Both play every file directly.
 enum PlayerEngine: String, CaseIterable, Identifiable, Codable {
-    /// Picks per file: Apple's player when it can play the file untouched, mpv for everything else.
+    /// Apple's native video layer: Picture in Picture, AirPlay, Dolby Vision, lowest battery use.
+    /// Falls back to the Metal renderer automatically for anything the native layer can't show.
     case automatic
-    /// mpv (FFmpeg + libass): every container, codec and subtitle format.
+    /// mpv's own Metal renderer (libplacebo): best scaling and HDR tone mapping, no PiP.
     case mpv
-    /// Apple's AVPlayer: Picture in Picture, AirPlay, Dolby Vision; the server converts what it can't play.
-    case native
     var id: String { rawValue }
     var label: String {
         switch self {
-        case .automatic: return "Automatic"
-        case .mpv: return "JellyReco (mpv)"
-        case .native: return "Apple (AVPlayer)"
+        case .automatic: return "Native (recommended)"
+        case .mpv: return "High-quality renderer"
         }
     }
     var footnote: String {
         switch self {
-        case .automatic: return "Apple's player for files it plays natively (PiP, AirPlay, Dolby Vision); mpv for everything else (MKV, DTS, TrueHD, ASS/PGS subtitles…). Nothing is converted on the server."
-        case .mpv: return "Plays every file directly on your iPhone, including styled ASS subtitles and PGS/VobSub."
-        case .native: return "Apple's player. Files it can't play are converted by your server."
-        }
-    }
-}
-
-enum MaxBitrate: Int, CaseIterable, Identifiable, Codable {
-    case auto = 0
-    case max = 200_000_000
-    case b120 = 120_000_000, b80 = 80_000_000, b60 = 60_000_000, b40 = 40_000_000
-    case b20 = 20_000_000, b15 = 15_000_000, b10 = 10_000_000, b8 = 8_000_000
-    case b6 = 6_000_000, b4 = 4_000_000, b3 = 3_000_000, b1_5 = 1_500_000, b720k = 720_000, b420k = 420_000
-    var id: Int { rawValue }
-    var label: String {
-        switch self {
-        case .auto: return "Auto (measure connection)"
-        case .max: return "Maximum (original)"
-        default:
-            let mbps = Double(rawValue) / 1_000_000
-            let res: String
-            switch rawValue {
-            case 40_000_000...: res = "4K"
-            case 10_000_000...: res = "1080p"
-            case 4_000_000...: res = "720p"
-            case 1_500_000...: res = "480p"
-            default: res = "360p"
-            }
-            return mbps >= 1 ? String(format: "%g Mbps · %@", mbps, res) : "\(rawValue / 1000) kbps · \(res)"
-        }
-    }
-}
-
-enum CompatibilityProfile: String, CaseIterable, Identifiable, Codable {
-    case auto, mostCompatible, directPlay
-    var id: String { rawValue }
-    var label: String {
-        switch self {
-        case .auto: return "Auto"
-        case .mostCompatible: return "Most compatible (H.264/AAC)"
-        case .directPlay: return "Direct play only"
+        case .automatic: return "mpv decodes every file directly; Apple's video layer shows it, with Picture in Picture, AirPlay and Dolby Vision. Files it can't show switch to the high-quality renderer by themselves."
+        case .mpv: return "mpv's libplacebo renderer for everything: sharper scaling and HDR tone mapping, but no Picture in Picture."
         }
     }
 }
@@ -259,14 +219,10 @@ final class AppSettings {
     var subtitleBold: Bool { didSet { save(subtitleBold, "subtitleBold") } }
     var subtitlePosition: Int { didSet { save(subtitlePosition, "subtitlePosition") } } // 0...100 (mpv sub-pos)
     var overrideASSStyles: Bool { didSet { save(overrideASSStyles, "overrideASSStyles") } }
-    var audioNormalization: Bool { didSet { save(audioNormalization, "audioNormalization") } }
     var stereoDownmix: Bool { didSet { save(stereoDownmix, "stereoDownmix") } }
 
-    // Playback quality
-    var maxBitrate: MaxBitrate { didSet { save(maxBitrate.rawValue, "maxBitrate") } }
-    var cellularBitrate: MaxBitrate { didSet { save(cellularBitrate.rawValue, "cellularBitrate") } }
-    var compatibility: CompatibilityProfile { didSet { save(compatibility.rawValue, "compatibility") } }
-    var allowTranscoding: Bool { didSet { save(allowTranscoding, "allowTranscoding") } }
+    /// Direct play always comes first; only if the iPhone can't play a file is the server asked to convert it.
+    var transcodeFallback: Bool { didSet { save(transcodeFallback, "transcodeFallback") } }
 
     // For You
     var useOnDeviceAI: Bool { didSet { save(useOnDeviceAI, "useOnDeviceAI") } }
@@ -286,9 +242,6 @@ final class AppSettings {
         func s(_ k: String, _ def: String) -> String { d.string(forKey: k) ?? def }
         func e<E: RawRepresentable>(_ k: String, _ def: E) -> E where E.RawValue == String {
             d.string(forKey: k).flatMap(E.init(rawValue:)) ?? def
-        }
-        func ei<E: RawRepresentable>(_ k: String, _ def: E) -> E where E.RawValue == Int {
-            (d.object(forKey: k) as? Int).flatMap(E.init(rawValue:)) ?? def
         }
         func set(_ k: String) -> Set<String> { Set(d.array(forKey: k) as? [String] ?? []) }
 
@@ -358,14 +311,9 @@ final class AppSettings {
         subtitleBold = b("subtitleBold", true)
         subtitlePosition = i("subtitlePosition", 100)
         overrideASSStyles = b("overrideASSStyles", false)
-        audioNormalization = b("audioNormalization", false)
         stereoDownmix = b("stereoDownmix", false)
 
-        maxBitrate = ei("maxBitrate", MaxBitrate.max)
-        cellularBitrate = ei("cellularBitrate", MaxBitrate.b20)
-        compatibility = e("compatibility", CompatibilityProfile.auto)
-        allowTranscoding = b("allowTranscoding", true)
-
+        transcodeFallback = b("transcodeFallback", true)
         useOnDeviceAI = b("useOnDeviceAI", true)
         recoSource = s("recoSource", "")
         dismissedPicks = set("dismissedPicks")
@@ -374,7 +322,85 @@ final class AppSettings {
         requireFaceID = b("requireFaceID", false)
     }
 
-    private func save(_ value: Any, _ key: String) { d.set(value, forKey: key) }
+    private func save(_ value: Any, _ key: String) {
+        d.set(value, forKey: key)
+        if !isApplyingRemote && Self.syncedKeys.contains(key) { onChange?() }
+    }
+
+    // MARK: Sync with the server
+
+    /// Called after a synced setting changes (AppModel saves them to the server, debounced).
+    @ObservationIgnored var onChange: (() -> Void)?
+    @ObservationIgnored private var isApplyingRemote = false
+
+    /// Everything that's a preference (not a cache or a per-device thing like Face ID).
+    static let syncedKeys: Set<String> = [
+        "appearance", "showPosterLabels", "showRatingBadges", "showProgressIndicator", "showUnplayedIndicator",
+        "showPlayedIndicator", "showFavoriteIndicator", "homeShowContinue", "homeShowNextUp", "homeMergeNextUp",
+        "homeShowLatest", "homeShowPicks", "nextUpRewatching", "nextUpMaxDays", "hiddenLatestLibraries",
+        "libraryLayout", "libraryPosterStyle", "gridColumns", "rememberLayoutPerLibrary", "showLetterPicker",
+        "showRandomButton", "layoutOverrides", "showMissingEpisodes", "landscapeEpisodeThumbs", "hideSpoilers",
+        "playerEngine", "hardwareDecoding", "resumeOffset", "jumpBackward", "jumpForward", "defaultSpeed",
+        "autoPlayNext", "nextUpCountdown", "stillWatchingAfter", "autoSkipIntro", "autoSkipRecap", "autoSkipOutro",
+        "showSkipButtons", "timestampStyle", "showChaptersOnSlider", "trickplayPreviews", "startInLandscape",
+        "pipAutomatically", "backgroundAudio", "gestureLeftVertical", "gestureRightVertical", "gestureHorizontal",
+        "doubleTap", "longPress", "pinchToFill", "preferredAudioLanguage", "preferredSubtitleLanguage",
+        "subtitlesByDefault", "preferSignsAndSongs", "subtitleSize", "subtitleColor", "subtitleBackground",
+        "subtitleBold", "subtitlePosition", "overrideASSStyles", "stereoDownmix", "transcodeFallback",
+        "useOnDeviceAI", "recoSource", "includeWatchingAsLiked",
+    ]
+
+    /// Current synced settings as JSON.
+    func exportJSON() -> String? {
+        var out: [String: Any] = [:]
+        for key in Self.syncedKeys { if let v = d.object(forKey: key) { out[key] = v } }
+        guard let data = try? JSONSerialization.data(withJSONObject: out, options: [.sortedKeys]) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    /// Applies settings saved on the server (from another device or a reinstall).
+    func importJSON(_ json: String) {
+        guard let data = json.data(using: .utf8),
+              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+        isApplyingRemote = true
+        defer { isApplyingRemote = false }
+        for (key, value) in dict where Self.syncedKeys.contains(key) { d.set(value, forKey: key) }
+        reloadFromDefaults()
+    }
+
+    /// Re-reads every property from UserDefaults (after importing).
+    private func reloadFromDefaults() {
+        let fresh = AppSettings()
+        appearance = fresh.appearance; showPosterLabels = fresh.showPosterLabels; showRatingBadges = fresh.showRatingBadges
+        showProgressIndicator = fresh.showProgressIndicator; showUnplayedIndicator = fresh.showUnplayedIndicator
+        showPlayedIndicator = fresh.showPlayedIndicator; showFavoriteIndicator = fresh.showFavoriteIndicator
+        homeShowContinue = fresh.homeShowContinue; homeShowNextUp = fresh.homeShowNextUp; homeMergeNextUp = fresh.homeMergeNextUp
+        homeShowLatest = fresh.homeShowLatest; homeShowPicks = fresh.homeShowPicks; nextUpRewatching = fresh.nextUpRewatching
+        nextUpMaxDays = fresh.nextUpMaxDays; hiddenLatestLibraries = fresh.hiddenLatestLibraries
+        libraryLayout = fresh.libraryLayout; libraryPosterStyle = fresh.libraryPosterStyle; gridColumns = fresh.gridColumns
+        rememberLayoutPerLibrary = fresh.rememberLayoutPerLibrary; showLetterPicker = fresh.showLetterPicker
+        showRandomButton = fresh.showRandomButton; layoutOverrides = fresh.layoutOverrides
+        showMissingEpisodes = fresh.showMissingEpisodes; landscapeEpisodeThumbs = fresh.landscapeEpisodeThumbs
+        hideSpoilers = fresh.hideSpoilers
+        playerEngine = fresh.playerEngine; hardwareDecoding = fresh.hardwareDecoding; resumeOffset = fresh.resumeOffset
+        jumpBackward = fresh.jumpBackward; jumpForward = fresh.jumpForward; defaultSpeed = fresh.defaultSpeed
+        autoPlayNext = fresh.autoPlayNext; nextUpCountdown = fresh.nextUpCountdown; stillWatchingAfter = fresh.stillWatchingAfter
+        autoSkipIntro = fresh.autoSkipIntro; autoSkipRecap = fresh.autoSkipRecap; autoSkipOutro = fresh.autoSkipOutro
+        showSkipButtons = fresh.showSkipButtons; timestampStyle = fresh.timestampStyle
+        showChaptersOnSlider = fresh.showChaptersOnSlider; trickplayPreviews = fresh.trickplayPreviews
+        startInLandscape = fresh.startInLandscape; pipAutomatically = fresh.pipAutomatically
+        backgroundAudio = fresh.backgroundAudio
+        gestureLeftVertical = fresh.gestureLeftVertical; gestureRightVertical = fresh.gestureRightVertical
+        gestureHorizontal = fresh.gestureHorizontal; doubleTap = fresh.doubleTap; longPress = fresh.longPress
+        pinchToFill = fresh.pinchToFill
+        preferredAudioLanguage = fresh.preferredAudioLanguage; preferredSubtitleLanguage = fresh.preferredSubtitleLanguage
+        subtitlesByDefault = fresh.subtitlesByDefault; preferSignsAndSongs = fresh.preferSignsAndSongs
+        subtitleSize = fresh.subtitleSize; subtitleColor = fresh.subtitleColor; subtitleBackground = fresh.subtitleBackground
+        subtitleBold = fresh.subtitleBold; subtitlePosition = fresh.subtitlePosition
+        overrideASSStyles = fresh.overrideASSStyles; stereoDownmix = fresh.stereoDownmix
+        transcodeFallback = fresh.transcodeFallback
+        useOnDeviceAI = fresh.useOnDeviceAI; recoSource = fresh.recoSource; includeWatchingAsLiked = fresh.includeWatchingAsLiked
+    }
 
     func layout(for libraryId: String) -> LibraryLayout {
         guard rememberLayoutPerLibrary, let raw = layoutOverrides[libraryId], let l = LibraryLayout(rawValue: raw) else {
@@ -394,7 +420,7 @@ final class AppSettings {
                     "startInLandscape", "pipAutomatically", "backgroundAudio", "gestureLeftVertical",
                     "gestureRightVertical", "gestureHorizontal", "doubleTap", "longPress", "pinchToFill",
                     "subtitleSize", "subtitleColor", "subtitleBackground", "subtitleBold", "subtitlePosition",
-                    "overrideASSStyles", "audioNormalization", "stereoDownmix"] {
+                    "overrideASSStyles", "stereoDownmix"] {
             d.removeObject(forKey: key)
         }
         let fresh = AppSettings()
@@ -411,6 +437,6 @@ final class AppSettings {
         pinchToFill = fresh.pinchToFill; subtitleSize = fresh.subtitleSize; subtitleColor = fresh.subtitleColor
         subtitleBackground = fresh.subtitleBackground; subtitleBold = fresh.subtitleBold
         subtitlePosition = fresh.subtitlePosition; overrideASSStyles = fresh.overrideASSStyles
-        audioNormalization = fresh.audioNormalization; stereoDownmix = fresh.stereoDownmix
+        stereoDownmix = fresh.stereoDownmix
     }
 }

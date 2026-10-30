@@ -18,6 +18,10 @@ struct LibrariesView: View {
                         }
                         .buttonStyle(PressStyle())
                     }
+                    NavigationLink { WatchlistView() } label: {
+                        SymbolTile(title: "My List", symbol: "bookmark.fill", tint: Theme.accent)
+                    }
+                    .buttonStyle(PressStyle())
                     NavigationLink { FavoritesView() } label: {
                         SymbolTile(title: "Favourites", symbol: "heart.fill", tint: Theme.pink)
                     }
@@ -576,5 +580,42 @@ struct CollectionsBrowser: View {
             q.limit = 500
             items = (try? await client.items(q).items) ?? []
         }
+    }
+}
+
+struct WatchlistView: View {
+    @Environment(AppModel.self) private var model
+    @State private var items: [BaseItem] = []
+    @State private var loaded = false
+
+    static func fetch(_ model: AppModel) async -> [BaseItem] {
+        guard let client = model.client, !model.watchlist.isEmpty else { return [] }
+        var q = JellyfinClient.ItemQuery()
+        q.ids = model.watchlist
+        q.limit = model.watchlist.count
+        let found = (try? await client.items(q).items) ?? []
+        let order = Dictionary(uniqueKeysWithValues: model.watchlist.enumerated().map { ($1, $0) })
+        return found.sorted { (order[$0.id] ?? .max) < (order[$1.id] ?? .max) }
+    }
+
+    var body: some View {
+        ScrollView {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 12)], spacing: 16) {
+                ForEach(items) { item in
+                    NavigationLink(value: ItemLink(item: item)) { PosterCard(item: item, width: 104) }
+                        .buttonStyle(PressStyle())
+                }
+            }
+            .padding()
+        }
+        .overlay {
+            if loaded && items.isEmpty {
+                ContentUnavailableView("My List is empty", systemImage: "bookmark",
+                                       description: Text("Add shows and movies from For You or by long-pressing them. Your list is saved on your Jellyfin server."))
+            }
+        }
+        .navigationTitle("My List")
+        .refreshable { await model.loadWatchlist(); items = await Self.fetch(model) }
+        .task(id: model.watchlist) { items = await Self.fetch(model); loaded = true }
     }
 }

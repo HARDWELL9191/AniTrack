@@ -1,0 +1,8 @@
+JellyReco.xcodeproj/
+build/
+Payload/
+*.ipa
+.DS_Store
+xcuserdata/
+DerivedData/
+build-test/

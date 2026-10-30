@@ -233,8 +233,18 @@ struct PickCard: View {
                             Label("Play", systemImage: "play.fill").frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.glassProminent)
+                        Button {
+                            Task {
+                                await model.toggleWatchlist(item)
+                                if model.isOnWatchlist(item) { onHandled() }   // planned = handled: next pick
+                            }
+                        } label: {
+                            Label("My List", systemImage: model.isOnWatchlist(item) ? "bookmark.fill" : "bookmark")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.glass)
                         NavigationLink(value: ItemLink(item: item)) {
-                            Label("Details", systemImage: "info.circle").frame(maxWidth: .infinity)
+                            Label("Details", systemImage: "info.circle").labelStyle(.iconOnly).frame(width: 44)
                         }
                         .buttonStyle(.glass)
                     }

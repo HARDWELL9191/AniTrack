@@ -11,9 +11,9 @@ enum JSONCoding {
         }
         d.dateDecodingStrategy = .custom { decoder in
             let c = try decoder.singleValueContainer()
-            let s = try c.decode(String.self)
-            if let date = parseDate(s) { return date }
-            throw DecodingError.dataCorruptedError(in: c, debugDescription: "Bad date \(s)")
+            // An odd date must never break a whole page: unknown formats become "long ago".
+            guard let s = try? c.decode(String.self) else { return .distantPast }
+            return parseDate(s) ?? .distantPast
         }
         return d
     }()
@@ -253,13 +253,25 @@ struct MediaUrl: Codable, Hashable {
 }
 
 struct TrickplayInfo: Codable, Hashable {
-    var width: Int
-    var height: Int
-    var tileWidth: Int
-    var tileHeight: Int
-    var thumbnailCount: Int
-    var interval: Int
+    private var _width: Int?
+    private var _height: Int?
+    private var _tileWidth: Int?
+    private var _tileHeight: Int?
+    private var _thumbnailCount: Int?
+    private var _interval: Int?
     var bandwidth: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case _width = "width", _height = "height", _tileWidth = "tileWidth", _tileHeight = "tileHeight"
+        case _thumbnailCount = "thumbnailCount", _interval = "interval", bandwidth
+    }
+
+    var width: Int { _width ?? 320 }
+    var height: Int { _height ?? 180 }
+    var tileWidth: Int { max(1, _tileWidth ?? 10) }
+    var tileHeight: Int { max(1, _tileHeight ?? 10) }
+    var thumbnailCount: Int { _thumbnailCount ?? 0 }
+    var interval: Int { _interval ?? 10_000 }
 }
 
 struct BaseItem: Codable, Hashable, Identifiable {
@@ -514,6 +526,26 @@ struct MediaSegment: Codable, Hashable, Identifiable {
     var type: String          // Unknown, Commercial, Preview, Recap, Outro, Intro
     var startTicks: Int64
     var endTicks: Int64
+}
+
+// MARK: - Per-user app storage on the server
+
+/// Jellyfin's per-user, per-client display preferences: JellyReco keeps My List here.
+struct DisplayPreferencesDto: Codable {
+    var id: String?
+    var viewType: String?
+    var sortBy: String?
+    var indexBy: String?
+    var rememberIndexing: Bool?
+    var primaryImageHeight: Int?
+    var primaryImageWidth: Int?
+    var customPrefs: [String: String?]?
+    var scrollDirection: String?
+    var showBackdrop: Bool?
+    var rememberSorting: Bool?
+    var sortOrder: String?
+    var showSidebar: Bool?
+    var client: String?
 }
 
 // MARK: - Filters

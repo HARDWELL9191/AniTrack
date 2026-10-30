@@ -27,6 +27,7 @@ struct HomeView: View {
                     }
 
                     if s.homeShowPicks { PicksShelf() }
+                    WatchlistShelf()
 
                     if s.homeShowLatest {
                         ForEach(latest) { entry in
@@ -168,6 +169,16 @@ struct HeroCard: View {
         .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
         .shadow(color: .black.opacity(0.2), radius: 12, y: 6)
         .itemActions(item)
+    }
+}
+
+/// My List on Home (stored on the server).
+struct WatchlistShelf: View {
+    @Environment(AppModel.self) private var model
+    @State private var items: [BaseItem] = []
+    var body: some View {
+        Shelf(title: "My List", items: items) { WatchlistView() }
+            .task(id: model.watchlist) { items = await WatchlistView.fetch(model) }
     }
 }
 

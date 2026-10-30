@@ -142,9 +142,9 @@ final class RecoEngine {
     func picks(for sourceId: String, genre: String?) -> [Pick] {
         _ = version
         let all = picks[sourceId] ?? []
-        let dismissed = model?.settings.dismissedPicks ?? []
         let visible = all.filter { pick in
-            !dismissed.contains(pick.id) && !(model?.isPlayed(pick.item) ?? false)
+            !(model?.isNotForMe(pick.item) ?? false) && !(model?.isPlayed(pick.item) ?? false)
+                && !(model?.watchlist.contains(pick.id) ?? false)
                 && (genre == nil || (pick.item.genres ?? []).contains(genre!))
         }
         guard let genre, visible.count > 1 else { return visible }
@@ -296,9 +296,9 @@ final class RecoEngine {
     /// How strongly your history says "liked" (positive) or "not for me" (negative); nil = no signal.
     private func signal(for item: BaseItem) -> Double? {
         guard let model else { return nil }
-        if model.settings.dismissedPicks.contains(item.id) { return -1.0 }
+        if model.isNotForMe(item) { return -1.0 }
         let ud = model.userData(for: item) ?? UserItemData()
-        var w: Double?
+        var w: Double? = model.watchlist.contains(item.id) ? 0.5 : nil   // planned = liked enough to plan
         let daysSince = ud.lastPlayedDate.map { Date().timeIntervalSince($0) / 86_400 } ?? 0
 
         if ud.played == true {
@@ -316,7 +316,7 @@ final class RecoEngine {
                 }
             }
         } else if let pct = ud.playedPercentage, pct > 0 {
-            w = (pct < 25 && daysSince > 30) ? -0.4 : (model.settings.includeWatchingAsLiked ? 0.4 : nil)
+            w = (pct < 25 && daysSince > 30) ? -0.4 : (model.settings.includeWatchingAsLiked ? max(w ?? 0, 0.4) : w)
         }
         if ud.isFavorite == true { w = max(w ?? 0, 0) + 0.9 }
         if let likes = ud.likes { w = likes ? max(w ?? 0, 0) + 0.5 : -1.0 }
@@ -325,7 +325,7 @@ final class RecoEngine {
 
     private func isCandidate(_ item: BaseItem) -> Bool {
         guard let model else { return false }
-        if model.settings.dismissedPicks.contains(item.id) { return false }
+        if model.isNotForMe(item) || model.watchlist.contains(item.id) { return false }
         let ud = model.userData(for: item)
         if ud?.played == true || ud?.isFavorite == true { return false }
         if (ud?.playedPercentage ?? 0) > 0 { return false }
@@ -561,7 +561,7 @@ final class RecoEngine {
         guard let client = model?.client else { return [] }
         let base = item.kind == .episode ? (item.seriesId ?? item.id) : item.id
         let similar = (try? await client.similar(base, limit: 40)) ?? []
-        let unwatched = similar.filter { !($0.userData?.played ?? false) && !(model?.settings.dismissedPicks.contains($0.id) ?? false) }
+        let unwatched = similar.filter { !($0.userData?.played ?? false) && !(model?.isNotForMe($0) ?? false) }
         return unwatched.sorted { (match(for: $0) ?? 0) > (match(for: $1) ?? 0) }
     }
 
@@ -576,13 +576,13 @@ final class RecoEngine {
     }
 
     func dismiss(_ item: BaseItem) {
-        model?.settings.dismissedPicks.insert(item.id)
-        listChanged()
+        guard let model else { return }
+        Task { await model.setNotForMe(item, true) }
     }
 
     func resetDismissed() {
-        model?.settings.dismissedPicks = []
-        listChanged()
+        guard let model else { return }
+        Task { await model.resetNotForMe() }
     }
 }
 

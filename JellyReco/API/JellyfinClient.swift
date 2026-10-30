@@ -412,6 +412,42 @@ final class JellyfinClient: @unchecked Sendable {
         return (try? decode(data)) ?? UserItemData(isFavorite: favorite)
     }
 
+    /// Thumbs down (`false`), thumbs up (`true`), or cleared (`nil`): Jellyfin's own like/dislike.
+    @discardableResult
+    func setLikes(_ id: String, _ likes: Bool?) async throws -> UserItemData {
+        let data: Data
+        if let likes {
+            data = try await send("POST", "/UserItems/\(id)/Rating", query: ["userId": try requireUser(), "likes": likes])
+        } else {
+            data = try await send("DELETE", "/UserItems/\(id)/Rating", query: ["userId": try requireUser()])
+        }
+        return (try? decode(data)) ?? UserItemData(likes: likes)
+    }
+
+    static let storageClient = "jellyreco"
+    static let storageId = "jellyreco-lists"
+
+    func loadAppStorage() async throws -> DisplayPreferencesDto {
+        try await get("/DisplayPreferences/\(Self.storageId)", ["userId": try requireUser(), "client": Self.storageClient])
+    }
+
+    func saveAppStorage(_ prefs: DisplayPreferencesDto) async throws {
+        var body = prefs
+        body.client = Self.storageClient
+        body.id = body.id ?? Self.storageId
+        body.sortBy = body.sortBy ?? "SortName"
+        body.sortOrder = body.sortOrder ?? "Ascending"
+        body.scrollDirection = body.scrollDirection ?? "Horizontal"
+        body.showBackdrop = body.showBackdrop ?? true
+        body.showSidebar = body.showSidebar ?? false
+        body.rememberIndexing = body.rememberIndexing ?? false
+        body.rememberSorting = body.rememberSorting ?? false
+        body.primaryImageWidth = body.primaryImageWidth ?? 0
+        body.primaryImageHeight = body.primaryImageHeight ?? 0
+        try await postVoid("/DisplayPreferences/\(Self.storageId)",
+                           query: ["userId": try requireUser(), "client": Self.storageClient], json: body)
+    }
+
     // MARK: Images
 
     func imageURL(itemId: String, type: String = "Primary", tag: String? = nil, index: Int? = nil,
@@ -508,11 +544,18 @@ final class JellyfinClient: @unchecked Sendable {
 
     /// The original file, untouched (mpv and AVPlayer both read it straight off the server).
     func directStreamURL(itemId: String, source: MediaSourceInfo, playSessionId: String?) -> URL? {
+        // Live TV and other remote sources: the server's own direct-stream URL when it gives one.
+        if let direct = source.directStreamUrl, !direct.isEmpty, source.liveStreamId != nil || source.isRemote == true {
+            return absolute(direct)
+        }
         let container = source.container?.split(separator: ",").first.map(String.init)
-        return url("/Videos/\(itemId)/stream" + (container.map { ".\($0)" } ?? ""), [
+        var query: [String: Any?] = [
             "static": true, "mediaSourceId": source.id, "deviceId": Self.deviceId,
             "playSessionId": playSessionId, "ApiKey": token, "Tag": source.eTag,
-        ])
+        ]
+        if let live = source.liveStreamId { query["LiveStreamId"] = live }
+        let ext = (container.map { ".\($0)" } ?? "")
+        return url("/Videos/\(itemId)/stream" + (source.liveStreamId == nil ? ext : ""), query)
     }
 
     /// Server-relative URLs (TranscodingUrl, DeliveryUrl) made absolute, with the token attached.
