@@ -142,7 +142,8 @@ jobs:
           HDR="$FW/Headers"; [ -d "$HDR" ] || HDR="$FW/Versions/A/Headers"
           # The framework keeps client.h at the top of Headers; the C API expects <mpv/client.h>.
           mkdir -p inc/mpv && cp "$HDR"/*.h inc/mpv/
-          clang -O2 -arch arm64 -Iinc tools/formattest/formattest.c "$BIN" \
+          FWDIR="$(cd "$(dirname "$FW")" && pwd)"
+          clang -O2 -arch arm64 -Iinc tools/formattest/formattest.c "$BIN" -Wl,-rpath,"$FWDIR" \
             -framework AVFoundation -framework AVKit -framework AudioToolbox -framework CoreAudio \
             -framework CoreFoundation -framework CoreGraphics -framework CoreImage -framework CoreMedia \
             -framework CoreText -framework CoreVideo -framework Foundation -framework IOSurface \
@@ -160,6 +161,7 @@ jobs:
 
       - name: Play every file, every audio and subtitle track
         run: |
+          set -o pipefail
           cp samples/samples.log samples.log || true
           shopt -s nullglob
           ./formattest samples/*.mkv samples/*.mp4 samples/*.avi samples/*.wmv samples/*.ts samples/*.webm samples/*.mov samples/*.m2ts 2>&1 | tee formattest.log

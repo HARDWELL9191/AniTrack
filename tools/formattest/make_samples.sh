@@ -12,7 +12,7 @@ make() { name="$1"; shift; if timeout 120 ffmpeg -nostdin -loglevel error -y "$@
 
 make hevc10_truehd_ass.mkv $V $A6 -i subs.ass -map 0 -map 1 -map 2 -c:v libx265 -preset ultrafast -pix_fmt yuv420p10le -x265-params log-level=error -c:a truehd -strict -2 -c:s ass
 make av1_opus_srt.mkv $V $A -i subs.srt -map 0 -map 1 -map 2 -c:v libsvtav1 -preset 12 -c:a libopus -c:s srt
-make h264_dts_vobsub.mkv $V $A6 -i subs.srt -map 0 -map 1 -map 2 -c:v libx264 -preset ultrafast -c:a dca -strict -2 -c:s dvdsub
+make h264_dts_srt.mkv $V $A6 -i subs.srt -map 0 -map 1 -map 2 -c:v libx264 -preset ultrafast -c:a dca -strict -2 -c:s srt
 make hevc_eac3_movtext.mp4 $V $A6 -i subs.srt -map 0 -map 1 -map 2 -c:v libx265 -preset ultrafast -x265-params log-level=error -tag:v hvc1 -c:a eac3 -c:s mov_text
 make vp9_flac_webvtt.mkv $V $A -i subs.srt -map 0 -map 1 -map 2 -c:v libvpx-vp9 -deadline realtime -cpu-used 8 -c:a flac -c:s webvtt
 make h264_ac3_aac_two_audio.mkv $V $A6 $A -map 0 -map 1 -map 2 -c:v libx264 -preset ultrafast -c:a:0 ac3 -c:a:1 aac
