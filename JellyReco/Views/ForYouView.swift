@@ -5,6 +5,7 @@ import SwiftUI
 /// Never shows anything already on your server.
 struct ForYouView: View {
     @Environment(AppModel.self) private var model
+    @Namespace private var zoom
     @State private var genre: String?
     @State private var index = 0
     @State private var handled = 0
@@ -52,6 +53,8 @@ struct ForYouView: View {
             }
             .sheet(item: $detail) { ExternalDetailSheet(title: $0) }
             .navigationDestination(isPresented: $showMyList) { MyListView() }
+            .appDestinations(zoom: zoom)
+            .environment(\.zoomNamespace, zoom)
         }
     }
 
