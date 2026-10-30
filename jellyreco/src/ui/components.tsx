@@ -1,6 +1,6 @@
 // Building blocks shared by every screen (AniReco's cards, shelves, menus and sheets).
 
-import { type CSSProperties, type ReactNode, useEffect, useLayoutEffect, useRef, useState, type MouseEvent as RMouseEvent } from "react";
+import { type CSSProperties, type InputHTMLAttributes, type ReactNode, useEffect, useLayoutEffect, useRef, useState, type MouseEvent as RMouseEvent } from "react";
 import type { Jellyfin } from "../core/api";
 import type { Item } from "../core/types";
 import { itemSubtitle, itemTitle, playedPercent } from "./fmt";
@@ -205,6 +205,13 @@ export function ItemRow({ item, subtitle, trailing, onClick, index, context, pla
       <span className="row-more" role="button" onClick={onMenu} aria-label="More"><Icon name="more" size={18} /></span>
     </button>
   );
+}
+
+/** A slider in Apple's style: a slim capsule that fills up to the value. */
+export function Range(props: InputHTMLAttributes<HTMLInputElement>) {
+  const min = Number(props.min ?? 0), max = Number(props.max ?? 100), v = Number(props.value ?? min);
+  const fill = `${Math.max(0, Math.min(100, ((v - min) / (max - min || 1)) * 100))}%`;
+  return <input {...props} type="range" className={`lg-slider ${props.className ?? ""}`} style={{ ...props.style, ["--fill" as string]: fill }} />;
 }
 
 // MARK: Shelves and grids

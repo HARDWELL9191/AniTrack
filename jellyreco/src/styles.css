@@ -658,119 +658,165 @@ details.raw { padding: 12px 16px; border-radius: 16px; background: var(--panel);
 details.raw summary { cursor: pointer; font-weight: 650; }
 
 /* ===================== Player ===================== */
+/* Apple's player: the video is the content; the controls are clear Liquid Glass floating over it,
+   with a dimming layer underneath while they show. (The video is drawn by mpv behind the page, so
+   there's nothing to blur: the glass is tint, rim light and shadow.) */
 
-/* While video plays, the page is see-through: mpv's picture is the window's background. */
 html.video-mode, html.video-mode body { background: transparent !important; background-image: none !important; }
 .shell.behind-video { visibility: hidden; }
-.player { position: fixed; inset: 0; z-index: 100; color: #fff; user-select: none; cursor: default; --pc: rgba(255, 255, 255, 0.92); }
+.player { position: fixed; inset: 0; z-index: 100; color: #fff; user-select: none; cursor: default;
+  --pc: rgba(255, 255, 255, 0.96); --text: #f5f5f7; --muted: rgba(235, 235, 245, 0.62); --press: rgba(255, 255, 255, 0.12); --line: rgba(255, 255, 255, 0.14);
+  /* Clear glass over video */
+  --vg-fill: rgba(28, 28, 32, 0.34); --vg-fill-strong: rgba(24, 24, 28, 0.62); }
 .player.controls-off { cursor: none; }
 .player-surface { position: absolute; inset: 0; }
-.player-top, .player-bottom { position: absolute; left: 0; right: 0; padding: 18px 26px; transition: opacity 0.25s, transform 0.25s; }
-.player-top { top: 0; display: flex; align-items: center; gap: 14px; background: linear-gradient(180deg, rgba(0, 0, 0, 0.72), transparent); padding-bottom: 60px; }
-.player-bottom { bottom: 0; background: linear-gradient(0deg, rgba(0, 0, 0, 0.82), rgba(0, 0, 0, 0.35) 60%, transparent); padding-top: 70px; }
-.controls-off .player-top { opacity: 0; transform: translateY(-10px); pointer-events: none; }
-.controls-off .player-bottom { opacity: 0; transform: translateY(10px); pointer-events: none; }
-.controls-off .skip-button { bottom: 40px; }
-.player-title { display: flex; align-items: center; gap: 14px; min-width: 0; }
-.player-title > div { display: flex; flex-direction: column; min-width: 0; }
-.player-title strong { font-size: 18px; text-shadow: 0 1px 6px rgba(0, 0, 0, 0.6); }
-.player-title span { color: rgba(255, 255, 255, 0.75); font-size: 13.5px; }
-.player-logo { max-height: 44px; max-width: 180px; object-fit: contain; }
-.player-top-actions { margin-left: auto; display: flex; gap: 6px; align-items: center; }
-.player-icon { border: 0; background: none; color: var(--pc); width: 40px; height: 40px; display: inline-grid; place-items: center; border-radius: 50%; transition: background 0.12s, transform 0.1s; }
-.player-icon:hover:not(:disabled) { background: rgba(255, 255, 255, 0.14); }
-.player-icon:active:not(:disabled) { transform: scale(0.92); }
-.player-icon.big { width: 54px; height: 54px; background: rgba(255, 255, 255, 0.12); }
-.player-icon:disabled { opacity: 0.35; }
-.player-controls { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 8px; }
-.pc-left, .pc-right { display: flex; align-items: center; gap: 4px; }
-.pc-right { gap: 6px; }
-.player-pill { display: inline-flex; gap: 7px; align-items: center; height: 36px; padding: 0 12px; border-radius: 999px; border: 1px solid rgba(255, 255, 255, 0.16);
-  background: rgba(255, 255, 255, 0.08); color: var(--pc); font-weight: 650; font-size: 13px; backdrop-filter: blur(16px); }
-.player-pill:hover { background: rgba(255, 255, 255, 0.18); }
-.player-pill.on { background: var(--accent); border-color: transparent; color: #fff; }
-.time-label { border: 0; background: none; color: var(--pc); font-size: 13.5px; font-weight: 650; margin-left: 10px; }
-.time-label .muted { color: rgba(255, 255, 255, 0.65); }
-.volume { display: flex; align-items: center; gap: 4px; margin-left: 6px; }
-.volume input { width: 110px; accent-color: var(--accent); }
-.volume-value { width: 28px; font-size: 12px; color: rgba(255, 255, 255, 0.7); }
-.player .chip-muted { background: rgba(255, 255, 255, 0.12); color: rgba(255, 255, 255, 0.8); }
-.player-center { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; gap: 10px; pointer-events: none; }
-.player-center .spinner { border-color: rgba(255, 255, 255, 0.2); border-top-color: #fff; }
-.player-flash { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 20px 26px;
-  border-radius: 24px; background: rgba(0, 0, 0, 0.45); backdrop-filter: blur(14px); pointer-events: none; animation: flash 0.7s ease-out forwards; font-weight: 700; }
-@keyframes flash { 0% { opacity: 0; transform: translate(-50%, -50%) scale(0.85); } 15% { opacity: 1; transform: translate(-50%, -50%) scale(1); } 70% { opacity: 1; } 100% { opacity: 0; } }
-.player-error { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); max-width: 480px; padding: 26px; border-radius: 22px; display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; background: rgba(15, 17, 23, 0.9); }
-.player-error p { margin: 0; color: rgba(255, 255, 255, 0.8); }
+.player-dim { position: absolute; inset: 0; pointer-events: none; transition: opacity 0.35s;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.42), transparent 22%, transparent 58%, rgba(0, 0, 0, 0.62)); }
+.controls-off .player-dim { opacity: 0; }
+.player-top, .player-dock { transition: opacity 0.3s, transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.controls-off .player-top { opacity: 0; transform: translateY(-8px); pointer-events: none; }
+.controls-off .player-dock { opacity: 0; transform: translateY(10px); pointer-events: none; }
 
-/* Timeline */
-.timeline { position: relative; height: 22px; display: flex; align-items: center; cursor: pointer; }
-.tl-track { position: relative; width: 100%; height: 5px; border-radius: 5px; background: rgba(255, 255, 255, 0.22); transition: height 0.12s; }
-.timeline:hover .tl-track { height: 8px; }
-.tl-buffer, .tl-played { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 5px; }
-.tl-buffer { background: rgba(255, 255, 255, 0.35); }
-.tl-played { background: var(--accent); }
-.tl-segment { position: absolute; top: 0; bottom: 0; background: rgba(250, 115, 158, 0.55); }
+/* Clear glass used by every player control */
+.player .lg { background: var(--vg-fill); box-shadow: var(--lg-rim-dark), 0 10px 30px rgba(0, 0, 0, 0.28); backdrop-filter: blur(20px) saturate(180%); }
+
+.player-top { position: absolute; top: 18px; left: 18px; right: 18px; display: flex; align-items: center; gap: 10px; }
+.player-top-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+.pg-group { display: flex; align-items: center; gap: 2px; padding: 4px; border-radius: 999px; }
+.pg-button { width: 40px; height: 40px; border: 0; border-radius: 50%; background: none; color: var(--pc); display: grid; place-items: center; transition: background 0.15s, transform 0.12s; }
+.pg-button:hover { background: rgba(255, 255, 255, 0.16); }
+.pg-button:active { transform: scale(0.9); }
+.pg-button.on { background: rgba(255, 255, 255, 0.92); color: #111; }
+.pg-chip { height: 32px; padding: 0 14px; border-radius: 999px; display: inline-flex; align-items: center; font-size: 12.5px; font-weight: 650; color: #ffd60a; }
+
+/* Bottom dock: title above one floating glass bar */
+.player-dock { position: absolute; left: 18px; right: 18px; bottom: 18px; display: flex; flex-direction: column; gap: 12px; }
+.pd-title { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 0 8px; max-width: min(720px, 70%); text-shadow: 0 1px 12px rgba(0, 0, 0, 0.55); }
+.pd-logo { max-height: 56px; max-width: 260px; object-fit: contain; object-position: left bottom; filter: drop-shadow(0 2px 10px rgba(0, 0, 0, 0.5)); }
+.pd-title-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.pd-eyebrow { font-size: 13px; font-weight: 600; color: rgba(255, 255, 255, 0.72); }
+.pd-title-text strong { font-size: 21px; font-weight: 700; letter-spacing: -0.015em; white-space: pre; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.pd-ends { font-size: 12.5px; color: rgba(255, 255, 255, 0.66); }
+.pd-bar { border-radius: 30px; padding: 12px 14px 10px; display: flex; flex-direction: column; gap: 6px; }
+.pd-timeline { display: flex; align-items: center; gap: 12px; padding: 0 6px; }
+.pd-time { min-width: 46px; font-size: 12.5px; font-weight: 650; color: rgba(255, 255, 255, 0.82); border: 0; background: none; padding: 0; text-align: left; }
+.pd-time.end { text-align: right; }
+.pd-controls { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.pd-left, .pd-right { display: flex; align-items: center; gap: 2px; }
+.pd-button { min-width: 42px; height: 42px; padding: 0; border: 0; border-radius: 999px; background: none; color: var(--pc); display: inline-grid; place-items: center;
+  transition: background 0.15s, transform 0.12s, color 0.15s; }
+.pd-button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.14); }
+.pd-button:active:not(:disabled) { transform: scale(0.88); }
+.pd-button:disabled { opacity: 0.32; }
+.pd-button.on { background: rgba(255, 255, 255, 0.94); color: #111; }
+.pd-button.play { width: 52px; height: 52px; min-width: 52px; }
+.pd-button.play:hover:not(:disabled) { background: rgba(255, 255, 255, 0.14); }
+.pd-button.speed span { font-size: 13.5px; font-weight: 750; padding: 0 10px; }
+
+/* Apple-style slider: a slim capsule that fills white; it thickens and shows a knob on hover. */
+.lg-slider { -webkit-appearance: none; appearance: none; height: 22px; background: none; cursor: pointer; margin: 0; --track: 5px; width: 100%;
+  --slider-fill: var(--accent); --slider-rest: color-mix(in srgb, var(--text) 16%, transparent); }
+.player .lg-slider { --slider-fill: rgba(255, 255, 255, 0.95); --slider-rest: rgba(255, 255, 255, 0.24); }
+/* Outside the player the knob always shows (like macOS settings sliders). */
+:not(.pd-volume) > .lg-slider:not(.mini-player .lg-slider)::-webkit-slider-thumb { transform: scale(1); }
+.lg-slider::-webkit-slider-runnable-track { height: var(--track); border-radius: 999px; transition: height 0.15s;
+  background: linear-gradient(90deg, var(--slider-fill) var(--fill, 0%), var(--slider-rest) var(--fill, 0%)); }
+.lg-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; margin-top: calc((var(--track) - 14px) / 2); border-radius: 50%; background: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35), 0 0 0 0.5px rgba(0, 0, 0, 0.08); transform: scale(0); transition: transform 0.15s; }
+.lg-slider:hover, .lg-slider:active, .lg-slider:focus-visible { --track: 7px; }
+.lg-slider:hover::-webkit-slider-thumb, .lg-slider:active::-webkit-slider-thumb, .lg-slider:focus-visible::-webkit-slider-thumb { transform: scale(1); }
+.lg-slider:focus { outline: none; }
+.pd-volume { display: flex; align-items: center; gap: 2px; margin-left: 8px; }
+.pd-volume .lg-slider { width: 96px; }
+
+/* Loading, flashes, errors */
+.player-center { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; gap: 10px; pointer-events: none; font-weight: 650; }
+.player-center .spinner { border-color: rgba(255, 255, 255, 0.22); border-top-color: #fff; }
+.player-flash { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); min-width: 104px; min-height: 104px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+  padding: 18px 22px; border-radius: 34px; pointer-events: none; animation: flash 0.75s ease-out forwards; font-weight: 700; font-size: 14px; }
+@keyframes flash { 0% { opacity: 0; transform: translate(-50%, -50%) scale(0.8); } 18% { opacity: 1; transform: translate(-50%, -50%) scale(1.02); } 30% { transform: translate(-50%, -50%) scale(1); } 70% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, -50%) scale(0.96); } }
+.player-error { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); max-width: 480px; padding: 28px; border-radius: 30px; display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; }
+.player .player-error { background: var(--vg-fill-strong); }
+.player-error p { margin: 0; color: rgba(255, 255, 255, 0.82); }
+
+/* Timeline: Apple's scrubber (white fill, no blue), chapters as small gaps, trickplay preview above */
+.timeline { position: relative; flex: 1; height: 24px; display: flex; align-items: center; cursor: pointer; }
+.tl-track { position: relative; width: 100%; height: 6px; border-radius: 999px; background: rgba(255, 255, 255, 0.22); transition: height 0.15s; }
+.timeline:hover .tl-track { height: 9px; }
+.tl-buffer, .tl-played { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 999px; }
+.tl-buffer { background: rgba(255, 255, 255, 0.3); }
+.tl-played { background: rgba(255, 255, 255, 0.96); }
+.tl-segment { position: absolute; top: 0; bottom: 0; background: rgba(255, 214, 10, 0.55); mix-blend-mode: screen; }
 .tl-segment.seg-commercial { background: rgba(255, 159, 10, 0.6); }
-.tl-segment.seg-recap, .tl-segment.seg-preview { background: rgba(160, 160, 255, 0.5); }
-.tl-ab { position: absolute; top: -2px; bottom: -2px; border: 2px solid #ffd60a; border-radius: 4px; }
-.tl-chapter { position: absolute; top: 0; bottom: 0; width: 3px; margin-left: -1px; background: rgba(0, 0, 0, 0.65); }
-.tl-thumb { position: absolute; top: 50%; width: 16px; height: 16px; margin: -8px 0 0 -8px; border-radius: 50%; background: #fff; box-shadow: 0 1px 6px rgba(0, 0, 0, 0.5); transform: scale(0); transition: transform 0.12s; }
+.tl-segment.seg-recap, .tl-segment.seg-preview { background: rgba(160, 170, 255, 0.5); }
+.tl-ab { position: absolute; top: -3px; bottom: -3px; border: 2px solid #ffd60a; border-radius: 999px; }
+.tl-chapter { position: absolute; top: -1px; bottom: -1px; width: 3px; margin-left: -1.5px; background: rgba(0, 0, 0, 0.55); border-radius: 2px; }
+.tl-thumb { position: absolute; top: 50%; width: 15px; height: 15px; margin: -7.5px 0 0 -7.5px; border-radius: 50%; background: #fff; box-shadow: 0 1px 6px rgba(0, 0, 0, 0.45); transform: scale(0); transition: transform 0.15s; }
 .timeline:hover .tl-thumb { transform: scale(1); }
-.tl-preview { position: absolute; bottom: 30px; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none; }
-.tl-preview-text { display: flex; flex-direction: column; align-items: center; padding: 4px 10px; border-radius: 10px; background: rgba(0, 0, 0, 0.75); font-size: 12.5px; }
+.tl-preview { position: absolute; bottom: 36px; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none; z-index: 2; }
+.tl-preview-text { display: flex; flex-direction: column; align-items: center; padding: 5px 12px; border-radius: 999px; background: var(--vg-fill-strong); box-shadow: var(--lg-rim-dark); font-size: 12.5px; backdrop-filter: blur(16px); }
 .tl-preview-text span { color: rgba(255, 255, 255, 0.75); max-width: 240px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.trickplay { border-radius: 10px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.6); border: 2px solid rgba(255, 255, 255, 0.85); background-repeat: no-repeat; background-color: #000; }
+.trickplay { border-radius: 14px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.5); background-repeat: no-repeat; background-color: #000; }
 
-/* Skip, up next, stats */
-.skip-button { position: absolute; right: 28px; bottom: 130px; display: inline-flex; gap: 8px; align-items: center; height: 46px; padding: 0 20px; border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.35); background: rgba(20, 22, 28, 0.7); color: #fff; font-weight: 750; font-size: 15px; backdrop-filter: blur(16px);
-  transition: bottom 0.25s, background 0.15s; animation: rise 0.2s ease-out; z-index: 3; }
-.skip-button:hover { background: var(--accent); border-color: transparent; }
-.up-next { position: absolute; right: 28px; bottom: 130px; display: flex; gap: 14px; padding: 14px; width: 520px; border-radius: 20px; background: rgba(15, 17, 23, 0.86); color: #fff; z-index: 4; animation: rise 0.2s ease-out; }
-.up-next-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.up-next-text small { color: var(--accent); font-weight: 750; }
+/* Skip intro, up next, stats */
+.skip-button { position: absolute; right: 26px; bottom: 196px; display: inline-flex; gap: 8px; align-items: center; height: 46px; padding: 0 22px; border: 0; border-radius: 999px;
+  color: #fff; font-weight: 700; font-size: 15px; transition: bottom 0.3s, background 0.15s, transform 0.12s; animation: rise 0.25s ease-out; z-index: 3; }
+.player .skip-button.lg:hover { background: rgba(255, 255, 255, 0.92); color: #111; }
+.skip-button:active { transform: scale(0.96); }
+.controls-off .skip-button { bottom: 32px; }
+.up-next { position: absolute; right: 26px; bottom: 196px; display: flex; gap: 14px; padding: 12px; width: 520px; border-radius: 28px; color: #fff; z-index: 4; animation: rise 0.25s ease-out; }
+.player .up-next { background: var(--vg-fill-strong); }
+.controls-off .up-next { bottom: 32px; }
+.up-next .cover { border-radius: 18px !important; }
+.up-next-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 2px 4px 2px 0; }
+.up-next-text small { color: rgba(255, 255, 255, 0.7); font-weight: 650; }
 .up-next-text .muted { color: rgba(255, 255, 255, 0.7); }
-.stats { position: absolute; left: 26px; top: 90px; width: 560px; max-width: calc(100vw - 52px); padding: 14px 16px; border-radius: 16px; background: rgba(10, 12, 16, 0.82); color: #e8ecf3;
-  font: 12px/1.55 "Cascadia Mono", Consolas, monospace; z-index: 3; }
+.stats { position: absolute; left: 18px; top: 78px; width: 560px; max-width: calc(100vw - 36px); padding: 14px 18px; border-radius: 22px; color: #e8ecf3;
+  font: 12px/1.55 "Cascadia Mono", Consolas, monospace; z-index: 3; background: var(--vg-fill-strong); box-shadow: var(--lg-rim-dark); backdrop-filter: blur(20px); }
 .stats-row { display: grid; grid-template-columns: 110px 1fr; gap: 10px; }
 .stats-row > span:first-child { color: rgba(255, 255, 255, 0.55); }
 
-/* Panels */
-.player-panel { position: absolute; right: 20px; bottom: 120px; width: 380px; max-height: calc(100vh - 220px); overflow-y: auto; padding: 18px; border-radius: 22px;
-  background: rgba(16, 18, 24, 0.9); border: 1px solid rgba(255, 255, 255, 0.1); backdrop-filter: blur(30px) saturate(160%); color: #fff; display: flex; flex-direction: column; gap: 12px;
-  z-index: 5; animation: rise 0.16s ease-out; --text: #f2f3f7; --muted: rgba(235, 238, 245, 0.6); --press: rgba(255, 255, 255, 0.1); --glass: rgba(255, 255, 255, 0.1); --line: rgba(255, 255, 255, 0.12); }
+/* Menus from the bar (audio, subtitles, speed, more, episodes): glass popovers above their button */
+.player-panel { position: absolute; bottom: 152px; width: 360px; max-height: calc(100vh - 260px); overflow-y: auto; padding: 14px; border-radius: 28px;
+  display: flex; flex-direction: column; gap: 12px; z-index: 5; transform-origin: bottom right; animation: popover 0.22s cubic-bezier(0.2, 0.9, 0.25, 1.15); }
+.player .player-panel.lg { background: var(--vg-fill-strong); backdrop-filter: blur(30px) saturate(180%); }
+@keyframes popover { from { opacity: 0; transform: scale(0.92) translateY(8px); } to { opacity: 1; transform: none; } }
 .player-panel.wide { width: 560px; }
-.player-panel h3 { font-size: 16px; }
-.player-panel select { background: rgba(255, 255, 255, 0.1); color: #fff; }
+.player-panel h3 { font-size: 15px; font-weight: 700; padding: 2px 6px 0; }
+.player-panel select { background: rgba(255, 255, 255, 0.12); color: #fff; }
 .player-panel select option { color: #000; }
 .panel-head-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.track-list { display: flex; flex-direction: column; gap: 2px; }
-.track { display: flex; gap: 10px; align-items: center; padding: 9px 10px; border: 0; border-radius: 12px; background: none; text-align: left; color: inherit; }
-.track:hover { background: rgba(255, 255, 255, 0.08); }
-.track.on { background: color-mix(in srgb, var(--accent) 26%, transparent); }
-.track-check { width: 18px; color: var(--accent); display: grid; place-items: center; }
-.track.on .track-check { color: #fff; }
+.track-list { display: flex; flex-direction: column; gap: 1px; }
+.track { display: flex; gap: 10px; align-items: center; padding: 9px 10px; border: 0; border-radius: 14px; background: none; text-align: left; color: inherit; }
+.track:hover { background: rgba(255, 255, 255, 0.12); }
+.track.on { background: none; }
+.track.on:hover { background: rgba(255, 255, 255, 0.12); }
+.track-check { width: 18px; color: #fff; display: grid; place-items: center; }
 .track-text { display: flex; flex-direction: column; }
+.track.on .track-text > span { font-weight: 700; }
 .track-text small { color: rgba(255, 255, 255, 0.6); font-size: 12px; }
 .speed-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
 .speed-grid .glass-button { padding: 0; color: #fff; }
 .player-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.player-actions .glass-button { color: #fff; }
-.player-panel .glass-button { color: #fff; }
+.player-panel .glass-button { color: #fff; background: rgba(255, 255, 255, 0.12); box-shadow: none; backdrop-filter: none; }
+.player-panel .glass-button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.2); }
+.player-panel .glass-button.prominent, .player-panel .segmented button.on { background: rgba(255, 255, 255, 0.94); color: #111; }
+.player-panel .segmented button { background: rgba(255, 255, 255, 0.1); box-shadow: none; color: #fff; backdrop-filter: none; }
+.player-panel .lg-slider, .player-panel input[type="range"] { --slider-fill: #fff; }
 .chapter-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; }
-.chapter { display: flex; flex-direction: column; gap: 4px; border: 0; background: none; padding: 6px; border-radius: 12px; text-align: left; color: inherit; }
-.chapter:hover, .chapter.on { background: rgba(255, 255, 255, 0.1); }
-.chapter.on .chapter-name { color: var(--accent); }
+.chapter { display: flex; flex-direction: column; gap: 6px; border: 0; background: none; padding: 6px; border-radius: 18px; text-align: left; color: inherit; }
+.chapter .cover { border-radius: 12px !important; }
+.chapter:hover, .chapter.on { background: rgba(255, 255, 255, 0.12); }
+.chapter.on .chapter-name { color: #fff; }
 .chapter-name { font-size: 13px; font-weight: 650; }
 .episode-drawer { display: flex; flex-direction: column; gap: 6px; }
-.episode-drawer .episode { grid-template-columns: auto 1fr; color: inherit; border: 0; text-align: left; }
+.episode-drawer .episode { grid-template-columns: auto 1fr; color: inherit; border: 0; text-align: left; border-radius: 18px; }
 .episode-drawer .episode-thumb { width: auto; height: auto; background: none; }
 .episode-drawer .episode-text p { color: rgba(255, 255, 255, 0.6); }
-.episode-drawer .episode.on { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.episode-drawer .episode.on { background: rgba(255, 255, 255, 0.14); }
 .keys { display: flex; flex-direction: column; gap: 6px; }
 .key-row { display: grid; grid-template-columns: 150px 1fr; gap: 10px; align-items: center; font-size: 13px; }
-kbd { font: 600 11.5px "Segoe UI", sans-serif; padding: 3px 8px; border-radius: 7px; background: rgba(255, 255, 255, 0.14); border: 1px solid rgba(255, 255, 255, 0.2); justify-self: start; }
+kbd { font: 600 11.5px "Segoe UI", sans-serif; padding: 3px 8px; border-radius: 8px; background: rgba(255, 255, 255, 0.14); box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.25); justify-self: start; }
 
 /* Mini player (music) */
 .mini-player { position: absolute; left: 16px; right: 16px; bottom: 14px; z-index: 40; display: flex; gap: 14px; align-items: center; padding: 8px 14px 8px 8px; border-radius: 20px;
@@ -795,7 +841,7 @@ kbd { font: 600 11.5px "Segoe UI", sans-serif; padding: 3px 8px; border-radius: 
   .settings-nav { flex-direction: row; flex-wrap: wrap; position: static; }
   .form.grid-2 { grid-template-columns: 1fr; }
   .dash-grid { grid-template-columns: 1fr; }
-  .player-pill span { display: none; }
+  .pd-volume .lg-slider { width: 70px; }
 }
 
 /* For You: titles not on the server (TMDB) */
@@ -813,3 +859,175 @@ kbd { font: 600 11.5px "Segoe UI", sans-serif; padding: 3px 8px; border-radius: 
 .tmdb-text h2 { font-size: 24px; }
 .cast-row { display: flex; gap: 14px; overflow-x: auto; padding-bottom: 6px; }
 .ext-tile { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+
+/* ===================== Liquid Glass ===================== */
+/* Apple's material, everywhere controls float: a thin translucent layer that bends what's behind
+   its rim (lens filter in index.html), blurs and brightens it, lights its edges (specular rim:
+   brighter top-left, softer bottom-right) and casts a shadow that grows with its size.
+   Regular glass in the app; clear glass with dimming over video (player section). Selected states
+   are fills on the glass, never glass on glass. Tint (the accent) only for the main action. */
+
+:root {
+  --lg-fill: rgba(255, 255, 255, 0.075);
+  --lg-fill-hover: rgba(255, 255, 255, 0.13);
+  --lg-surface: rgba(30, 32, 40, 0.42);
+  --lg-surface-strong: rgba(26, 28, 36, 0.7);
+  --lg-rim: inset 1px 1px 0 -0.25px rgba(255, 255, 255, 0.42), inset -1px -1px 0 -0.25px rgba(255, 255, 255, 0.16), inset 0 0 0 0.5px rgba(255, 255, 255, 0.1);
+  --lg-rim-dark: inset 1px 1px 0 -0.25px rgba(255, 255, 255, 0.4), inset -1px -1px 0 -0.25px rgba(255, 255, 255, 0.14), inset 0 0 0 0.5px rgba(255, 255, 255, 0.12);
+  --lg-shadow: 0 6px 18px rgba(0, 0, 0, 0.22), 0 1px 2px rgba(0, 0, 0, 0.2);
+  --lg-shadow-big: 0 24px 64px rgba(0, 0, 0, 0.45), 0 3px 10px rgba(0, 0, 0, 0.25);
+  --lg-blur: blur(14px) saturate(190%) brightness(1.06);
+  --lg-lens: url(#lg-lens) blur(8px) saturate(190%) brightness(1.06);
+  --lg-blur-big: blur(36px) saturate(180%);
+  --lg-puck: rgba(255, 255, 255, 0.2);
+  --lg-light: rgba(255, 255, 255, 0.16);
+  --bg: #0a0b10;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --lg-fill: rgba(255, 255, 255, 0.5); --lg-fill-hover: rgba(255, 255, 255, 0.72); --lg-surface: rgba(255, 255, 255, 0.48); --lg-surface-strong: rgba(250, 250, 252, 0.78);
+    --lg-rim: inset 1px 1px 0 -0.25px rgba(255, 255, 255, 0.95), inset -1px -1px 0 -0.25px rgba(255, 255, 255, 0.6), inset 0 0 0 0.5px rgba(0, 0, 0, 0.07);
+    --lg-shadow: 0 6px 18px rgba(40, 50, 80, 0.12), 0 1px 2px rgba(40, 50, 80, 0.1); --lg-shadow-big: 0 24px 64px rgba(40, 50, 80, 0.22), 0 3px 10px rgba(40, 50, 80, 0.12);
+    --lg-blur: blur(14px) saturate(180%) brightness(1.04); --lg-lens: url(#lg-lens) blur(8px) saturate(180%) brightness(1.04); --lg-puck: rgba(255, 255, 255, 0.95); --lg-light: rgba(255, 255, 255, 0.7);
+  }
+}
+:root[data-theme="light"] {
+  --lg-fill: rgba(255, 255, 255, 0.5); --lg-fill-hover: rgba(255, 255, 255, 0.72); --lg-surface: rgba(255, 255, 255, 0.48); --lg-surface-strong: rgba(250, 250, 252, 0.78);
+  --lg-rim: inset 1px 1px 0 -0.25px rgba(255, 255, 255, 0.95), inset -1px -1px 0 -0.25px rgba(255, 255, 255, 0.6), inset 0 0 0 0.5px rgba(0, 0, 0, 0.07);
+  --lg-shadow: 0 6px 18px rgba(40, 50, 80, 0.12), 0 1px 2px rgba(40, 50, 80, 0.1); --lg-shadow-big: 0 24px 64px rgba(40, 50, 80, 0.22), 0 3px 10px rgba(40, 50, 80, 0.12);
+  --lg-blur: blur(14px) saturate(180%) brightness(1.04); --lg-lens: url(#lg-lens) blur(8px) saturate(180%) brightness(1.04); --lg-puck: rgba(255, 255, 255, 0.95); --lg-light: rgba(255, 255, 255, 0.7);
+}
+
+/* The wallpaper the glass refracts: soft color fields, like macOS's default desktop light. */
+body {
+  font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+  background-color: var(--bg);
+  background-image:
+    radial-gradient(900px 620px at 0% 0%, color-mix(in srgb, var(--accent) 30%, transparent), transparent 70%),
+    radial-gradient(760px 560px at 100% 8%, color-mix(in srgb, var(--pink) 20%, transparent), transparent 70%),
+    radial-gradient(1000px 700px at 60% 110%, color-mix(in srgb, #8e6bff 18%, transparent), transparent 70%);
+  background-attachment: fixed;
+}
+h1, h2, .page-head h1 { font-family: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif; }
+
+/* --- The material --- */
+.lg, .glass-button, .round-button, .search-field, .segmented, .tabbar, .dropdown-button, .sidebar, .menu, .modal, .toast, .panel, .mini-player {
+  background-color: var(--lg-fill);
+  box-shadow: var(--lg-rim), var(--lg-shadow);
+  border: 0;
+  -webkit-backdrop-filter: var(--lg-blur);
+  backdrop-filter: var(--lg-blur);
+}
+/* Small floating controls bend light at their rim (the lens). */
+.glass-button, .round-button, .search-field, .segmented, .tabbar { backdrop-filter: var(--lg-lens); }
+/* Light follows the pointer on glass you can press (set by main.tsx as --mx/--my). */
+.glass-button, .round-button, .dropdown-button, .segmented button, .tabbar button {
+  background-image: radial-gradient(90px circle at var(--mx, 50%) var(--my, -40%), var(--lg-light), transparent 70%);
+  background-repeat: no-repeat;
+  transition: background-color 0.18s, transform 0.14s cubic-bezier(0.2, 0.9, 0.3, 1.4), box-shadow 0.18s;
+}
+.glass-button:hover:not(:disabled), .round-button:hover:not(:disabled) { background-color: var(--lg-fill-hover); }
+.glass-button:active:not(:disabled), .round-button:active:not(:disabled) { transform: scale(0.95); box-shadow: var(--lg-rim), 0 2px 8px rgba(0, 0, 0, 0.2), inset 0 0 18px rgba(255, 255, 255, 0.16); }
+/* Tint only for the main action */
+.glass-button.prominent { background-color: color-mix(in srgb, var(--accent) 88%, transparent); color: #fff;
+  box-shadow: inset 1px 1px 0 -0.25px rgba(255, 255, 255, 0.55), inset -1px -1px 0 -0.25px rgba(255, 255, 255, 0.2), 0 6px 18px color-mix(in srgb, var(--accent) 35%, transparent); }
+.glass-button.prominent:hover:not(:disabled) { background-color: color-mix(in srgb, var(--accent) 80%, white); }
+.glass-button.danger { color: var(--low); }
+.glass-button { height: 38px; padding: 0 18px; font-weight: 600; }
+.glass-button.icon-only { width: 38px; }
+.round-button { width: 34px; height: 34px; }
+
+/* Larger surfaces: softer scattering, deeper shadow, no lens (like Apple's menus and sidebars). */
+.sidebar, .menu, .modal { backdrop-filter: var(--lg-blur-big); -webkit-backdrop-filter: var(--lg-blur-big); }
+.menu, .modal, .toast { background-color: var(--lg-surface-strong); box-shadow: var(--lg-rim), var(--lg-shadow-big); }
+.panel { background-color: var(--lg-surface); }
+
+/* --- Shell: the sidebar floats inset from the window, its corners concentric with the window's --- */
+.shell { grid-template-columns: 252px 1fr; }
+.sidebar { margin: 10px 0 10px 10px; border-radius: 24px; background-color: var(--lg-surface); padding: 16px 10px 10px; }
+.brand { padding: 6px 12px 16px; }
+.nav-item { border-radius: 12px; padding: 9px 12px; font-weight: 550; color: var(--text); opacity: 0.86; transition: background-color 0.15s; }
+.nav-item svg { color: var(--accent); }
+.nav-item:hover { background: var(--press); opacity: 1; }
+.nav-item.on { background: color-mix(in srgb, var(--accent) 26%, transparent); opacity: 1; box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--accent) 40%, transparent); }
+.nav-section { text-transform: none; letter-spacing: 0; font-size: 12px; font-weight: 650; padding: 16px 12px 4px; }
+.sidebar-foot { border-radius: 16px; border: 0; background: none; }
+.sidebar-foot:hover { background: var(--press); }
+
+/* --- Page headers: large title, controls grouped in glass on the right --- */
+.page-head h1 { font-size: 32px; font-weight: 700; letter-spacing: -0.02em; }
+.shelf-head h2 { color: var(--text); font-size: 20px; font-weight: 700; letter-spacing: -0.015em; }
+.shelf-head h2 svg { color: var(--muted); }
+
+/* Segmented controls and tab bars: one glass capsule, the choice is a raised puck inside it. */
+.segmented, .tabbar { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 3px; border-radius: 999px; }
+.segmented { justify-content: flex-start; }
+.segmented button, .tabbar button { border: 0; background-color: transparent; box-shadow: none; padding: 7px 14px; border-radius: 999px; font-weight: 600; font-size: 13px; color: var(--text); opacity: 0.8; }
+.segmented button:hover, .tabbar button:hover { opacity: 1; }
+.segmented button.on, .tabbar button.on { background-color: var(--lg-puck); color: var(--text); opacity: 1; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18), inset 0 0 0 0.5px rgba(255, 255, 255, 0.25); }
+
+/* Search field and text inputs: a glass capsule / filled field */
+.search-field { height: 40px; border-radius: 999px; }
+.search-field:focus-within { box-shadow: var(--lg-rim), var(--lg-shadow), 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent); }
+input[type="text"], input:not([type]), input[type="password"], input[type="number"], input[type="date"], input[type="time"], .field input, select, textarea {
+  border-radius: 12px; border: 0; background-color: var(--press); box-shadow: inset 0 0 0 0.5px var(--line); }
+input:focus, select:focus, textarea:focus { outline: none; box-shadow: inset 0 0 0 0.5px var(--line), 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent); }
+
+/* Menus pop out of their button */
+.menu { border-radius: 20px; padding: 6px; }
+.menu-item { border-radius: 12px; }
+.menu-item:hover { background: color-mix(in srgb, var(--accent) 85%, transparent); color: #fff; }
+.menu-item:hover .menu-icon, .menu-item:hover .menu-label small { color: #fff; }
+.menu-section { text-transform: none; letter-spacing: 0; font-size: 12px; }
+.dropdown-menu, .context-menu { animation: popover 0.2s cubic-bezier(0.2, 0.9, 0.25, 1.15); transform-origin: top left; }
+.dropdown-menu.right { transform-origin: top right; }
+
+/* Sheets: a big glass pane over a dimmed window */
+.modal { border-radius: 30px; }
+.modal-backdrop { background: rgba(0, 0, 0, 0.32); backdrop-filter: none; }
+.toast { border-radius: 999px; padding: 10px 14px 10px 18px; }
+
+/* Groups (settings, dashboard) read as grouped glass panels with sentence-case titles */
+.group-title { text-transform: none; letter-spacing: 0; font-size: 13px; font-weight: 700; }
+.panel { border-radius: 24px; }
+
+/* Switches: iOS style */
+.switch { width: 46px; height: 28px; border: 0; background: var(--press); box-shadow: inset 0 0 0 0.5px var(--line); }
+.switch::after { top: 2px; left: 2px; width: 24px; height: 24px; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25), 0 0 0 0.5px rgba(0, 0, 0, 0.05); }
+.switch:checked { background: var(--good); box-shadow: none; }
+.switch:checked::after { transform: translateX(18px); }
+
+/* Sliders everywhere follow the player's slider */
+input[type="range"]:not(.lg-slider) { accent-color: var(--accent); }
+
+/* Cards are content: no glass on the art itself, only on the small controls floating over it */
+.card-cover { border-radius: 14px; }
+.card-cover > .cover { border-radius: 14px !important; }
+.card-play, .card-more, .card-status, .bubble { box-shadow: var(--lg-rim-dark), 0 4px 12px rgba(0, 0, 0, 0.25); background-color: rgba(20, 20, 26, 0.38); backdrop-filter: blur(12px) saturate(180%); }
+.card-play:hover { background-color: color-mix(in srgb, var(--accent) 88%, transparent); }
+.letters button.on { background: var(--lg-puck); color: var(--text); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15); }
+.letters button:hover { background: var(--press); color: var(--text); }
+
+/* Mini player: a floating glass capsule */
+.mini-player { left: 18px; right: 18px; bottom: 16px; border-radius: 26px; padding: 8px 12px 8px 8px; background-color: var(--lg-surface-strong); box-shadow: var(--lg-rim), var(--lg-shadow-big); --pc: var(--text); }
+.mini-player .pd-button { color: var(--text); }
+.mini-player .pd-button.play { width: 46px; height: 46px; min-width: 46px; }
+.mini-player .lg-slider { --slider-fill: var(--text); --slider-rest: color-mix(in srgb, var(--text) 18%, transparent); }
+.mini-player .pd-volume .lg-slider { width: 90px; }
+.mini-cover .cover { border-radius: 14px !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  .player-panel, .dropdown-menu, .context-menu, .player-flash, .modal { animation: none !important; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .lg, .glass-button, .round-button, .search-field, .segmented, .tabbar, .dropdown-button, .sidebar, .menu, .modal, .toast, .panel, .mini-player { backdrop-filter: none; background-color: var(--bg-2); }
+}
+
+/* Season picker: the same glass segmented control as the library tabs */
+.season-tabs { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 3px; border-radius: 999px; background-color: var(--lg-fill); box-shadow: var(--lg-rim), var(--lg-shadow); backdrop-filter: var(--lg-lens); }
+.season-tabs button { border: 0; background: transparent; box-shadow: none; padding: 7px 14px; border-radius: 999px; font-weight: 600; font-size: 13px; color: var(--text); opacity: 0.8; }
+.season-tabs button:hover { opacity: 1; }
+.season-tabs button.on { background: var(--lg-puck); color: var(--text); opacity: 1; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18), inset 0 0 0 0.5px rgba(255, 255, 255, 0.25); }
+/* Glass over artwork (details banner): clear glass with its own dimming, so the art can't recolor it */
+.back-float { background-color: rgba(18, 18, 24, 0.34); color: #fff; backdrop-filter: blur(14px) saturate(140%) brightness(0.9); box-shadow: var(--lg-rim-dark), 0 6px 18px rgba(0, 0, 0, 0.3); }
+.back-float:hover:not(:disabled) { background-color: rgba(18, 18, 24, 0.5); }

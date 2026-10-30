@@ -44,6 +44,12 @@ if (native) {
   });
 }
 
+// Browser preview only: a pretend engine so the player can be looked at (stripped from builds).
+if (!native && import.meta.env.DEV && new URLSearchParams(location.search).has("mockplayer")) {
+  const { mockEngine } = await import("./dev/mockEngine");
+  setEngine(mockEngine());
+}
+
 const store: TokenStore = native
   ? { load: () => invoke<string | null>("accounts_load"), save: (data) => invoke("accounts_save", { data }) }
   : {
@@ -92,6 +98,19 @@ async function playLocalFile(path: string) {
     model.fail(e);
   }
 }
+
+// Liquid Glass: the light on a glass control follows the pointer (CSS reads --mx/--my).
+const GLASS = ".glass-button, .round-button, .dropdown-button, .segmented button, .tabbar button";
+let lit: HTMLElement | null = null;
+window.addEventListener("pointermove", (e) => {
+  const el = (e.target as HTMLElement | null)?.closest?.(GLASS) as HTMLElement | null;
+  if (lit && lit !== el) { lit.style.removeProperty("--mx"); lit.style.removeProperty("--my"); }
+  lit = el;
+  if (!el) return;
+  const r = el.getBoundingClientRect();
+  el.style.setProperty("--mx", `${e.clientX - r.left}px`);
+  el.style.setProperty("--my", `${e.clientY - r.top}px`);
+}, { passive: true });
 
 // No browser right-click menu (the app has its own) and no Ctrl+wheel page zoom.
 window.addEventListener("contextmenu", (e) => {

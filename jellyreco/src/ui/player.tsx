@@ -7,7 +7,7 @@ import type { PlayerController, PlayerState, TrackOption } from "../core/player"
 import { BITRATES, SPEEDS } from "../core/settings";
 import type { Item, MediaSegment } from "../core/types";
 import { ticksToSeconds } from "../core/types";
-import { cardImage, Cover, logoUrl, Segmented } from "./components";
+import { cardImage, Cover, logoUrl, Range, Segmented } from "./components";
 import { audioBadge, bitrate, bytes, clock, episodeCode, languageName, runtime, videoBadges } from "./fmt";
 import { Icon } from "./icons";
 import { routeFor, ui, useModel } from "./state";
@@ -34,6 +34,7 @@ export function PlayerOverlay() {
   const p = model.player!;
   const [visible, setVisible] = useState(true);
   const [panel, setPanel] = useState<Panel>(null);
+  const [anchor, setAnchor] = useState(24);
   const [stats, setStats] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [pip, setPip] = useState(false);
@@ -129,9 +130,9 @@ export function PlayerOverlay() {
       else if (k === "ArrowLeft" && !e.shiftKey) { handled(); void p.seekBy(-s.seekShort); show("rewind10", `−${s.seekShort}s`); }
       else if (k === "l" || (k === "ArrowRight" && e.shiftKey)) { handled(); void p.seekBy(s.seekLong); show("forward10", `+${s.seekLong}s`); }
       else if (k === "j" || (k === "ArrowLeft" && e.shiftKey)) { handled(); void p.seekBy(-s.seekLong); show("rewind10", `−${s.seekLong}s`); }
-      else if (k === "ArrowUp") { handled(); void p.setVolume(st.volume + 5); show("volume", `${Math.round(Math.min(st.volume + 5, s.volumeBoostMax))}%`); }
-      else if (k === "ArrowDown") { handled(); void p.setVolume(st.volume - 5); show("volumeLow", `${Math.round(Math.max(st.volume - 5, 0))}%`); }
-      else if (k === "m") { handled(); void p.toggleMute(); show(st.muted ? "volume" : "mute"); }
+      else if (k === "ArrowUp") { handled(); void p.setVolume(st.volume + 5); show("speakerFill", `${Math.round(Math.min(st.volume + 5, s.volumeBoostMax))}%`); }
+      else if (k === "ArrowDown") { handled(); void p.setVolume(st.volume - 5); show("speakerLowFill", `${Math.round(Math.max(st.volume - 5, 0))}%`); }
+      else if (k === "m") { handled(); void p.toggleMute(); show(st.muted ? "speakerFill" : "speakerMuteFill"); }
       else if (k === "f" || k === "F11") { handled(); void setFull(!fullscreen); }
       else if (k === "Escape") {
         handled();
@@ -197,18 +198,32 @@ export function PlayerOverlay() {
   const segment = st.activeSegment;
   const segAction = segment ? model.settings.segmentActions[segment.Type] : "none";
 
+  const openPanel = (name: Panel, e?: { currentTarget: HTMLElement }) => {
+    if (panel === name) { setPanel(null); return; }
+    // The menu opens from its button (like Apple's menus), kept inside the window.
+    const r = e?.currentTarget.getBoundingClientRect();
+    setAnchor(r ? Math.max(16, window.innerWidth - r.right - 8) : 24);
+    setPanel(name);
+  };
+  const isEpisode = item.Type === "Episode";
+  const remaining = model.settings.remainingTime;
+  const ends = new Date(Date.now() + Math.max(0, st.duration - st.position) * 1000 / Math.max(st.speed, 0.1));
+  const logo = isEpisode ? logoUrl(model.api!, item, 500) : undefined;
+
   return (
     <div className={`player ${visible || panel ? "controls-on" : "controls-off"}`} onMouseMove={poke}
       onDoubleClick={(e) => { if (model.settings.doubleClickFullscreen && (e.target as HTMLElement).classList.contains("player-surface")) void setFull(!fullscreen); }}
       onWheel={(e) => { if (model.settings.wheelVolume && !panel && (e.target as HTMLElement).classList.contains("player-surface")) { void p.setVolume(st.volume + (e.deltaY < 0 ? 5 : -5)); poke(); } }}
       data-tauri-drag-region={pip ? "" : undefined}>
       <div className="player-surface" onClick={() => { if (panel) setPanel(null); else { void p.togglePause(); show(st.paused ? "playFill" : "pauseFill"); } }} />
+      {/* Dimming behind the clear glass, only while the controls show (keeps them legible on bright video). */}
+      <div className="player-dim" />
 
       {(st.loading || st.buffering) && !st.error && (
-        <div className="player-center"><span className="spinner big" />{st.buffering && st.bufferingPercent > 0 && <span className="muted">{Math.round(st.bufferingPercent)}%</span>}</div>
+        <div className="player-center"><span className="spinner big" />{st.buffering && st.bufferingPercent > 0 && <span className="tabular">{Math.round(st.bufferingPercent)}%</span>}</div>
       )}
       {st.error && (
-        <div className="player-error panel">
+        <div className="player-error lg">
           <Icon name="info" size={28} />
           <h3>Can't play this</h3>
           <p>{st.error}</p>
@@ -216,63 +231,77 @@ export function PlayerOverlay() {
             <button className="glass-button prominent" onClick={() => void p.jumpTo(st.index)}>Try again</button></div>
         </div>
       )}
-      {flash && <div key={flash.key} className="player-flash"><Icon name={flash.icon} size={44} />{flash.text && <span>{flash.text}</span>}</div>}
+      {flash && <div key={flash.key} className="player-flash lg"><Icon name={flash.icon} size={40} />{flash.text && <span>{flash.text}</span>}</div>}
 
-      <header className="player-top">
-        <button className="player-icon" onClick={() => void close()} title="Back (Esc)"><Icon name="chevronLeft" size={26} /></button>
-        <div className="player-title">
-          {logoUrl(model.api!, item) && item.Type === "Episode" ? <img className="player-logo" src={logoUrl(model.api!, item, 400)} alt={item.SeriesName ?? ""} /> : null}
-          <div>
-            <strong>{item.Type === "Episode" ? item.SeriesName : item.Name}</strong>
-            {item.Type === "Episode" && <span>{episodeCode(item)} · {item.Name}</span>}
-            {item.Type !== "Episode" && item.ProductionYear && <span>{item.ProductionYear}</span>}
+      {/* Top: close and picture in picture on the left (as in Apple's player), info on the right. */}
+      <div className="player-top">
+        <div className="pg-group lg">
+          <button className="pg-button" onClick={() => void close()} title="Close (Esc)" aria-label="Close"><Icon name="x" size={19} strokeWidth={2.2} /></button>
+          <button className="pg-button" onClick={() => void togglePip()} title={pip ? "Back to the full player" : "Picture in picture"} aria-label="Picture in picture"><Icon name="pip" size={19} /></button>
+        </div>
+        <div className="player-top-right">
+          {st.playMethod && st.playMethod !== "DirectPlay" && <span className="pg-chip lg" title="The server is converting this file">{st.playMethod === "Transcode" ? "Transcoding" : "Remuxing"}</span>}
+          {st.abLoop[0] !== null && <span className="pg-chip lg" title="A-B loop (B)">{st.abLoop[1] === null ? "Loop A–" : "Loop A–B"}</span>}
+          <div className="pg-group lg">
+            <button className={`pg-button ${stats ? "on" : ""}`} onClick={() => setStats((v) => !v)} title="Stats for nerds (I)" aria-label="Stats"><Icon name="activity" size={18} /></button>
           </div>
         </div>
-        <div className="player-top-actions">
-          {st.playMethod !== "DirectPlay" && <span className="chip chip-danger" title="The server is converting this file">{st.playMethod === "Transcode" ? "Transcoding" : "Remuxing"}</span>}
-          {st.playMethod === "DirectPlay" && <span className="chip chip-muted" title="The file plays as stored">Direct play</span>}
-          <button className="player-icon" onClick={() => setStats((v) => !v)} title="Stats for nerds (I)"><Icon name="activity" size={20} /></button>
-          <button className="player-icon" onClick={() => void togglePip()} title="Picture in picture"><Icon name="pip" size={20} /></button>
-          <button className="player-icon" onClick={() => void setFull(!fullscreen)} title="Full screen (F)"><Icon name={fullscreen ? "exitFullscreen" : "fullscreen"} size={20} /></button>
-        </div>
-      </header>
+      </div>
 
       {stats && <Stats st={st} />}
 
       {segment && segAction !== "none" && !st.error && (
-        <button className="skip-button" onClick={() => void p.skipSegment(segment)}>
-          {SEGMENT_LABEL[segment.Type] ?? "Skip"} <Icon name="skipForward" size={16} />
+        <button className="skip-button lg" onClick={() => void p.skipSegment(segment)}>
+          {SEGMENT_LABEL[segment.Type] ?? "Skip"} <Icon name="nextFill" size={14} />
         </button>
       )}
       {st.upNext && st.upNextCountdown !== null && <UpNext p={p} next={st.upNext} countdown={st.upNextCountdown} />}
 
-      <footer className="player-bottom">
-        <Timeline st={st} p={p} />
-        <div className="player-controls">
-          <div className="pc-left">
-            <button className="player-icon" disabled={st.index === 0 && st.position < 5} onClick={() => void p.previous()} title="Previous (P)"><Icon name="prev" size={22} /></button>
-            <button className="player-icon" onClick={() => void p.seekBy(-model.settings.seekShort)} title={`Back ${model.settings.seekShort}s (←)`}><Icon name="rewind10" size={24} /></button>
-            <button className="player-icon big" onClick={() => void p.togglePause()} title="Play/pause (Space)"><Icon name={st.paused ? "playFill" : "pauseFill"} size={30} /></button>
-            <button className="player-icon" onClick={() => void p.seekBy(model.settings.seekShort)} title={`Forward ${model.settings.seekShort}s (→)`}><Icon name="forward10" size={24} /></button>
-            <button className="player-icon" disabled={st.index >= st.queue.length - 1 && !st.upNext} onClick={() => void p.next()} title="Next (N)"><Icon name="next" size={22} /></button>
-            <Volume st={st} p={p} />
-            <TimeLabel st={st} />
-          </div>
-          <div className="pc-right">
-            {st.abLoop[0] !== null && <span className="chip chip-accent" title="A-B loop (B)">{st.abLoop[1] === null ? "A–" : "A–B"}</span>}
-            {item.Type === "Episode" && <PanelButton icon="list" label="Episodes" on={panel === "episodes"} onClick={() => setPanel(panel === "episodes" ? null : "episodes")} />}
-            {st.chapters.length > 1 && <PanelButton icon="chapters" label="Chapters" on={panel === "chapters"} onClick={() => setPanel(panel === "chapters" ? null : "chapters")} />}
-            {st.queue.length > 1 && item.Type !== "Episode" && <PanelButton icon="queue" label="Queue" on={panel === "queue"} onClick={() => setPanel(panel === "queue" ? null : "queue")} />}
-            <PanelButton icon="audio" label="Audio" on={panel === "audio"} onClick={() => setPanel(panel === "audio" ? null : "audio")} />
-            <PanelButton icon="subtitles" label="Subtitles" on={panel === "subs"} onClick={() => setPanel(panel === "subs" ? null : "subs")} />
-            <PanelButton icon="gauge" label={`${st.speed}×`} on={panel === "speed"} onClick={() => setPanel(panel === "speed" ? null : "speed")} />
-            <PanelButton icon="settings" label="Settings" on={panel === "settings"} onClick={() => setPanel(panel === "settings" ? null : "settings")} />
+      {/* Bottom: title, then one floating glass bar with the timeline and every control. */}
+      <div className="player-dock">
+        <div className="pd-title">
+          {logo ? <img className="pd-logo" src={logo} alt={item.SeriesName ?? ""} onError={(e) => { e.currentTarget.style.display = "none"; }} /> : null}
+          <div className="pd-title-text">
+            {isEpisode && <span className="pd-eyebrow">{item.SeriesName}</span>}
+            <strong>{isEpisode ? `${episodeCode(item)}  ${item.Name ?? ""}` : item.Name}</strong>
+            {model.settings.showClock && st.duration > 0 && <span className="pd-ends">Ends at {ends.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>}
           </div>
         </div>
-      </footer>
+        <div className="pd-bar lg">
+          <div className="pd-timeline">
+            <span className="pd-time tabular">{clock(st.position)}</span>
+            <Timeline st={st} p={p} />
+            <button className="pd-time end tabular" onClick={() => model.updateSettings({ remainingTime: !remaining })} title={remaining ? "Show the length" : "Show the time left"}>
+              {remaining ? `−${clock(Math.max(0, st.duration - st.position))}` : clock(st.duration)}
+            </button>
+          </div>
+          <div className="pd-controls">
+            <div className="pd-left">
+              <button className="pd-button" disabled={st.index === 0 && st.position < 5} onClick={() => void p.previous()} title="Previous (P)" aria-label="Previous"><Icon name="prevFill" size={20} /></button>
+              <button className="pd-button" onClick={() => void p.seekBy(-model.settings.seekShort)} title={`Back ${model.settings.seekShort} seconds (←)`} aria-label="Back"><Icon name="rewind10" size={24} strokeWidth={1.8} /></button>
+              <button className="pd-button play" onClick={() => void p.togglePause()} title={st.paused ? "Play (Space)" : "Pause (Space)"} aria-label={st.paused ? "Play" : "Pause"}><Icon name={st.paused ? "playFill" : "pauseFill"} size={30} /></button>
+              <button className="pd-button" onClick={() => void p.seekBy(model.settings.seekShort)} title={`Forward ${model.settings.seekShort} seconds (→)`} aria-label="Forward"><Icon name="forward10" size={24} strokeWidth={1.8} /></button>
+              <button className="pd-button" disabled={st.index >= st.queue.length - 1 && !st.upNext} onClick={() => void p.next()} title="Next (N)" aria-label="Next"><Icon name="nextFill" size={20} /></button>
+              <Volume st={st} p={p} />
+            </div>
+            <div className="pd-right">
+              {isEpisode && <PanelButton icon="stack" label="Episodes (E)" on={panel === "episodes"} onClick={(e) => openPanel("episodes", e)} />}
+              {st.chapters.length > 1 && <PanelButton icon="chapters" label="Chapters" on={panel === "chapters"} onClick={(e) => openPanel("chapters", e)} />}
+              {st.queue.length > 1 && !isEpisode && <PanelButton icon="queue" label="Up next" on={panel === "queue"} onClick={(e) => openPanel("queue", e)} />}
+              <PanelButton icon="captions" label="Subtitles (C)" on={panel === "subs"} onClick={(e) => openPanel("subs", e)} />
+              <PanelButton icon="waveform" label="Audio (A)" on={panel === "audio"} onClick={(e) => openPanel("audio", e)} />
+              <button className={`pd-button speed ${panel === "speed" ? "on" : ""}`} onClick={(e) => openPanel("speed", e)} title="Playback speed" aria-label="Playback speed">
+                {st.speed === 1 ? <Icon name="gauge" size={21} /> : <span className="tabular">{st.speed}×</span>}
+              </button>
+              <PanelButton icon="ellipsis" label="More" on={panel === "settings"} onClick={(e) => openPanel("settings", e)} />
+              <button className="pd-button" onClick={() => void setFull(!fullscreen)} title={fullscreen ? "Exit full screen (F)" : "Full screen (F)"} aria-label="Full screen"><Icon name={fullscreen ? "shrink" : "expand"} size={20} /></button>
+            </div>
+          </div>
+        </div>
+      </div>
 
       {panel && (
-        <aside className={`player-panel ${panel === "episodes" || panel === "queue" || panel === "chapters" ? "wide" : ""}`} onMouseMove={(e) => e.stopPropagation()}>
+        <aside className={`player-panel lg ${panel === "episodes" || panel === "queue" || panel === "chapters" ? "wide" : ""}`} style={{ right: anchor }} onMouseMove={(e) => e.stopPropagation()}>
           {panel === "audio" && <AudioPanel st={st} p={p} />}
           {panel === "subs" && <SubsPanel st={st} p={p} />}
           {panel === "speed" && <SpeedPanel st={st} p={p} />}
@@ -287,8 +316,8 @@ export function PlayerOverlay() {
   );
 }
 
-function PanelButton({ icon, label, on, onClick }: { icon: string; label: string; on: boolean; onClick: () => void }) {
-  return <button className={`player-pill ${on ? "on" : ""}`} onClick={onClick} title={label}><Icon name={icon} size={18} /><span>{label}</span></button>;
+function PanelButton({ icon, label, on, onClick }: { icon: string; label: string; on: boolean; onClick: (e: { currentTarget: HTMLElement }) => void }) {
+  return <button className={`pd-button ${on ? "on" : ""}`} onClick={onClick} title={label} aria-label={label} aria-pressed={on}><Icon name={icon} size={21} /></button>;
 }
 
 function cycleSubs(p: PlayerController, st: PlayerState) {
@@ -396,27 +425,18 @@ function Trickplay({ st, t }: { st: PlayerState; t: number }) {
   return <div className="trickplay" style={style} />;
 }
 
-function TimeLabel({ st }: { st: PlayerState }) {
-  const model = useModel();
-  const remaining = model.settings.remainingTime;
-  const end = new Date(Date.now() + Math.max(0, st.duration - st.position) * 1000 / Math.max(st.speed, 0.1));
-  return (
-    <button className="time-label tabular" onClick={() => model.updateSettings({ remainingTime: !remaining })} title="Show elapsed / remaining">
-      {clock(st.position)} <span className="muted">/ {remaining ? `−${clock(st.duration - st.position)}` : clock(st.duration)}</span>
-      {model.settings.showClock && st.duration > 0 && <span className="muted small"> · ends {end.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>}
-    </button>
-  );
-}
-
 function Volume({ st, p }: { st: PlayerState; p: PlayerController }) {
   const model = useModel();
   const max = model.settings.volumeBoostMax;
+  const v = st.muted ? 0 : st.volume;
+  // Up to 100% fills the track; a boost above 100% (if allowed in Settings) shows past a tick.
   return (
-    <div className="volume">
-      <button className="player-icon" onClick={() => void p.toggleMute()} title="Mute (M)"><Icon name={st.muted || st.volume === 0 ? "mute" : st.volume < 50 ? "volumeLow" : "volume"} size={22} /></button>
-      <input type="range" min={0} max={max} step={1} value={st.muted ? 0 : st.volume} onChange={(e) => void p.setVolume(Number(e.target.value))}
-        style={{ "--fill": `${((st.muted ? 0 : st.volume) / max) * 100}%` } as CSSProperties} aria-label="Volume" />
-      <span className="volume-value tabular">{Math.round(st.muted ? 0 : st.volume)}</span>
+    <div className="pd-volume" title={`Volume ${Math.round(v)}%`}>
+      <button className="pd-button" onClick={() => void p.toggleMute()} title="Mute (M)" aria-label={st.muted ? "Unmute" : "Mute"}>
+        <Icon name={st.muted || st.volume === 0 ? "speakerMuteFill" : st.volume < 50 ? "speakerLowFill" : "speakerFill"} size={21} />
+      </button>
+      <Range min={0} max={max} step={1} value={v} onChange={(e) => void p.setVolume(Number(e.target.value))}
+        aria-label="Volume" />
     </div>
   );
 }
@@ -426,7 +446,7 @@ function Volume({ st, p }: { st: PlayerState; p: PlayerController }) {
 function UpNext({ p, next, countdown }: { p: PlayerController; next: Item; countdown: number }) {
   const model = useModel();
   return (
-    <div className="up-next panel">
+    <div className="up-next lg">
       <Cover url={cardImage(model.api!, next, "landscape", 240)} width={200} height={112} radius={10} icon="tv" />
       <div className="up-next-text">
         <small>Up next in {countdown}s</small>
@@ -679,7 +699,7 @@ function Slider({ label, value, min, max, step, format, onChange, reset }: { lab
     <div className="slider-row">
       <div className="slider-head"><span>{label}</span><span className="tabular muted">{format(value)}</span>
         {reset !== undefined && Math.abs(value - reset) > 1e-6 && <button className="link-button small" onClick={() => onChange(reset)}>Reset</button>}</div>
-      <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} />
+      <Range min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} />
     </div>
   );
 }
@@ -710,7 +730,7 @@ function Stats({ st }: { st: PlayerState }) {
     ["Engine", `${s["mpv-version"] ?? "mpv"} · FFmpeg ${s["ffmpeg-version"] ?? "?"}`],
   ];
   return (
-    <div className="stats panel">
+    <div className="stats">
       {rows.map(([k, v]) => <div key={k} className="stats-row"><span>{k}</span><span>{v}</span></div>)}
     </div>
   );
@@ -726,7 +746,7 @@ export function MiniPlayer() {
   const [lyricsOpen, setLyricsOpen] = useState(false);
   if (!item) return null;
   return (
-    <div className="mini-player panel">
+    <div className="mini-player lg">
       <button className="mini-cover" onClick={() => ui.push(model.tab, routeFor(item.AlbumId ? { Id: item.AlbumId, Type: "MusicAlbum" } : item))}>
         <Cover url={cardImage(model.api!, item, "square", 64)} width={52} height={52} radius={8} icon="music" />
       </button>
@@ -735,20 +755,20 @@ export function MiniPlayer() {
         <span className="muted small">{[item.Artists?.join(", "), item.Album].filter(Boolean).join(" · ")}</span>
       </div>
       <div className="mini-controls">
-        <button className="player-icon" onClick={() => p.toggleShuffle()} title="Shuffle"><Icon name="shuffle" size={17} className={st.shuffle ? "accent" : ""} /></button>
-        <button className="player-icon" onClick={() => void p.previous()}><Icon name="prev" size={20} /></button>
-        <button className="player-icon big" onClick={() => void p.togglePause()}><Icon name={st.paused ? "playFill" : "pauseFill"} size={26} /></button>
-        <button className="player-icon" onClick={() => void p.next()}><Icon name="next" size={20} /></button>
-        <button className="player-icon" onClick={() => void p.cycleRepeat()} title={`Repeat: ${st.repeat}`}><Icon name="repeat" size={17} className={st.repeat !== "none" ? "accent" : ""} /></button>
+        <button className="pd-button" onClick={() => p.toggleShuffle()} title="Shuffle"><Icon name="shuffle" size={17} className={st.shuffle ? "accent" : ""} /></button>
+        <button className="pd-button" onClick={() => void p.previous()}><Icon name="prevFill" size={19} /></button>
+        <button className="pd-button play" onClick={() => void p.togglePause()}><Icon name={st.paused ? "playFill" : "pauseFill"} size={26} /></button>
+        <button className="pd-button" onClick={() => void p.next()}><Icon name="nextFill" size={19} /></button>
+        <button className="pd-button" onClick={() => void p.cycleRepeat()} title={`Repeat: ${st.repeat}`}><Icon name="repeat" size={17} className={st.repeat !== "none" ? "accent" : ""} /></button>
       </div>
       <div className="mini-time">
         <span className="tabular small">{clock(st.position)}</span>
-        <input type="range" min={0} max={st.duration || 1} step={0.5} value={st.position} onChange={(e) => void p.seek(Number(e.target.value))} />
+        <Range min={0} max={st.duration || 1} step={0.5} value={st.position} onChange={(e) => void p.seek(Number(e.target.value))} aria-label="Position" />
         <span className="tabular small">{clock(st.duration)}</span>
       </div>
       <Volume st={st} p={p} />
-      {item.Type === "Audio" && <button className="player-icon" onClick={() => setLyricsOpen((v) => !v)} title="Lyrics"><Icon name="book" size={18} /></button>}
-      <button className="player-icon" onClick={() => void p.close()} title="Stop"><Icon name="x" size={18} /></button>
+      {item.Type === "Audio" && <button className="pd-button" onClick={() => setLyricsOpen((v) => !v)} title="Lyrics"><Icon name="book" size={18} /></button>}
+      <button className="pd-button" onClick={() => void p.close()} title="Stop"><Icon name="x" size={18} /></button>
       {lyricsOpen && <Lyrics id={item.Id} position={st.position} />}
     </div>
   );

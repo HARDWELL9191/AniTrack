@@ -56,7 +56,7 @@ export function DashboardRoot() {
   const { busy, run } = useAction();
   return (
     <div className="page">
-      <PageHeader title="Dashboard" subtitle={info ? `${info.ServerName} · Jellyfin ${info.Version}` : undefined}>
+      <PageHeader title="Dashboard" subtitle={info?.ServerName ? `${info.ServerName}${info.Version ? ` · Jellyfin ${info.Version}` : ""}` : undefined}>
         <button className="glass-button" disabled={busy} onClick={() => void run(() => api.post("/Library/Refresh"), "Scanning all libraries")}><Icon name="refresh" size={15} /> Scan all libraries</button>
         <button className="glass-button" onClick={() => ui.openSheet({ kind: "confirm", title: "Restart the server?", text: "Playback on every device stops for a moment.", confirmLabel: "Restart", run: async () => { await api.post("/System/Restart"); model.toast("Restarting…"); setTimeout(reloadInfo, 15000); } })}><Icon name="repeat" size={15} /> Restart</button>
         <button className="glass-button danger" onClick={() => ui.openSheet({ kind: "confirm", danger: true, title: "Shut down the server?", text: "You'll need to start it again on the server machine.", confirmLabel: "Shut down", run: () => api.post("/System/Shutdown") })}><Icon name="power" size={15} /> Shut down</button>
@@ -174,11 +174,11 @@ function RunningTasks() {
   const api = model.api!;
   const [tasks, setTasks] = useState<TaskInfo[] | null>(null);
   useEffect(() => {
-    const load = () => api.get<TaskInfo[]>("/ScheduledTasks", { isHidden: false }).then(setTasks).catch(() => {});
+    const load = () => api.get<TaskInfo[]>("/ScheduledTasks", { isHidden: false }).then((r) => setTasks(Array.isArray(r) ? r : [])).catch(() => {});
     void load();
     const socket = getSocket();
     socket?.send("ScheduledTasksInfoStart", "0,1000");
-    const off = socket?.on("ScheduledTasksInfo", (d) => setTasks(d as TaskInfo[]));
+    const off = socket?.on("ScheduledTasksInfo", (d) => { if (Array.isArray(d)) setTasks(d as TaskInfo[]); });
     const t = setInterval(load, 5000);
     return () => { clearInterval(t); off?.(); socket?.send("ScheduledTasksInfoStop"); };
   }, [api]);

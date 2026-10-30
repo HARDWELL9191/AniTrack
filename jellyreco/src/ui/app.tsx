@@ -1,7 +1,7 @@
 // App shell: sidebar (Home, For You, Search, Favorites, your libraries, Settings, Dashboard), a page
 // stack per tab, sheets, the right-click menu, toasts, and the player on top of everything.
 
-import { useEffect, useState } from "react";
+import { Component, type ReactNode, useEffect, useState } from "react";
 import type { Tab } from "../core/model";
 import appIcon from "../assets/app-icon.png";
 import { DashboardRoot, DashboardPage } from "./dashboard";
@@ -123,6 +123,7 @@ export function App() {
               <div key={t} className="tab" hidden={model.tab !== t}>
                 {/* The tab's first page stays mounted under pushed pages, keeping its scroll position. */}
                 <div className="scroll" hidden={!!top}>
+                  <Guard>
                   {t === "home" && <HomePage refreshKey={refresh} />}
                   {t === "forYou" && <ForYouPage refreshKey={refresh} />}
                   {t === "search" && <SearchPage />}
@@ -130,10 +131,11 @@ export function App() {
                   {t === "library" && library && <LibraryPage key={library.Id} view={library} refreshKey={refresh} />}
                   {t === "settings" && <SettingsPage />}
                   {t === "dashboard" && model.isAdmin && <DashboardRoot />}
+                  </Guard>
                 </div>
                 {top && (
                   <div className="scroll" key={`${stack.length}-${routeKey(top)}`}>
-                    <RoutePage route={top} back={() => ui.pop(t)} refreshKey={refresh} />
+                    <Guard><RoutePage route={top} back={() => ui.pop(t)} refreshKey={refresh} /></Guard>
                   </div>
                 )}
               </div>
@@ -142,7 +144,7 @@ export function App() {
           {player.active && player.isAudio && <MiniPlayer />}
         </main>
       </div>
-      {player.active && <PlayerOverlay />}
+      {player.active && <Guard><PlayerOverlay /></Guard>}
       <Sheets />
       <ItemMenu />
       <ErrorAlert />
@@ -204,4 +206,22 @@ function Toasts() {
       ))}
     </div>
   );
+}
+
+/** A screen that fails to draw shows what went wrong (with a retry) instead of blanking the app. */
+class Guard extends Component<{ children: ReactNode }, { error: Error | null }> {
+  state: { error: Error | null } = { error: null };
+  static getDerivedStateFromError(error: Error) { return { error }; }
+  componentDidCatch(error: Error) { console.error("Screen failed:", error); }
+  render() {
+    if (!this.state.error) return this.props.children;
+    return (
+      <div className="page"><div className="empty">
+        <Icon name="info" size={40} strokeWidth={1.4} />
+        <h3>This screen couldn't be shown</h3>
+        <p>{this.state.error.message}</p>
+        <button className="glass-button" onClick={() => this.setState({ error: null })}>Try again</button>
+      </div></div>
+    );
+  }
 }

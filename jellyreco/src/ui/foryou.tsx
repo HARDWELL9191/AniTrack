@@ -69,7 +69,11 @@ export function buildFeed(model: AppModel, libraryId: string, category: string, 
   const key = feedKey(libraryId, category) + (opts.more ? "+" : "");
   const running = loading.get(key);
   if (running) return running;
-  const job = (async () => {
+  let job: Promise<void> | undefined = undefined;
+  job = (async () => {
+    // Start after the job is registered below: an early return must still clear it (it used to
+    // finish before it was registered, so it stayed "running" forever and blocked every rebuild).
+    await Promise.resolve();
     try {
       const tmdb = getTmdb(model);
       if (!tmdb.configured || !model.api || !model.views.length) return;
@@ -99,7 +103,7 @@ export function buildFeed(model: AppModel, libraryId: string, category: string, 
       const k = feedKey(libraryId, category);
       if (libraryId && !model.feeds.get(k)) model.feeds.set(k, { picks: [], generatedAt: Date.now(), usedAI: false, exhausted: true, categories: [], watchedCount: 0, error: (e as Error).message });
     } finally {
-      loading.delete(key);
+      if (loading.get(key) === job) loading.delete(key);
       if (!loading.size) forYouStage.text = "";
       model.notify();
     }

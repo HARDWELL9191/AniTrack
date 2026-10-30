@@ -8,7 +8,7 @@ import { APP_VERSION } from "../core/api";
 import { getEngine } from "../core/engine";
 import { ALL_HOME_SECTIONS, BITRATES, DEFAULT_SETTINGS, DEFAULT_SUB_STYLE, type HomeSection, type SegmentAction, type Settings } from "../core/settings";
 import type { Culture, UserConfiguration } from "../core/types";
-import { Cover, Field, Group, PageHeader, Segmented, Toggle, useAction, useLoad } from "./components";
+import { Range, Cover, Field, Group, PageHeader, Segmented, Toggle, useAction, useLoad } from "./components";
 import { Icon } from "./icons";
 import { ui, useModel } from "./state";
 
@@ -135,7 +135,7 @@ function DisplaySettings() {
       <Toggle label="Show ratings on cards" checked={s.showRatings} onChange={(v) => set("showRatings", v)} />
       <div className="slider-row">
         <div className="slider-head"><span>Poster size</span><span className="muted tabular">{s.libraryCardSize}px</span></div>
-        <input type="range" min={120} max={260} step={4} value={s.libraryCardSize} onChange={(e) => set("libraryCardSize", Number(e.target.value))} />
+        <Range min={120} max={260} step={4} value={s.libraryCardSize} onChange={(e) => set("libraryCardSize", Number(e.target.value))} />
       </div>
     </Group>
   );
@@ -253,7 +253,7 @@ function PlaybackSettings() {
       )}
       <Group title="Next episode & skipping">
         <div className="toggle-row"><span>Up next</span><Segmented value={s.autoNext} options={[{ value: "smart", label: "At the credits" }, { value: "always", label: "At the end" }, { value: "off", label: "Off" }]} onChange={(v) => set("autoNext", v)} /></div>
-        <div className="slider-row"><div className="slider-head"><span>Countdown</span><span className="muted tabular">{s.upNextSeconds}s</span></div><input type="range" min={3} max={30} value={s.upNextSeconds} onChange={(e) => set("upNextSeconds", Number(e.target.value))} /></div>
+        <div className="slider-row"><div className="slider-head"><span>Countdown</span><span className="muted tabular">{s.upNextSeconds}s</span></div><Range min={3} max={30} value={s.upNextSeconds} onChange={(e) => set("upNextSeconds", Number(e.target.value))} /></div>
         {(["Intro", "Recap", "Outro", "Preview", "Commercial"] as const).map((t) => (
           <div key={t} className="toggle-row">
             <span>{t === "Outro" ? "Credits" : t === "Commercial" ? "Ads" : t}</span>
@@ -312,7 +312,7 @@ function PlayerSettings() {
         <Toggle label="Pass surround audio to your receiver" detail="Dolby/DTS bitstream over HDMI or S/PDIF" checked={s.audioPassthrough} onChange={(v) => set("audioPassthrough", v)} />
         <div className="toggle-row"><span>Channels</span><Segmented value={s.audioChannels} options={[{ value: "auto", label: "Automatic" }, { value: "stereo", label: "Stereo" }, { value: "5.1", label: "5.1" }, { value: "7.1", label: "7.1" }]} onChange={(v) => set("audioChannels", v)} /></div>
         <Toggle label="Even out loudness" detail="Quiet dialogue louder, explosions softer" checked={s.audioNormalize} onChange={(v) => set("audioNormalize", v)} />
-        <div className="slider-row"><div className="slider-head"><span>Volume boost up to</span><span className="muted tabular">{s.volumeBoostMax}%</span></div><input type="range" min={100} max={200} step={10} value={s.volumeBoostMax} onChange={(e) => set("volumeBoostMax", Number(e.target.value))} /></div>
+        <div className="slider-row"><div className="slider-head"><span>Volume boost up to</span><span className="muted tabular">{s.volumeBoostMax}%</span></div><Range min={100} max={200} step={10} value={s.volumeBoostMax} onChange={(e) => set("volumeBoostMax", Number(e.target.value))} /></div>
         <div className="toggle-row"><span>Default speed</span><Segmented value={s.defaultSpeed} options={[0.75, 1, 1.25, 1.5].map((v) => ({ value: v, label: `${v}×` }))} onChange={(v) => set("defaultSpeed", v)} /></div>
       </Group>
       <Group title="Controls">
@@ -321,7 +321,7 @@ function PlayerSettings() {
         <Toggle label="Start in full screen (this PC)" checked={s.startFullscreen} onChange={(v) => set("startFullscreen", v)} />
         <Toggle label="Show when it ends" checked={s.showClock} onChange={(v) => set("showClock", v)} />
         <Toggle label="Show remaining time" checked={s.remainingTime} onChange={(v) => set("remainingTime", v)} />
-        <div className="slider-row"><div className="slider-head"><span>Buffer ahead</span><span className="muted tabular">{s.cacheSeconds}s</span></div><input type="range" min={30} max={600} step={30} value={s.cacheSeconds} onChange={(e) => set("cacheSeconds", Number(e.target.value))} /></div>
+        <div className="slider-row"><div className="slider-head"><span>Buffer ahead</span><span className="muted tabular">{s.cacheSeconds}s</span></div><Range min={30} max={600} step={30} value={s.cacheSeconds} onChange={(e) => set("cacheSeconds", Number(e.target.value))} /></div>
         <Field label="Screenshot folder (this PC)" hint="Empty: your Pictures folder">
           <div className="row-line">
             <input value={s.screenshotFolder} onChange={(e) => set("screenshotFolder", e.target.value)} placeholder="Pictures" />
@@ -355,15 +355,15 @@ function SubtitleSettings() {
         The quick brown fox jumps over the lazy dog
       </div>
       <Field label="Font"><select value={s.font} onChange={(e) => set({ font: e.target.value })}>{["Segoe UI", "Arial", "Verdana", "Tahoma", "Trebuchet MS", "Georgia", "Times New Roman", "Consolas", "Bahnschrift", "Yu Gothic UI", "Meiryo UI"].map((f) => <option key={f}>{f}</option>)}</select></Field>
-      <div className="slider-row"><div className="slider-head"><span>Size</span><span className="muted tabular">{s.fontSize}</span></div><input type="range" min={24} max={90} value={s.fontSize} onChange={(e) => set({ fontSize: Number(e.target.value) })} /></div>
+      <div className="slider-row"><div className="slider-head"><span>Size</span><span className="muted tabular">{s.fontSize}</span></div><Range min={24} max={90} value={s.fontSize} onChange={(e) => set({ fontSize: Number(e.target.value) })} /></div>
       <Toggle label="Bold" checked={s.bold} onChange={(v) => set({ bold: v })} />
       <div className="toggle-row"><span>Text color</span><input type="color" value={toHex(s.color)} onChange={(e) => set({ color: `${e.target.value.toUpperCase()}FF` })} /></div>
       <div className="toggle-row"><span>Outline color</span><input type="color" value={toHex(s.borderColor)} onChange={(e) => set({ borderColor: `${e.target.value.toUpperCase()}FF` })} /></div>
-      <div className="slider-row"><div className="slider-head"><span>Outline</span><span className="muted tabular">{s.borderSize}</span></div><input type="range" min={0} max={6} step={0.5} value={s.borderSize} onChange={(e) => set({ borderSize: Number(e.target.value) })} /></div>
+      <div className="slider-row"><div className="slider-head"><span>Outline</span><span className="muted tabular">{s.borderSize}</span></div><Range min={0} max={6} step={0.5} value={s.borderSize} onChange={(e) => set({ borderSize: Number(e.target.value) })} /></div>
       <div className="toggle-row"><span>Background box</span>
         <span className="row-line"><input type="checkbox" className="switch" checked={!s.backgroundColor.endsWith("00")} onChange={(e) => set({ backgroundColor: e.target.checked ? "#000000B0" : "#00000000" })} />
           {!s.backgroundColor.endsWith("00") && <input type="color" value={toHex(s.backgroundColor)} onChange={(e) => set({ backgroundColor: `${e.target.value.toUpperCase()}B0` })} />}</span></div>
-      <div className="slider-row"><div className="slider-head"><span>Distance from the bottom</span><span className="muted tabular">{s.marginY}</span></div><input type="range" min={0} max={150} value={s.marginY} onChange={(e) => set({ marginY: Number(e.target.value) })} /></div>
+      <div className="slider-row"><div className="slider-head"><span>Distance from the bottom</span><span className="muted tabular">{s.marginY}</span></div><Range min={0} max={150} value={s.marginY} onChange={(e) => set({ marginY: Number(e.target.value) })} /></div>
       <div className="toggle-row"><span>Styled subtitles (ASS, anime typesetting)</span>
         <select value={s.assOverride} onChange={(e) => set({ assOverride: e.target.value as typeof s.assOverride })}>
           <option value="no">Keep their own styling (recommended)</option><option value="scale">Keep styling, use my size</option><option value="force">Force my style</option><option value="strip">Plain text</option>
@@ -388,7 +388,7 @@ function ForYouSettings() {
       </Field>
       <Toggle label="On-device AI ranking" detail={status ? `Engine: ${status.detail}` : "Reads overviews with a small model on your Snapdragon NPU"} checked={s.useOnDeviceAI} onChange={(v) => { set("useOnDeviceAI", v); model.feeds.clear(); }} />
       <div className="slider-row"><div className="slider-head"><span>Minimum TMDB rating</span><span className="muted tabular">{s.forYouMinRating ? s.forYouMinRating.toFixed(1) : "Any"}</span></div>
-        <input type="range" min={0} max={9} step={0.5} value={s.forYouMinRating} onChange={(e) => { set("forYouMinRating", Number(e.target.value)); model.feeds.clear(); }} /></div>
+        <Range min={0} max={9} step={0.5} value={s.forYouMinRating} onChange={(e) => { set("forYouMinRating", Number(e.target.value)); model.feeds.clear(); }} /></div>
       <p className="muted small">For You suggests shows and movies you don't have yet, from TMDB, based on what you've completed, are watching, favorited, rated or saved to Watch later. Nothing already on your server is suggested. Libraries named "placeholder" or "playlist(s)" never appear. The AI only reads: it never changes your server or your files, and only writes its own cache in JellyReco's app data folder.</p>
       <button className="glass-button" onClick={() => { model.forYouLibrary = null; model.feeds.clear(); model.toast("Picks will be rebuilt", "success"); }}><Icon name="refresh" size={15} /> Rebuild picks now</button>
     </Group>
