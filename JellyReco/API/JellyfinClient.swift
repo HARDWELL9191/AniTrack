@@ -415,7 +415,8 @@ final class JellyfinClient: @unchecked Sendable {
     func episodes(seriesId: String, seasonId: String? = nil) async throws -> [BaseItem] {
         let r: QueryResult<BaseItem> = try await get("/Shows/\(seriesId)/Episodes", [
             "userId": try requireUser(), "seasonId": seasonId,
-            "fields": Self.listFields + ["MediaSources", "Chapters", "Trickplay"],
+            // Light list (a season can have 1000+ episodes); the player loads the full item.
+            "fields": Self.listFields,
             "enableUserData": true,
         ])
         return r.items ?? []

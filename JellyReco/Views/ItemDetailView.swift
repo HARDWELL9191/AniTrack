@@ -8,7 +8,6 @@ struct ItemDetailView: View {
     @State private var detail: BaseItem?
     @State private var seasons: [BaseItem] = []
     @State private var selectedSeason: String?
-    @State private var shownEpisodes = 20
     @State private var episodes: [BaseItem] = []
     @State private var nextUp: BaseItem?
     @State private var similar: [BaseItem] = []
@@ -277,8 +276,8 @@ struct ItemDetailView: View {
 
     // MARK: Seasons & episodes
 
-    /// AniReco's episodes block: "Episodes" header with a glass season dropdown, then the
-    /// episodes 20 at a time with "Show more episodes".
+    /// AniReco's episodes block: "Episodes" header with a glass season dropdown, then every
+    /// episode of the season in one endless list (rows are built lazily as you scroll).
     @ViewBuilder
     private var episodesSection: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -288,17 +287,9 @@ struct ItemDetailView: View {
                 if current.kind == .series && !seasons.isEmpty { seasonMenu }
             }
             LazyVStack(alignment: .leading, spacing: 14) {
-                ForEach(episodes.prefix(shownEpisodes)) { ep in
+                ForEach(episodes) { ep in
                     EpisodeRow(episode: ep)
                 }
-            }
-            if episodes.count > shownEpisodes {
-                Button {
-                    withAnimation(.snappy) { shownEpisodes += 20 }
-                } label: {
-                    Text("Show more episodes (\(episodes.count - shownEpisodes) left)").frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.glass)
             }
             if episodes.isEmpty && !seasons.isEmpty {
                 HStack(spacing: 10) {
@@ -309,7 +300,6 @@ struct ItemDetailView: View {
         }
         .padding(.horizontal)
         .onChange(of: selectedSeason) { _, _ in
-            shownEpisodes = 20
             Task { await loadEpisodes() }
         }
     }

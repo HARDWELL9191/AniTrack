@@ -152,6 +152,14 @@ jobs:
             -lbz2 -liconv -lexpat -lresolv -lxml2 -lz -lc++ \
             -o formattest 2>&1 | tee -a link.log
           ls -la formattest
+          clang -O2 -arch arm64 -Iinc tools/formattest/rendertest.c "$BIN" -Wl,-rpath,"$FWDIR" \
+            -framework AVFoundation -framework AVKit -framework AudioToolbox -framework CoreAudio \
+            -framework CoreFoundation -framework CoreGraphics -framework CoreImage -framework CoreMedia \
+            -framework CoreText -framework CoreVideo -framework Foundation -framework IOSurface \
+            -framework Metal -framework QuartzCore -framework Security -framework VideoToolbox \
+            -framework AppKit -framework OpenGL -framework IOKit -framework Cocoa \
+            -lbz2 -liconv -lexpat -lresolv -lxml2 -lz -lc++ \
+            -o rendertest 2>&1 | tee -a link.log
 
       - name: Get the test files
         uses: actions/download-artifact@v7
@@ -166,12 +174,26 @@ jobs:
           shopt -s nullglob
           ./formattest samples/*.mkv samples/*.mp4 samples/*.avi samples/*.wmv samples/*.ts samples/*.webm samples/*.mov samples/*.m2ts 2>&1 | tee formattest.log
 
+      - name: Draw subtitles (PGS, DVB, SRT, coloured ASS) with and without the app's fonts
+        if: always()
+        run: |
+          set -o pipefail
+          shopt -s nullglob
+          # The app links the iPhone's system fonts into a folder for mpv; do the same with macOS's.
+          mkdir -p fonts
+          for f in /System/Library/Fonts/Helvetica.ttc /System/Library/Fonts/HelveticaNeue.ttc /System/Library/Fonts/Supplemental/Arial.ttf; do
+            [ -f "$f" ] && ln -sf "$f" fonts/
+          done
+          ls -la fonts | tee rendertest.log
+          ./rendertest samples/render/* 2>&1 | grep -v "^$" | tee -a rendertest.log || true
+          ./rendertest --fonts "$PWD/fonts" "Helvetica" samples/render/* 2>&1 | tee -a rendertest.log
+
       - name: Publish format test log to the ci-logs branch
         if: always()
         run: |
           mkdir -p /tmp/cilog && cd /tmp/cilog
           git init -q && git checkout -q -b ci-logs
-          { echo "run ${{ github.run_id }}"; cat "$GITHUB_WORKSPACE/formattest.log" 2>/dev/null || true; echo "--- link/build"; cat "$GITHUB_WORKSPACE/link.log" 2>/dev/null || true; echo "--- samples"; cat "$GITHUB_WORKSPACE/samples.log" 2>/dev/null || true; } > formattest.txt
+          { echo "run ${{ github.run_id }}"; cat "$GITHUB_WORKSPACE/rendertest.log" 2>/dev/null || true; echo "--- formats"; cat "$GITHUB_WORKSPACE/formattest.log" 2>/dev/null || true; echo "--- link/build"; cat "$GITHUB_WORKSPACE/link.log" 2>/dev/null || true; echo "--- samples"; cat "$GITHUB_WORKSPACE/samples.log" 2>/dev/null || true; } > formattest.txt
           git add -A && git -c user.name=ci -c user.email=ci@local commit -qm "format log ${{ github.run_id }}"
           git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" ci-logs:ci-logs-formats
 
