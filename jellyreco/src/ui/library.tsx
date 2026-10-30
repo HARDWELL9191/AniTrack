@@ -237,7 +237,7 @@ export function ItemBrowser({ base, scopeKey, types, folders, refreshKey = 0, sh
         <div className="toolbar-row wrap">
           <span className="muted small tabular">{total === null ? "" : `${total.toLocaleString()} ${total === 1 ? "item" : "items"}`}</span>
           <div className="toolbar-spacer" />
-          {items.some(isPlayable) && !folders && (
+          {items.some(isPlayable) && (
             <>
               <button className="glass-button" onClick={() => void playAll(model, query, false)}><Icon name="playFill" size={14} /> Play all</button>
               <button className="glass-button" onClick={() => void playAll(model, query, true)}><Icon name="shuffle" size={15} /> Shuffle</button>
@@ -254,7 +254,7 @@ export function ItemBrowser({ base, scopeKey, types, folders, refreshKey = 0, sh
           <Segmented value={v.layout} options={[{ value: "grid", label: "", icon: "grid" }, { value: "list", label: "", icon: "list" }]} onChange={(layout) => setV({ layout })} />
         </div>
       )}
-      {showControls && v.sort === "SortName" && !folders && (
+      {showControls && v.sort === "SortName" && (
         <div className="letters">
           {["", "#", ..."ABCDEFGHIJKLMNOPQRSTUVWXYZ"].map((l) => <button key={l || "all"} className={v.letter === l ? "on" : ""} onClick={() => setV({ letter: l })}>{l || "All"}</button>)}
         </div>

@@ -179,7 +179,7 @@ export function ItemCard({ item, width, shape, onClick, subtitle, showPlay = tru
 
 export function isPlayable(item: Item): boolean {
   if (item.Type === "Person" || item.Type === "Genre" || item.Type === "Studio" || item.Type === "MusicGenre" || item.Type === "Book") return false;
-  if (item.Type === "CollectionFolder" || item.Type === "UserView" || item.Type === "Folder") return false;
+  if (item.Type === "CollectionFolder" || item.Type === "UserView") return false;
   if (item.Type === "Program" || item.Type === "TvProgram" || item.Type === "LiveTvProgram") return !!item.ChannelId;
   return true;
 }
