@@ -87,17 +87,21 @@ async Task<JsonObject> Explain(string prompt)
     return new JsonObject { ["ok"] = true, ["text"] = result.Text.Trim() };
 }
 
-static partial class PackageIdentity
+static unsafe partial class PackageIdentity
 {
+    // Plain pointer buffer: no runtime marshalling needed (Native AOT).
     [LibraryImport("kernel32.dll")]
-    private static partial int GetCurrentPackageFullName(ref uint length, [Out] char[]? name);
+    private static partial int GetCurrentPackageFullName(uint* length, char* name);
 
     public static string? Current()
     {
         uint length = 0;
         // 15700 = APPMODEL_ERROR_NO_PACKAGE: the process has no package identity.
-        if (GetCurrentPackageFullName(ref length, null) == 15700) return null;
+        if (GetCurrentPackageFullName(&length, null) == 15700 || length == 0) return null;
         var buffer = new char[length];
-        return GetCurrentPackageFullName(ref length, buffer) == 0 ? new string(buffer, 0, (int)length - 1) : null;
+        fixed (char* p = buffer)
+        {
+            return GetCurrentPackageFullName(&length, p) == 0 ? new string(p, 0, (int)length - 1) : null;
+        }
     }
 }
