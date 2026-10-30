@@ -261,7 +261,10 @@ export function ItemBrowser({ base, scopeKey, types, folders, refreshKey = 0, sh
       {error && !items.length ? <ErrorNote text={error} retry={() => { setError(null); setTotal(null); }} />
         : total === 0 ? <Empty icon="search" title="Nothing here" text={activeCount ? "No items match these filters." : undefined} />
         : v.layout === "list" ? <div className="rows columns">{items.map((i) => <ItemRow key={i.Id} item={i} />)}</div>
-        : <Grid min={gridMin(items, model.settings.libraryCardSize)}>{items.map((i) => <ItemCard key={i.Id} item={i} width={undefined} />)}</Grid>}
+        : folders
+          // Folder browsing: small thumbnails in a dense grid.
+          ? <Grid min={gridMin(items, model.settings.libraryCardSize) >= 260 ? 170 : 104} compact>{items.map((i) => <ItemCard key={i.Id} item={i} width={undefined} showPlay={false} />)}</Grid>
+          : <Grid min={gridMin(items, model.settings.libraryCardSize)}>{items.map((i) => <ItemCard key={i.Id} item={i} width={undefined} />)}</Grid>}
       <LoadMore onVisible={() => void loadMore()} active={!busy && total !== null && items.length < total} />
       {busy && <Spinner />}
     </>

@@ -253,8 +253,8 @@ export function Shelf({ title, action, children, icon, subtitle }: { title: Reac
   );
 }
 
-export function Grid({ children, min = 160 }: { children: ReactNode; min?: number }) {
-  return <div className="grid" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${min}px, 1fr))` }}>{children}</div>;
+export function Grid({ children, min = 160, compact }: { children: ReactNode; min?: number; compact?: boolean }) {
+  return <div className={compact ? "grid compact" : "grid"} style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${min}px, 1fr))` }}>{children}</div>;
 }
 
 // MARK: Small pieces

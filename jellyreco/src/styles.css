@@ -474,6 +474,11 @@ input[type="color"] { width: 44px; height: 30px; border: 0; background: none; pa
 .card-play:hover { background: var(--accent); }
 .grid { display: grid; gap: 22px 18px; }
 .grid .card { width: 100% !important; }
+.grid.compact { gap: 14px 12px; }
+.grid.compact .card-title { font-size: 12px; }
+.grid.compact .card-sub { font-size: 11px; }
+.grid.compact .card-more { width: 24px; height: 24px; right: 4px; bottom: 4px; }
+.grid.compact .cover-placeholder svg { width: 22px; height: 22px; }
 .grid .card .cover { width: 100% !important; height: auto !important; aspect-ratio: var(--ar, 2 / 3); }
 .library-tile { display: flex; flex-direction: column; gap: 8px; border: 0; background: none; padding: 0; text-align: left; flex: none; }
 .library-tile-name { display: flex; gap: 8px; align-items: center; font-weight: 650; }
