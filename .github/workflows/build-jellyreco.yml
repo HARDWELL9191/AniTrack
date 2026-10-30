@@ -97,7 +97,26 @@ jobs:
           git add -A && git -c user.name=ci -c user.email=ci@local commit -qm "build log ${{ github.run_id }}"
           git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" ci-logs:ci-logs-build
 
+  samples:
+    # Test files are made on Linux (ffmpeg installs in seconds there; Homebrew builds it from source on new macOS).
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - name: Generate test files
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg > /dev/null
+          ffmpeg -hide_banner -version | head -1
+          tools/formattest/make_samples.sh samples 2>&1 | tee samples.log
+          cp samples.log samples/
+      - uses: actions/upload-artifact@v7
+        with:
+          name: format-samples
+          path: samples/
+          if-no-files-found: error
+
   formats:
+    needs: samples
     # Plays generated test files (HEVC 10-bit, AV1, VP9, DTS, TrueHD, E-AC3, FLAC, Opus, ASS,
     # VobSub, WebVTT, mov_text, AVI, WMV, TS, M2TS…) with the exact libmpv build the app ships.
     runs-on: xcode-27
@@ -133,13 +152,16 @@ jobs:
             -o formattest 2>&1 | tee -a link.log
           ls -la formattest
 
-      - name: Generate test files
-        run: |
-          brew install ffmpeg
-          tools/formattest/make_samples.sh samples 2>&1 | tee samples.log
+      - name: Get the test files
+        uses: actions/download-artifact@v7
+        with:
+          name: format-samples
+          path: samples
 
       - name: Play every file, every audio and subtitle track
         run: |
+          cp samples/samples.log samples.log || true
+          shopt -s nullglob
           ./formattest samples/*.mkv samples/*.mp4 samples/*.avi samples/*.wmv samples/*.ts samples/*.webm samples/*.mov samples/*.m2ts 2>&1 | tee formattest.log
 
       - name: Publish format test log to the ci-logs branch
