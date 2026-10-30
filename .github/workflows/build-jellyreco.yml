@@ -134,7 +134,7 @@ jobs:
       - name: Generate test files
         run: |
           brew install ffmpeg
-          tools/formattest/make_samples.sh samples
+          tools/formattest/make_samples.sh samples 2>&1 | tee samples.log
 
       - name: Play every file, every audio and subtitle track
         run: |
@@ -145,7 +145,7 @@ jobs:
         run: |
           mkdir -p /tmp/cilog && cd /tmp/cilog
           git init -q && git checkout -q -b ci-logs
-          { echo "run ${{ github.run_id }}"; cat "$GITHUB_WORKSPACE/formattest.log" 2>/dev/null; cat "$GITHUB_WORKSPACE/link.log" 2>/dev/null; } > formattest.txt
+          { echo "run ${{ github.run_id }}"; cat "$GITHUB_WORKSPACE/formattest.log" 2>/dev/null || true; echo "--- link/build"; cat "$GITHUB_WORKSPACE/link.log" 2>/dev/null || true; echo "--- samples"; cat "$GITHUB_WORKSPACE/samples.log" 2>/dev/null || true; } > formattest.txt
           git add -A && git -c user.name=ci -c user.email=ci@local commit -qm "format log ${{ github.run_id }}"
           git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" ci-logs:ci-logs-formats
 

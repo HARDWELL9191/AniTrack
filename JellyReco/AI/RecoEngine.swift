@@ -187,7 +187,10 @@ final class RecoEngine {
             return
         }
         buildTask?.cancel()
-        let task = Task { [weak self] in await self?.runBuild() }
+        let task = Task { [weak self] in
+            guard let self else { return }
+            await self.runBuild()
+        }
         buildTask = task
         await task.value
         if buildTask == task { buildTask = nil }
@@ -563,7 +566,12 @@ final class RecoEngine {
         guard let model, let reader = model.reader else { return [] }
         if snapshot.isEmpty { await ensureBuilt() }
         let baseId = item.kind == .episode || item.kind == .season ? (item.seriesId ?? item.id) : item.id
-        let base = byId[baseId] ?? ((try? await reader.item(baseId)) ?? item)
+        var base = item
+        if let known = byId[baseId] {
+            base = known
+        } else if let fetched = try? await reader.item(baseId) {
+            base = fetched
+        }
 
         var pool: [String: BaseItem] = [:]
         for s in (try? await reader.similar(baseId, limit: 40)) ?? [] { pool[s.id] = byId[s.id] ?? s }

@@ -116,7 +116,10 @@ final class DiscoveryEngine {
 
     func build(_ sourceId: String, genre: String?) async {
         if let running = tasks[sourceId] { running.cancel() }
-        let task = Task { [weak self] in await self?.run(sourceId, genre: genre) }
+        let task = Task { [weak self] in
+            guard let self else { return }
+            await self.run(sourceId, genre: genre)
+        }
         tasks[sourceId] = task
         await task.value
     }
