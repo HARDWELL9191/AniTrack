@@ -20,6 +20,7 @@
     <AssemblyName>AniTrack.AI</AssemblyName>
     <RootNamespace>AniTrack.AI</RootNamespace>
     <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ImplicitUsings>enable</ImplicitUsings>
     <InvariantGlobalization>true</InvariantGlobalization>
     <ApplicationManifest>app.manifest</ApplicationManifest>

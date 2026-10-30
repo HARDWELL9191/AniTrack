@@ -5,6 +5,7 @@
 // The app starts it when you ask for an explanation and closes it after a minute of quiet, so
 // the language model is only loaded while it's being used.
 
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -35,7 +36,14 @@ while (await input.ReadLineAsync() is { } line)
         switch ((string?)request["cmd"])
         {
             case "status":
-                reply = new JsonObject { ["ok"] = true, ["state"] = LanguageModel.GetReadyState().ToString() };
+                reply = new JsonObject
+                {
+                    ["ok"] = true,
+                    ["state"] = LanguageModel.GetReadyState().ToString(),
+                    // Which package identity Windows sees for this process (null = none), the
+                    // first thing to check when the state is CapabilityMissing.
+                    ["identity"] = PackageIdentity.Current(),
+                };
                 break;
 
             case "explain":
@@ -77,4 +85,19 @@ async Task<JsonObject> Explain(string prompt)
     var status = result.Status.ToString();
     if (status != "Complete") return Error($"Windows' language model didn't answer ({status}).");
     return new JsonObject { ["ok"] = true, ["text"] = result.Text.Trim() };
+}
+
+static partial class PackageIdentity
+{
+    [LibraryImport("kernel32.dll")]
+    private static partial int GetCurrentPackageFullName(ref uint length, [Out] char[]? name);
+
+    public static string? Current()
+    {
+        uint length = 0;
+        // 15700 = APPMODEL_ERROR_NO_PACKAGE: the process has no package identity.
+        if (GetCurrentPackageFullName(ref length, null) == 15700) return null;
+        var buffer = new char[length];
+        return GetCurrentPackageFullName(ref length, buffer) == 0 ? new string(buffer, 0, (int)length - 1) : null;
+    }
 }

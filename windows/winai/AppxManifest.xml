@@ -8,8 +8,7 @@
   xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
   xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
-  xmlns:systemai="http://schemas.microsoft.com/appx/manifest/systemai/windows10"
-  IgnorableNamespaces="uap uap10 rescap systemai">
+  IgnorableNamespaces="uap uap10 rescap">
 
   <Identity Name="AniTrack.WindowsAI" Publisher="CN=AniTrack" Version="__VERSION__" ProcessorArchitecture="arm64" />
 
@@ -32,7 +31,9 @@
 
   <Capabilities>
     <rescap:Capability Name="runFullTrust" />
-    <systemai:Capability Name="systemAIModels" />
+    <!-- Windows' on-device language model; declared as a restricted capability, as in
+         Microsoft's current Windows AI guides. -->
+    <rescap:Capability Name="systemAIModels" />
   </Capabilities>
 
   <Applications>
