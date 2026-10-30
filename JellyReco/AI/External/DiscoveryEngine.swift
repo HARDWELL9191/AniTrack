@@ -32,6 +32,9 @@ final class DiscoveryEngine {
     private(set) var errors: [String: String] = [:]
     private(set) var builtAt: [String: Date] = [:]
     private(set) var usedAI = false
+    /// What the build is doing right now, per library (shown under the spinner).
+    private(set) var status: [String: String] = [:]
+    @ObservationIgnored private var generation: [String: Int] = [:]
     private(set) var version = 0
 
     @ObservationIgnored private weak var model: AppModel?
@@ -48,8 +51,17 @@ final class DiscoveryEngine {
         tasks = [:]
         picks = [:]
         errors = [:]
+        status = [:]
+        isBuilding = []
         builtAt = [:]
         version &+= 1
+    }
+
+    /// A new TMDB key: forget results and errors made without it and build again.
+    func keyChanged() {
+        reset()
+        guard hasKey, let id = model?.reco.currentSourceId else { return }
+        Task { await build(id, genre: nil) }
     }
 
     var hasKey: Bool { !(model?.settings.tmdbKey.trimmingCharacters(in: .whitespaces).isEmpty ?? true) }
@@ -101,7 +113,7 @@ final class DiscoveryEngine {
     }
 
     func ensureBuilt(_ sourceId: String) async {
-        if picks[sourceId] == nil {
+        if picks[sourceId] == nil || (picks[sourceId]?.isEmpty ?? true) {
             if let saved = await DiskCache.loadInBackground([ExternalPick].self, name: cacheName(sourceId)) {
                 picks[sourceId] = saved
                 version &+= 1
@@ -132,14 +144,32 @@ final class DiscoveryEngine {
             errors[sourceId] = TMDBError.noKey.localizedDescription
             return
         }
+        // Only the newest build of a library owns its spinner and status (an older, cancelled
+        // build finishing late must not hide the spinner of the one still running).
+        let gen = (generation[sourceId] ?? 0) + 1
+        generation[sourceId] = gen
         isBuilding.insert(sourceId)
         errors[sourceId] = nil
-        defer { isBuilding.remove(sourceId) }
+        defer {
+            if generation[sourceId] == gen {
+                isBuilding.remove(sourceId)
+                status[sourceId] = nil
+            }
+        }
+        func step(_ text: String) { if generation[sourceId] == gen { status[sourceId] = text } }
+        func fail(_ text: String) {
+            guard generation[sourceId] == gen else { return }
+            errors[sourceId] = text
+            if genre == nil, picks[sourceId] == nil { picks[sourceId] = [] }
+        }
+        await tmdb.resetStats()
 
+        step("Reading your library…")
         await model.reco.ensureBuilt()
         await loadIdMap()
+        step("Connecting to TMDB…")
         do { try await tmdb.loadGenres() } catch {
-            errors[sourceId] = error.localizedDescription
+            fail(error.localizedDescription)
             return
         }
 
@@ -147,7 +177,7 @@ final class DiscoveryEngine {
         // Everything you watched teaches; this library's history counts 1.5×.
         let history = model.reco.history(boosting: sourceId)
         guard !history.isEmpty else {
-            errors[sourceId] = "Finish or favourite a few titles on your server first: For You learns from them."
+            fail("Finish or favourite a few titles on your server first: For You learns from them.")
             return
         }
 
@@ -178,6 +208,7 @@ final class DiscoveryEngine {
         var votes: [String: Double] = [:]
         var reasons: [String: [String]] = [:]
         var candidates: [String: ExternalTitle] = [:]
+        step("Finding \(seeds.count) of your favourites on TMDB…")
 
         await withTaskGroup(of: (BaseItem, Double, [ExternalTitle]).self) { group in
             for seed in seeds {
@@ -199,6 +230,7 @@ final class DiscoveryEngine {
         }
 
         // 2) Explore: well-rated titles in your top genres (and the chosen category).
+        step("Exploring your favourite genres…")
         let topGenres = profile.top(prefix: "g:", count: 4)
         let animeFilter: Bool? = {
             switch kind {
@@ -225,8 +257,16 @@ final class DiscoveryEngine {
             }
         }
         if Task.isCancelled { return }
+        if candidates.isEmpty {
+            let stats = (await tmdb.failed, await tmdb.lastFailure)
+            fail(stats.0 > 0
+                 ? "TMDB didn't answer (\(stats.0) requests failed). \(stats.1 ?? "")"
+                 : "TMDB found nothing for your favourites. Pull down to try again.")
+            return
+        }
 
         // 3) Never anything you already have, have seen, wished for or rejected.
+        step("Removing what you already have…")
         let owned = OwnedIndex(items: model.reco.libraryItems, idMap: idMap)
         let hidden = model.externalHidden
         let thisYear = Calendar.current.component(.year, from: Date())
@@ -251,6 +291,7 @@ final class DiscoveryEngine {
         var shortlist = Array(scored.prefix(90))
 
         // 4) Details for the short list: keywords (tags) and IMDb/TVDB ids — then check ownership again.
+        step("Reading details of \(shortlist.count) titles…")
         let detailed = await withTaskGroup(of: (Int, ExternalTitle).self, returning: [Int: ExternalTitle].self) { group in
             for (i, s) in shortlist.enumerated() { group.addTask { (i, await tmdb.details(s.title)) } }
             var out: [Int: ExternalTitle] = [:]
@@ -266,14 +307,22 @@ final class DiscoveryEngine {
         // 5) On-device AI: overviews compared with your favourites' (and away from dislikes).
         var semantic: [String: Double] = [:]
         var nearest: [String: [String]] = [:]
-        let aiOn = model.settings.useOnDeviceAI && SemanticEngine.shouldRunNow
+        let aiOn = model.settings.useOnDeviceAI && SemanticEngine.shouldRunNow && !shortlist.isEmpty
+        if aiOn { step("Ranking with on-device AI…") }
         if aiOn {
             let anchors = history.filter { abs($0.weight) >= 0.5 && !$0.item.plainOverview.isEmpty }
                 .sorted { abs($0.weight) > abs($1.weight) }.prefix(50)
             let extDislikes = model.externalNotForMe.prefix(40)
             let inputs = anchors.map { RecoEngine.embeddingInput($0.item) } + extDislikes.map(\.embeddingInput)
                 + shortlist.map(\.title.embeddingInput)
-            let vectors = await Task.detached(priority: .utility) { await SemanticEngine.shared.vectors(for: inputs) }.value
+            // The on-device model can be slow to load the first time: never wait more than 25 s.
+            let vectors: [String: [Float]] = await withTaskGroup(of: [String: [Float]]?.self) { group in
+                group.addTask { await Task.detached(priority: .utility) { await SemanticEngine.shared.vectors(for: inputs) }.value }
+                group.addTask { try? await Task.sleep(nanoseconds: 25_000_000_000); return nil }
+                let first = await group.next() ?? nil
+                group.cancelAll()
+                return first ?? [:]
+            }
             var taste: [Float] = []
             var likedVectors: [(String, [Float])] = []
             for a in anchors {
@@ -323,6 +372,11 @@ final class DiscoveryEngine {
                                 highlights: profile.highlights(for: Self.pseudoItem(s.title)))
         }
         if Task.isCancelled { return }
+        if result.isEmpty {
+            fail(candidates.isEmpty ? "TMDB found nothing." :
+                 "Everything TMDB suggested (\(candidates.count) titles) is already on your server, on My List, or marked Seen / Not for me. Pull down to try again, or pick another category.")
+            return
+        }
         if let genre {
             // A category build adds to the library's list instead of replacing it.
             var merged = picks[sourceId] ?? []

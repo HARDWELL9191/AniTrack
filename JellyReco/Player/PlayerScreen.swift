@@ -110,6 +110,7 @@ private struct PlayerContent: View {
     @State private var holdSpeed = false
     @State private var pinch: CGFloat?          // live pinch scale (nil when not pinching)
     @State private var volume = SystemVolume()
+    @State private var menuOpen = false
 
     enum HUD: Equatable {
         case brightness(Double), volume(Double), jump(Double), text(String)
@@ -142,8 +143,12 @@ private struct PlayerContent: View {
 
             if locked {
                 lockedOverlay
-            } else if showControls || panel != nil {
+            } else if showControls || panel != nil || menuOpen {
                 controls.transition(.opacity)
+                if panel == nil {
+                    // Centred on the screen itself (not between the bars), like Apple's player.
+                    transport.transition(.opacity)
+                }
             }
 
             if !locked { cornerCards }
@@ -159,11 +164,13 @@ private struct PlayerContent: View {
             if controller.askStillWatching { StillWatchingCard(controller: controller, close: close) }
             VolumeViewHost(volume: volume).frame(width: 1, height: 1).opacity(0.01).allowsHitTesting(false)
         }
+        .tint(.white)
         .animation(.easeInOut(duration: 0.25), value: showControls)
         .animation(.easeOut(duration: 0.2), value: hud)
         .animation(.snappy, value: panel)
         .onAppear { scheduleHide() }
         .onChange(of: player.isPaused) { _, paused in if paused { hideTask?.cancel() } else { scheduleHide() } }
+        .onChange(of: menuOpen) { _, open in if open { hideTask?.cancel() } else { scheduleHide() } }
     }
 
     // MARK: Apple-style controls
@@ -182,8 +189,6 @@ private struct PlayerContent: View {
             VStack(spacing: 0) {
                 topBar
                 Spacer()
-                transport
-                Spacer()
                 if let panel { panelView(panel).padding(.bottom, 12) }
                 bottomBar
             }
@@ -191,6 +196,7 @@ private struct PlayerContent: View {
             .padding(.vertical, 14)
         }
         .foregroundStyle(.white)
+        .tint(.white)
     }
 
     private var topBar: some View {
@@ -219,29 +225,40 @@ private struct PlayerContent: View {
     }
 
     private var transport: some View {
-        GlassEffectContainer(spacing: 40) {
-            HStack(spacing: 40) {
-                glassCircle("gobackward.\(settings.jumpBackward)", size: 58, font: .title2) {
-                    controller.jump(-Double(settings.jumpBackward))
-                    scheduleHide()
-                }
-                Button {
-                    controller.togglePlay()
-                    scheduleHide()
-                } label: {
-                    Image(systemName: player.isPaused ? "play.fill" : "pause.fill")
-                        .font(.system(size: 34, weight: .semibold))
-                        .contentTransition(.symbolEffect(.replace))
-                        .frame(width: 78, height: 78)
-                }
-                .buttonStyle(.plain)
-                .glassEffect(.regular.interactive(), in: .circle)
-                glassCircle("goforward.\(settings.jumpForward)", size: 58, font: .title2) {
-                    controller.jump(Double(settings.jumpForward))
-                    scheduleHide()
-                }
+        HStack(spacing: 44) {
+            transportButton("gobackward.\(settings.jumpBackward)", glyph: 28, size: 60) {
+                controller.jump(-Double(settings.jumpBackward))
+                scheduleHide()
+            }
+            transportButton(player.isPaused ? "play.fill" : "pause.fill", glyph: 36, size: 84,
+                            // The play triangle's visual centre sits left of its box (Apple nudges it).
+                            nudge: player.isPaused ? 3 : 0) {
+                controller.togglePlay()
+                scheduleHide()
+            }
+            transportButton("goforward.\(settings.jumpForward)", glyph: 28, size: 60) {
+                controller.jump(Double(settings.jumpForward))
+                scheduleHide()
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .foregroundStyle(.white)
+    }
+
+    /// One transport button: white glyph, exactly centred in its glass circle.
+    private func transportButton(_ symbol: String, glyph: CGFloat, size: CGFloat, nudge: CGFloat = 0,
+                                 action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: glyph, weight: .semibold))
+                .contentTransition(.symbolEffect(.replace))
+                .offset(x: nudge)
+                .frame(width: size, height: size)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.white)
+        .glassEffect(.regular.interactive(), in: .circle)
     }
 
     private var bottomBar: some View {
@@ -267,115 +284,117 @@ private struct PlayerContent: View {
         }
     }
 
-    // MARK: Menus (native iOS menus, like Apple's player)
+    // MARK: Menus (native iOS menus, like Apple's player; the controls stay up while one is open)
 
     private var speedMenu: some View {
-        Menu {
-            Picker("Playback Speed", selection: Binding(get: { player.playbackRate }, set: { controller.setSpeed($0) })) {
-                ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0], id: \.self) { rate in
-                    Text(rate == 1 ? "1× (Normal)" : String(format: "%g×", rate)).tag(rate)
-                }
-            }
-        } label: {
-            menuCircle("gauge.with.dots.needle.67percent")
+        PlayerMenuButton(symbol: "gauge.with.dots.needle.67percent", onOpenChange: { menuOpen = $0 }) {
+            let current = player.playbackRate
+            let rates = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
+            return UIMenu(title: "Playback Speed", options: .singleSelection, children: rates.map { rate in
+                UIAction(title: rate == 1 ? "1× (Normal)" : String(format: "%g×", rate),
+                         state: abs(current - rate) < 0.01 ? .on : .off) { _ in controller.setSpeed(rate) }
+            })
         }
-        .menuOrder(.fixed)
+        .frame(width: 44, height: 44)
     }
 
     private var audioSubtitleMenu: some View {
-        Menu {
-            Section("Audio") {
-                Picker("Audio", selection: Binding(
-                    get: { controller.audioOptions.first(where: \.isSelected)?.id },
-                    set: { if let id = $0 { controller.selectAudio(id) } })) {
-                    ForEach(controller.audioOptions) { t in
-                        Text(t.title).tag(Optional(t.id))
+        PlayerMenuButton(symbol: "captions.bubble", onOpenChange: { menuOpen = $0 }) {
+            let audio = UIMenu(title: "Audio", options: [.displayInline, .singleSelection], children:
+                controller.audioOptions.map { t in
+                    UIAction(title: t.title, subtitle: t.detail.isEmpty ? nil : t.detail, state: t.isSelected ? .on : .off) { _ in
+                        controller.selectAudio(t.id)
                     }
-                }
-                .pickerStyle(.inline)
-            }
-            Section("Subtitles") {
-                Picker("Subtitles", selection: Binding(
-                    get: { controller.subtitleOptions.first(where: \.isSelected)?.id },
-                    set: { controller.selectSubtitle($0) })) {
-                    Text("Off").tag(MPVMediaTrackIdentifier?.none)
-                    ForEach(controller.subtitleOptions) { t in
-                        Text(t.detail.isEmpty ? t.title : "\(t.title) (\(t.detail))").tag(Optional(t.id))
+                })
+            let subtitleOptions = controller.subtitleOptions
+            let anySelected = subtitleOptions.contains(where: \.isSelected)
+            let subs = UIMenu(title: "Subtitles", options: [.displayInline, .singleSelection], children:
+                [UIAction(title: "Off", state: anySelected ? .off : .on) { _ in controller.selectSubtitle(nil) }] +
+                subtitleOptions.map { t in
+                    UIAction(title: t.title, subtitle: t.detail.isEmpty ? nil : t.detail, state: t.isSelected ? .on : .off) { _ in
+                        controller.selectSubtitle(t.id)
                     }
-                }
-                .pickerStyle(.inline)
-            }
-            Section {
-                Menu("Second subtitle line") {
-                    Picker("Second subtitle", selection: Binding(
-                        get: { controller.secondarySubtitle?.id },
-                        set: { controller.selectSubtitle($0, secondary: true) })) {
-                        Text("Off").tag(MPVMediaTrackIdentifier?.none)
-                        ForEach(controller.subtitleOptions) { t in Text(t.title).tag(Optional(t.id)) }
+                })
+            let secondaryId = controller.secondarySubtitle?.id
+            let second = UIMenu(title: "Second Subtitle", image: UIImage(systemName: "captions.bubble.fill"), options: .singleSelection, children:
+                [UIAction(title: "Off", state: secondaryId == nil ? .on : .off) { _ in controller.selectSubtitle(nil, secondary: true) }] +
+                subtitleOptions.map { t in
+                    UIAction(title: t.title, state: t.id == secondaryId ? .on : .off) { _ in controller.selectSubtitle(t.id, secondary: true) }
+                })
+            let sizes: [(String, Double)] = [("Small", 0.8), ("Medium", 1.0), ("Large", 1.25), ("Extra Large", 1.5)]
+            let size = UIMenu(title: "Subtitle Size", image: UIImage(systemName: "textformat.size"), options: .singleSelection, children:
+                sizes.map { name, value in
+                    UIAction(title: name, state: abs(settings.subtitleSize - value) < 0.01 ? .on : .off) { _ in
+                        settings.subtitleSize = value
+                        controller.applySubtitleScale()
                     }
-                }
-                delayMenu("Subtitle timing", value: controller.subtitleDelay) { controller.setSubtitleDelay($0) }
-                delayMenu("Audio timing", value: controller.audioDelay) { controller.setAudioDelay($0) }
-                Menu("Subtitle size") {
-                    Picker("Size", selection: Binding(get: { settings.subtitleSize }, set: { v in
-                        settings.subtitleSize = v
-                        player.setProperty("sub-scale", to: String(format: "%.2f", v))
-                    })) {
-                        Text("Small").tag(0.8)
-                        Text("Medium").tag(1.0)
-                        Text("Large").tag(1.25)
-                        Text("Extra large").tag(1.5)
-                    }
-                }
-            }
-        } label: {
-            menuCircle("text.bubble")
+                })
+            let timing = UIMenu(title: "", options: .displayInline, children: [
+                delayMenu("Subtitle Timing", symbol: "text.badge.checkmark", value: controller.subtitleDelay) { controller.setSubtitleDelay($0) },
+                delayMenu("Audio Timing", symbol: "waveform", value: controller.audioDelay) { controller.setAudioDelay($0) },
+                second, size,
+            ])
+            return UIMenu(children: [audio, subs, timing])
         }
+        .frame(width: 44, height: 44)
     }
 
-    private func delayMenu(_ title: String, value: Double, set: @escaping (Double) -> Void) -> some View {
-        Menu("\(title) (\(String(format: "%+.1f s", value)))") {
-            Button("Earlier by 0.5 s") { set(value - 0.5) }
-            Button("Earlier by 0.1 s") { set(value - 0.1) }
-            Button("Later by 0.1 s") { set(value + 0.1) }
-            Button("Later by 0.5 s") { set(value + 0.5) }
-            Button("Reset") { set(0) }.disabled(value == 0)
+    /// Timing submenu; it stays open so you can tap several steps in a row.
+    private func delayMenu(_ title: String, symbol: String, value: Double, set: @escaping (Double) -> Void) -> UIMenu {
+        func step(_ label: String, _ delta: Double) -> UIAction {
+            UIAction(title: label, attributes: .keepsMenuPresented) { _ in set(value + delta) }
         }
+        return UIMenu(title: title, subtitle: String(format: "%+.1f s", value), image: UIImage(systemName: symbol), children: [
+            step("Earlier by 0.5 s", -0.5), step("Earlier by 0.1 s", -0.1),
+            step("Later by 0.1 s", 0.1), step("Later by 0.5 s", 0.5),
+            UIAction(title: "Reset", attributes: value == 0 ? .disabled : []) { _ in set(0) },
+        ])
     }
 
     private var moreMenu: some View {
-        Menu {
+        PlayerMenuButton(symbol: "ellipsis", onOpenChange: { menuOpen = $0 }) {
+            var top: [UIMenuElement] = []
             if !controller.chapters.isEmpty {
-                Button("Chapters", systemImage: "list.bullet.rectangle") { openPanel(.chapters) }
+                top.append(UIAction(title: "Chapters", image: UIImage(systemName: "list.bullet.rectangle")) { _ in openPanel(.chapters) })
             }
             if controller.item.kind == .episode {
-                Button("Episodes", systemImage: "rectangle.stack") { openPanel(.episodes) }
+                top.append(UIAction(title: "Episodes", image: UIImage(systemName: "rectangle.stack")) { _ in openPanel(.episodes) })
                 if controller.upNext != nil {
-                    Button("Next episode", systemImage: "forward.end.fill") { Task { await controller.playNext(auto: false) } }
+                    top.append(UIAction(title: "Next Episode", image: UIImage(systemName: "forward.end.fill")) { _ in
+                        Task { await controller.playNext(auto: false) }
+                    })
                 }
             }
-            Button(controller.isFilled ? "Fit to screen" : "Fill screen",
-                   systemImage: controller.isFilled ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right") {
-                withAnimation(.snappy) { controller.toggleFill() }
-            }
-            Button("Lock controls", systemImage: "lock") { withAnimation { locked = true } }
-            Divider()
-            Picker("Renderer", selection: Binding(get: { controller.usesNativeOutput },
-                                                 set: { native in Task { await controller.switchRenderer(toMetal: !native) } })) {
-                Text("Native (PiP, Dolby Vision)").tag(true)
-                Text("High quality (Metal)").tag(false)
-            }
-            Button("Playback info", systemImage: "info.circle") { openPanel(.info) }
-        } label: {
-            menuCircle("ellipsis")
+            let current = controller.aspectMode
+            let modes: [(PlaybackController.AspectMode, String, String)] = [
+                (.fit, "Fit", "arrow.down.right.and.arrow.up.left"),
+                (.fill, "Fill", "arrow.up.left.and.arrow.down.right"),
+                (.stretch, "Stretch", "arrow.left.and.right"),
+            ]
+            let aspect = UIMenu(title: "Aspect Ratio", subtitle: modes.first { $0.0 == current }?.1,
+                                image: UIImage(systemName: "aspectratio"), options: .singleSelection, children: modes.map { mode, title, symbol in
+                UIAction(title: title, image: UIImage(systemName: symbol), state: mode == current ? .on : .off) { _ in
+                    withAnimation(.smooth(duration: 0.35)) { controller.setAspect(mode) }
+                }
+            })
+            let view = UIMenu(title: "", options: .displayInline, children: [
+                aspect,
+                UIAction(title: "Lock Controls", image: UIImage(systemName: "lock")) { _ in withAnimation { locked = true } },
+            ])
+            let native = controller.usesNativeOutput
+            let renderer = UIMenu(title: "Renderer", image: UIImage(systemName: "cpu"), options: .singleSelection, children: [
+                UIAction(title: "Native (PiP, Dolby Vision)", state: native ? .on : .off) { _ in
+                    Task { await controller.switchRenderer(toMetal: false) }
+                },
+                UIAction(title: "High Quality (Metal)", state: native ? .off : .on) { _ in
+                    Task { await controller.switchRenderer(toMetal: true) }
+                },
+            ])
+            let info = UIAction(title: "Playback Info", image: UIImage(systemName: "info.circle")) { _ in openPanel(.info) }
+            return UIMenu(children: [UIMenu(title: "", options: .displayInline, children: top), view,
+                                     UIMenu(title: "", options: .displayInline, children: [renderer, info])])
         }
-    }
-
-    private func menuCircle(_ symbol: String) -> some View {
-        Image(systemName: symbol)
-            .font(.body.weight(.semibold))
-            .frame(width: 44, height: 44)
-            .glassEffect(.regular.interactive(), in: .circle)
+        .frame(width: 44, height: 44)
     }
 
     private func glassCircle(_ symbol: String, size: CGFloat, font: Font = .body, action: @escaping () -> Void) -> some View {
@@ -383,8 +402,10 @@ private struct PlayerContent: View {
             Image(systemName: symbol)
                 .font(font.weight(.semibold))
                 .frame(width: size, height: size)
+                .contentShape(Circle())
         }
         .buttonStyle(.plain)
+        .foregroundStyle(.white)
         .glassEffect(.regular.interactive(), in: .circle)
     }
 
@@ -459,7 +480,7 @@ private struct PlayerContent: View {
             case .right:
                 controller.jump(Double(settings.jumpForward)); showHUD(.jump(Double(settings.jumpForward)))
             case .center:
-                withAnimation(.snappy) { controller.toggleFill() }   // like Apple: double-tap the middle to zoom
+                withAnimation(.smooth(duration: 0.35)) { controller.toggleFill() }   // like Apple: double-tap the middle to zoom
             }
         case .playPause:
             controller.togglePlay()
@@ -471,10 +492,16 @@ private struct PlayerContent: View {
     private func pinchChanged(_ scale: CGFloat, ended: Bool) {
         guard !locked, settings.pinchToFill else { return }
         if ended {
-            pinch = nil
-            withAnimation(.snappy) { controller.setFill(scale > 1.0) }
+            // One transaction: the live pinch size eases into fit or fill (no jump back first).
+            let fill = controller.isFilled ? scale > 0.92 : scale > 1.08
+            withAnimation(.smooth(duration: 0.3)) {
+                pinch = nil
+                controller.setFill(fill)
+            }
         } else {
-            pinch = scale
+            var t = Transaction()
+            t.disablesAnimations = true
+            withTransaction(t) { pinch = scale }
         }
     }
 
@@ -512,7 +539,7 @@ private struct PlayerContent: View {
         hideTask?.cancel()
         hideTask = Task {
             try? await Task.sleep(nanoseconds: 4_000_000_000)
-            guard !Task.isCancelled, panel == nil, !player.isPaused, scrubbing == nil else { return }
+            guard !Task.isCancelled, panel == nil, !menuOpen, !player.isPaused, scrubbing == nil else { return }
             withAnimation(.easeInOut(duration: 0.3)) { showControls = false }
         }
     }
@@ -535,8 +562,10 @@ private struct PlayerContent: View {
 
 // MARK: - Video surface (fit / fill / pinch)
 
-/// The video is laid out at its exact fitted size, then scaled up to fill (the method Swiftfin
-/// uses with this engine; mpv's own zoom options don't apply to the native video layer).
+/// Fit and fill change the video view's real size (centred, clipped), the way MPVUI's surface
+/// is built to animate: during the animation it keeps the current picture and stretches it
+/// smoothly, then renders sharp at the final size. Subtitles are moved up and scaled back while
+/// filled so they stay on screen at their normal size.
 private struct VideoSurface: View {
     let controller: PlaybackController
     let pinch: CGFloat?
@@ -551,14 +580,24 @@ private struct VideoSurface: View {
             let fit = min(container.width / video.width, container.height / video.height)
             let fitted = CGSize(width: video.width * fit, height: video.height * fit)
             let fillScale = max(container.width / max(fitted.width, 1), container.height / max(fitted.height, 1))
-            let base: CGFloat = controller.isFilled ? fillScale : 1
-            let scale = min(max(base * (pinch ?? 1), 1), fillScale * 1.5)
+            let mode = controller.aspectMode
+            let base: CGFloat = mode == .fill ? fillScale : 1
+            let scale = min(max(base * (pinch ?? 1), 1), fillScale * 1.25)
+            // Stretch: the fitted picture pulled to the screen's shape (non-uniform scale).
+            let stretchX: CGFloat = mode == .stretch && pinch == nil ? container.width / max(fitted.width, 1) : 1
+            let stretchY: CGFloat = mode == .stretch && pinch == nil ? container.height / max(fitted.height, 1) : 1
             MPVVideoPlayer(player: controller.player)
-                .frame(width: fitted.width, height: fitted.height)
-                .scaleEffect(scale)
+                .frame(width: fitted.width * (mode == .stretch ? 1 : scale), height: fitted.height * (mode == .stretch ? 1 : scale))
+                .scaleEffect(x: stretchX, y: stretchY)
                 .frame(width: container.width, height: container.height)
                 .clipped()
                 .allowsHitTesting(false)
+                .onChange(of: mode, initial: true) { _, mode in
+                    // Part of the picture hidden above and below while filled (fraction of its height).
+                    let filled = mode == .fill
+                    let hidden = filled ? max(0, 1 - container.height / max(fitted.height * fillScale, 1)) / 2 : 0
+                    controller.applyFill(hiddenFraction: hidden, scale: filled ? fillScale : 1)
+                }
         }
     }
 }
@@ -779,18 +818,29 @@ enum Screen {
     }
 }
 
-/// System volume through a hidden MPVolumeView slider (the supported way to change it; also
-/// keeps the system volume HUD from covering the video).
+/// System volume: read live from the audio session (so the hardware buttons move the slider)
+/// and set through a hidden MPVolumeView slider (the supported way; it also keeps the system
+/// volume HUD from covering the video).
 @Observable
 @MainActor
 final class SystemVolume {
     @ObservationIgnored weak var slider: UISlider?
+    @ObservationIgnored private var observation: NSKeyValueObservation?
     var shown: Float = AVAudioSession.sharedInstance().outputVolume
+
+    init() {
+        observation = AVAudioSession.sharedInstance().observe(\.outputVolume, options: [.new]) { [weak self] session, _ in
+            let v = session.outputVolume
+            Task { @MainActor in self?.shown = v }
+        }
+    }
+
     var value: Float {
-        get { slider?.value ?? shown }
+        get { shown }
         set {
-            shown = newValue
-            slider?.value = newValue
+            let v = min(1, max(0, newValue))
+            shown = v
+            slider?.value = v
             slider?.sendActions(for: .valueChanged)
         }
     }
@@ -802,28 +852,121 @@ private struct VolumeViewHost: UIViewRepresentable {
         let view = MPVolumeView(frame: CGRect(x: 0, y: 0, width: 1, height: 1))
         DispatchQueue.main.async {
             volume.slider = view.subviews.compactMap { $0 as? UISlider }.first
-            if let v = volume.slider?.value { volume.shown = v }
         }
         return view
     }
     func updateUIView(_ uiView: MPVolumeView, context: Context) {}
 }
 
-/// Apple's top-right volume capsule: speaker icon + slider.
+/// Apple's volume control: a glass capsule with the speaker icon and a thin white track that
+/// thickens while you drag it, following the hardware buttons live.
 private struct VolumeCapsule: View {
     let volume: SystemVolume
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: volume.shown == 0 ? "speaker.slash.fill" : "speaker.wave.2.fill")
-                .font(.subheadline.weight(.semibold))
-                .frame(width: 22)
-            Slider(value: Binding(get: { Double(volume.shown) }, set: { volume.value = Float($0) }), in: 0...1)
-                .tint(.white)
-                .frame(width: 96)
+    @State private var dragging = false
+    @State private var dragStart: Float = 0
+    private let trackWidth: CGFloat = 92
+
+    private var symbol: String {
+        switch volume.shown {
+        case 0: return "speaker.slash.fill"
+        case ..<0.34: return "speaker.wave.1.fill"
+        case ..<0.67: return "speaker.wave.2.fill"
+        default: return "speaker.wave.3.fill"
         }
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: symbol)
+                .font(.system(size: 15, weight: .semibold))
+                .contentTransition(.symbolEffect(.replace))
+                .frame(width: 24, alignment: .leading)
+            ZStack(alignment: .leading) {
+                Capsule().fill(.white.opacity(0.25))
+                Capsule().fill(.white).frame(width: trackWidth * CGFloat(volume.shown))
+            }
+            .frame(width: trackWidth, height: dragging ? 9 : 5)
+            .frame(height: 44)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { g in
+                        if !dragging { dragging = true; dragStart = volume.shown }
+                        volume.value = dragStart + Float(g.translation.width / trackWidth)
+                    }
+                    .onEnded { _ in dragging = false }
+            )
+            .animation(.easeOut(duration: 0.15), value: dragging)
+        }
+        .foregroundStyle(.white)
         .padding(.horizontal, 14)
         .frame(height: 44)
         .glassEffect(.regular.interactive(), in: .capsule)
+    }
+}
+
+// MARK: - Menu button (UIKit menu, so the player knows while it's open)
+
+/// A glass circle that opens a native iOS menu, like Apple's player. Unlike SwiftUI's Menu it
+/// reports when the menu opens and closes, so the controls don't hide while you're choosing.
+/// The menu is rebuilt each time it opens, so checkmarks are always current.
+private struct PlayerMenuButton: UIViewRepresentable {
+    let symbol: String
+    let onOpenChange: (Bool) -> Void
+    let makeMenu: () -> UIMenu
+
+    init(symbol: String, onOpenChange: @escaping (Bool) -> Void, makeMenu: @escaping () -> UIMenu) {
+        self.symbol = symbol
+        self.onOpenChange = onOpenChange
+        self.makeMenu = makeMenu
+    }
+
+    func makeUIView(context: Context) -> MenuButton {
+        let button = MenuButton(type: .system)
+        var config = UIButton.Configuration.glass()
+        config.cornerStyle = .capsule
+        config.baseForegroundColor = .white
+        config.contentInsets = .zero
+        config.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(pointSize: 17, weight: .semibold)
+        config.image = UIImage(systemName: symbol)
+        button.configuration = config
+        button.tintColor = .white
+        button.showsMenuAsPrimaryAction = true
+        button.menu = UIMenu(children: [UIDeferredMenuElement.uncached { [weak button] completion in
+            completion(button?.provider?().children ?? [])
+        }])
+        update(button)
+        return button
+    }
+
+    func updateUIView(_ button: MenuButton, context: Context) { update(button) }
+
+    private func update(_ button: MenuButton) {
+        button.provider = makeMenu
+        button.onOpenChange = onOpenChange
+        if var config = button.configuration, config.image != UIImage(systemName: symbol) {
+            config.image = UIImage(systemName: symbol)
+            button.configuration = config
+        }
+    }
+
+    final class MenuButton: UIButton {
+        var provider: (() -> UIMenu)?
+        var onOpenChange: ((Bool) -> Void)?
+
+        override func contextMenuInteraction(_ interaction: UIContextMenuInteraction,
+                                             willDisplayMenuFor configuration: UIContextMenuConfiguration,
+                                             animator: (any UIContextMenuInteractionAnimating)?) {
+            super.contextMenuInteraction(interaction, willDisplayMenuFor: configuration, animator: animator)
+            onOpenChange?(true)
+        }
+
+        override func contextMenuInteraction(_ interaction: UIContextMenuInteraction,
+                                             willEndFor configuration: UIContextMenuConfiguration,
+                                             animator: (any UIContextMenuInteractionAnimating)?) {
+            super.contextMenuInteraction(interaction, willEndFor: configuration, animator: animator)
+            onOpenChange?(false)
+        }
     }
 }
 
@@ -890,7 +1033,7 @@ private struct ErrorCard: View {
                 Button("Close", action: close).buttonStyle(.glass)
                 Button("Try again") { Task { await controller.retry() } }.buttonStyle(.glass)
                 if controller.method != .transcode {
-                    Button("Convert on server") { Task { await controller.retryWithConversion() } }.buttonStyle(.glassProminent)
+                    Button("Convert on server") { Task { await controller.retryWithConversion() } }.buttonStyle(.tintedGlass)
                 }
             }
         }
@@ -916,7 +1059,7 @@ private struct UpNextCard: View {
                 Text("Next episode in \(secondsLeft)").font(.caption.weight(.semibold)).foregroundStyle(.white.opacity(0.7))
                 Text([next.episodeLabel, next.name].compactMap { $0 }.joined(separator: " · ")).font(.subheadline.weight(.semibold)).lineLimit(2)
                 HStack(spacing: 8) {
-                    Button("Play now") { Task { await controller.playNext(auto: false) } }.buttonStyle(.glassProminent).controlSize(.small)
+                    Button("Play now") { Task { await controller.playNext(auto: false) } }.buttonStyle(.tintedGlass).controlSize(.small)
                     Button("Cancel") { controller.cancelCountdown() }.buttonStyle(.glass).controlSize(.small)
                 }
             }
@@ -936,7 +1079,7 @@ private struct StillWatchingCard: View {
             Text("Are you still watching?").font(.title2.bold())
             HStack(spacing: 10) {
                 Button("Stop", action: close).buttonStyle(.glass)
-                Button("Keep watching") { controller.confirmStillWatching() }.buttonStyle(.glassProminent)
+                Button("Keep watching") { controller.confirmStillWatching() }.buttonStyle(.tintedGlass)
             }
         }
         .foregroundStyle(.white)

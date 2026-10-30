@@ -1,12 +1,13 @@
 import Foundation
 
 enum TMDBError: LocalizedError {
-    case noKey, badKey(String?), http(Int, String?)
+    case noKey, badKey(String?), http(Int, String?), network(String)
     var errorDescription: String? {
         switch self {
         case .noKey: return "Add your free TMDB API key in Settings → Recommendations."
         case .badKey(let m): return "TMDB didn't accept the key\(m.map { ": \($0)" } ?? ""). Paste the API Read Access Token (the long one) or the API key."
         case .http(let c, let m): return "TMDB error \(c)\(m.map { ": \($0)" } ?? "")."
+        case .network(let m): return "Couldn't reach TMDB: \(m)"
         }
     }
 }
@@ -33,7 +34,27 @@ actor TMDBClient {
 
     private var isBearer: Bool { key.count > 40 }
 
+    // Request statistics, so For You can say exactly what went wrong instead of showing nothing.
+    private(set) var succeeded = 0
+    private(set) var failed = 0
+    private(set) var lastFailure: String?
+    func resetStats() { succeeded = 0; failed = 0; lastFailure = nil }
+
     private func get(_ path: String, _ query: [String: String] = [:]) async throws -> Data {
+        do {
+            let data = try await rawGet(path, query)
+            succeeded += 1
+            return data
+        } catch {
+            if !(error is CancellationError) && (error as? URLError)?.code != .cancelled {
+                failed += 1
+                lastFailure = error.localizedDescription
+            }
+            throw error
+        }
+    }
+
+    private func rawGet(_ path: String, _ query: [String: String]) async throws -> Data {
         guard !key.isEmpty else { throw TMDBError.noKey }
         var comps = URLComponents(string: "https://api.themoviedb.org/3" + path)!
         var items = query.map { URLQueryItem(name: $0.key, value: $0.value) }
@@ -43,8 +64,13 @@ actor TMDBClient {
         var request = URLRequest(url: comps.url!)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if isBearer { request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
-        for attempt in 0..<3 {
-            let (data, response) = try await session.data(for: request)
+        for attempt in 0..<4 {
+            let (data, response): (Data, URLResponse)
+            do {
+                (data, response) = try await session.data(for: request)
+            } catch let e as URLError where e.code != .cancelled {
+                throw TMDBError.network(e.localizedDescription)
+            }
             let code = (response as? HTTPURLResponse)?.statusCode ?? 0
             if code == 429 {   // rate limited: wait as told, then retry
                 let wait = Double((response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Retry-After") ?? "") ?? Double(attempt + 1)

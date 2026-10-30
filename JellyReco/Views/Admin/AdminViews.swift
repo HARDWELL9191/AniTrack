@@ -223,6 +223,7 @@ struct MessageSheet: View {
         NavigationStack {
             Form {
                 TextField("Title", text: $header)
+                    .keyboardDoneBar()
                 TextField("Message", text: $text, axis: .vertical).lineLimit(3...6)
             }
             .navigationTitle("Message \(session.userName ?? "")")
@@ -496,6 +497,7 @@ struct NewUserSheet: View {
         NavigationStack {
             Form {
                 TextField("Name", text: $name).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .keyboardDoneBar()
                 SecureField("Password (optional)", text: $password)
             }
             .navigationTitle("New user")

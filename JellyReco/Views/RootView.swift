@@ -19,6 +19,7 @@ struct RootView: View {
         .overlay {
             if model.isLocked { LockView() }
         }
+        .background { KeyboardDismissOnTapOutside().allowsHitTesting(false) }
         .fullScreenCover(item: $model.playback) { request in
             PlayerScreen(request: request)
         }
@@ -69,7 +70,7 @@ struct LockView: View {
                 } label: {
                     Label("Unlock", systemImage: "faceid").frame(maxWidth: 220)
                 }
-                .buttonStyle(.glassProminent)
+                .buttonStyle(.tintedGlass)
                 .controlSize(.large)
                 if failed { Text("Couldn't verify. Try again.").font(.footnote).foregroundStyle(.secondary) }
             }
@@ -135,6 +136,7 @@ struct SignInFlow: View {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Server address").font(.headline)
                         TextField("e.g. 192.168.1.20:8096 or jellyfin.example.com", text: $address)
+                    .keyboardDoneBar()
                             .keyboardType(.URL)
                             .textContentType(.URL)
                             .textInputAutocapitalization(.never)
@@ -158,7 +160,7 @@ struct SignInFlow: View {
                         .font(.headline)
                         .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.glassProminent)
+                    .buttonStyle(.tintedGlass)
                     .controlSize(.large)
                     .disabled(isConnecting || JellyfinClient.normalize(address) == nil)
                 }
@@ -312,6 +314,7 @@ struct UserPickerView: View {
             }
             Section("Sign in") {
                 TextField("Username", text: $username)
+                    .keyboardDoneBar()
                     .textContentType(.username)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()

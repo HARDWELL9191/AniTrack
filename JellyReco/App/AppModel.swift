@@ -282,6 +282,7 @@ final class AppModel {
             guard let self else { return }
             let key = self.settings.tmdbKey
             Task { await self.saveStorage { custom in custom["tmdbkey"] = key } }
+            self.discovery.keyChanged()
         }
     }
 
@@ -512,8 +513,8 @@ final class AppModel {
             }
             var queue: [BaseItem] = []
             if target.kind == .episode { queue = await episodesAfter(target) }
-            await startPlayback(PlaybackRequest(item: target, startSeconds: start, mediaSourceId: mediaSourceId,
-                                                audioIndex: audio, subtitleIndex: subtitle, queue: queue))
+            playback = PlaybackRequest(item: target, startSeconds: start, mediaSourceId: mediaSourceId,
+                                       audioIndex: audio, subtitleIndex: subtitle, queue: queue)
         }
     }
 

@@ -145,7 +145,7 @@ struct ItemDetailView: View {
                             }
                             .frame(maxWidth: .infinity)
                         }
-                        .buttonStyle(.glassProminent)
+                        .buttonStyle(.tintedGlass)
                         if resume > 0 {
                             Button { playCurrent(from: 0) } label: {
                                 Image(systemName: "arrow.counterclockwise").font(.headline).frame(width: 44)

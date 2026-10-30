@@ -47,7 +47,11 @@ final class PlaybackController {
     private(set) var audioDelay: Double = 0
     private(set) var subtitleDelay: Double = 0
     /// Fill instead of fit (the surface is scaled up to cover the screen, like Apple's player).
-    private(set) var isFilled = false
+    /// Fit (whole picture), Fill (zoom until the screen is covered) or Stretch (picture pulled
+    /// to the screen's shape: nothing cut off, nothing black).
+    enum AspectMode: String, CaseIterable { case fit, fill, stretch }
+    private(set) var aspectMode: AspectMode = .fit
+    var isFilled: Bool { aspectMode == .fill }
     /// Recent engine messages (shown in Playback info) so problems are visible.
     private(set) var diagnostics: [String] = []
     var trickplay: TrickplayProvider?
@@ -125,6 +129,12 @@ final class PlaybackController {
         case .box:
             options["sub-border-style"] = "background-box"
             options["sub-back-color"] = "#99000000"
+        }
+        // Fonts for mpv's subtitle renderer: without them text subtitles have nothing to draw with.
+        if let fonts = SubtitleFonts.prepare() {
+            options["sub-fonts-dir"] = fonts.directory
+            options["sub-font"] = fonts.family
+            options["osd-font"] = fonts.family
         }
         if settings.stereoDownmix { options["audio-channels"] = "stereo" }
         return MPVPlayerConfiguration(
@@ -217,6 +227,7 @@ final class PlaybackController {
             guard let url else { throw JellyfinError.message("Couldn't build the stream address.") }
 
             player.load(url, playAutomatically: true, startTime: resumeSeconds > 1 ? .seconds(resumeSeconds) : nil)
+            if fillHidden > 0 || fillScale != 1 { applySubtitleLayout() }
             player.setPlaybackRate(settings.defaultSpeed)
             loadExternalSubtitles(itemId: full.id, source: src)
             prepareTrickplay(full, source: src)
@@ -484,9 +495,33 @@ final class PlaybackController {
         player.setSubtitleDelay(.milliseconds(Int(s * 1000)))
     }
 
-    func toggleFill() { isFilled.toggle() }
+    /// Double-tap / pinch: between fit and fill (from stretch, back to fit).
+    func toggleFill() { aspectMode = aspectMode == .fit ? .fill : .fit }
 
-    func setFill(_ on: Bool) { isFilled = on }
+    func setAspect(_ mode: AspectMode) { aspectMode = mode }
+
+    @ObservationIgnored private var fillHidden: Double = 0
+    @ObservationIgnored private var fillScale: Double = 1
+
+    /// While the video is zoomed to fill, part of the picture is off screen: lift subtitles into
+    /// the visible area and scale them back to their normal size (text subtitles; styled ASS
+    /// keeps its own placement, like in Infuse).
+    func applyFill(hiddenFraction: Double, scale: Double) {
+        fillHidden = hiddenFraction
+        fillScale = max(scale, 1)
+        applySubtitleLayout()
+    }
+
+    func applySubtitleScale() { applySubtitleLayout() }
+
+    private func applySubtitleLayout() {
+        let base = Double(settings.subtitlePosition)               // % of the picture height
+        let pos = fillHidden * 100 + base * (1 - 2 * fillHidden)
+        player.setProperty("sub-pos", to: String(Int(pos.rounded())))
+        player.setProperty("sub-scale", to: String(format: "%.3f", settings.subtitleSize / fillScale))
+    }
+
+    func setFill(_ on: Bool) { aspectMode = on ? .fill : .fit }
 
     var currentSeconds: Double { seconds(player.position) }
     var durationSeconds: Double {

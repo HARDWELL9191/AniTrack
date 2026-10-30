@@ -158,6 +158,7 @@ struct ServerAddressesSheet: View {
                 }
                 Section("Add address") {
                     TextField("https://jellyfin.example.com", text: $newURL)
+                    .keyboardDoneBar()
                         .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
                     Button("Add") {
                         if let u = JellyfinClient.normalize(newURL)?.absoluteString, !urls.contains(u) { urls.append(u) }
@@ -195,6 +196,7 @@ struct ApproveQuickConnectSheet: View {
         VStack(spacing: 16) {
             Text("Approve Quick Connect").font(.title3.bold())
             TextField("6-digit code", text: $code)
+                    .keyboardDoneBar()
                 .keyboardType(.numberPad)
                 .font(.title2.monospacedDigit())
                 .multilineTextAlignment(.center)
@@ -208,7 +210,7 @@ struct ApproveQuickConnectSheet: View {
                     } catch { result = error.localizedDescription }
                 }
             }
-            .buttonStyle(.glassProminent)
+            .buttonStyle(.tintedGlass)
             .disabled(code.count < 4)
             if let result { Text(result).font(.footnote).foregroundStyle(.secondary) }
         }
@@ -231,6 +233,7 @@ struct ChangePasswordSheet: View {
             Form {
                 if isOwn { SecureField("Current password", text: $current) }
                 SecureField("New password", text: $new1)
+                    .keyboardDoneBar()
                 SecureField("Repeat new password", text: $new2)
                 if let error { Text(error).foregroundStyle(.red).font(.footnote) }
             }
@@ -262,16 +265,6 @@ struct PlayerSettingsView: View {
     var body: some View {
         @Bindable var s = model.settings
         Form {
-            Section {
-                Picker("Player", selection: $s.applePlayer) {
-                    Text("Apple player when possible").tag(true)
-                    Text("Always JellyReco player").tag(false)
-                }
-            } footer: {
-                Text(s.applePlayer
-                     ? "Files Apple's own player handles perfectly open in it: MP4/MOV as they are, and MKV with H.264/HEVC/AV1 video and AAC/AC3/E-AC3/FLAC/ALAC/MP3 audio repackaged by your server without re-encoding. Everything else (DTS, TrueHD, PGS/VobSub, styled ASS subtitles, several audio tracks in an MKV, 10-bit H.264, VP9…) opens in the JellyReco player, which plays every format. If Apple's player can't open a file, the JellyReco player takes over at the same point."
-                     : "Every file opens in the JellyReco player (mpv), which plays every format directly.")
-            }
             Section {
                 Picker("Video output", selection: $s.playerEngine) {
                     ForEach(PlayerEngine.allCases) { Text($0.label).tag($0) }
@@ -578,20 +571,27 @@ struct AppearanceSettingsView: View {
 struct ForYouSettingsView: View {
     @Environment(AppModel.self) private var model
     @State private var keyStatus: String?
+    @State private var draft = ""
+    @State private var checking = false
     var body: some View {
         @Bindable var s = model.settings
         Form {
             Section {
-                SecureField("TMDB API key or read access token", text: $s.tmdbKey)
+                if !s.tmdbKey.isEmpty && draft.isEmpty {
+                    LabeledContent("Saved key", value: Self.masked(s.tmdbKey))
+                }
+                SecureField(s.tmdbKey.isEmpty ? "TMDB API key or read access token" : "Paste a new key to replace it", text: $draft)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
-                Button("Check key") {
-                    Task {
-                        do { try await TMDBClient(key: s.tmdbKey).validate(); keyStatus = "Key works." }
-                        catch { keyStatus = error.localizedDescription }
-                    }
+                    .submitLabel(.done)
+                    .keyboardDoneBar()
+                Button {
+                    Keyboard.dismiss()
+                    Task { await check() }
+                } label: {
+                    HStack { Text(draft.isEmpty ? "Check saved key" : "Check and save"); if checking { Spacer(); ProgressView() } }
                 }
-                .disabled(s.tmdbKey.isEmpty)
+                .disabled((draft.isEmpty && s.tmdbKey.isEmpty) || checking)
                 if let keyStatus { Text(keyStatus).font(.footnote).foregroundStyle(.secondary) }
             } header: { Text("TMDB") } footer: {
                 Text("For You looks for new titles on TMDB (free key from themoviedb.org → Settings → API). Your library itself keeps using Jellyfin's own metadata.")
@@ -627,6 +627,34 @@ struct ForYouSettingsView: View {
         switch PickExplainer.shared.availability {
         case .available: return "Apple Intelligence"
         case .unavailable: return "Unavailable"
+        }
+    }
+}
+
+extension ForYouSettingsView {
+    static func masked(_ key: String) -> String {
+        let k = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard k.count > 8 else { return String(repeating: "•", count: k.count) }
+        return "\(k.prefix(4))…\(k.suffix(4)) (\(k.count > 40 ? "read access token" : "API key"))"
+    }
+
+    func check() async {
+        checking = true
+        defer { checking = false }
+        let candidate = draft.isEmpty ? model.settings.tmdbKey : draft
+        do {
+            try await TMDBClient(key: candidate).validate()
+            if !draft.isEmpty {
+                model.settings.tmdbKey = candidate.components(separatedBy: .whitespacesAndNewlines).joined()
+                    .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+                draft = ""
+                keyStatus = "Key works and is saved. For You is building your picks."
+            } else {
+                keyStatus = "Key works."
+                model.discovery.keyChanged()
+            }
+        } catch {
+            keyStatus = error.localizedDescription
         }
     }
 }

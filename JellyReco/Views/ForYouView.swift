@@ -89,6 +89,13 @@ struct ForYouView: View {
         }
     }
 
+    private var tryAgainButton: some View {
+        Button("Try again", systemImage: "arrow.clockwise") {
+            Task { await discovery.build(sourceId, genre: nil) }
+        }
+        .buttonStyle(.glass)
+    }
+
     private func dropdownLabel(_ text: String, symbol: String) -> some View {
         HStack(spacing: 6) {
             Image(systemName: symbol)
@@ -122,15 +129,28 @@ struct ForYouView: View {
             VStack(spacing: 14) {
                 ProgressView()
                 Text("Learning from \(model.reco.sourceName(sourceId))…").font(.headline)
-                Text("Comparing what you finished on your server with what's out there\(model.settings.useOnDeviceAI ? ", with on-device AI" : "").")
+                Text(discovery.status[sourceId] ?? "Comparing what you finished on your server with what's out there\(model.settings.useOnDeviceAI ? ", with on-device AI" : "").")
                     .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                    .contentTransition(.opacity)
+                    .animation(.easeInOut, value: discovery.status[sourceId])
             }
             .padding(40)
         } else if picks.isEmpty, let error = discovery.errors[sourceId] {
-            ContentUnavailableView("Couldn't build picks", systemImage: "exclamationmark.triangle", description: Text(error))
+            ContentUnavailableView {
+                Label("Couldn't build picks", systemImage: "exclamationmark.triangle")
+            } description: {
+                Text(error)
+            } actions: {
+                tryAgainButton
+            }
         } else if picks.isEmpty {
-            ContentUnavailableView("No picks yet", systemImage: "wand.and.stars",
-                                   description: Text(genre == nil ? "Pull down to look again." : "Nothing new in \(genre!) right now."))
+            ContentUnavailableView {
+                Label("No picks yet", systemImage: "wand.and.stars")
+            } description: {
+                Text(genre == nil ? "Tap Try again to look for picks." : "Nothing new in \(genre!) right now.")
+            } actions: {
+                tryAgainButton
+            }
         } else {
             let safe = min(index, picks.count - 1)
             let pick = picks[safe]
@@ -281,7 +301,7 @@ struct ExternalPickCard: View {
                                 .lineLimit(1).minimumScaleFactor(0.8)
                                 .frame(maxWidth: .infinity)
                         }
-                        .buttonStyle(.glassProminent)
+                        .buttonStyle(.tintedGlass)
                         Button(action: onDetails) {
                             Label("Details", systemImage: "info.circle").frame(maxWidth: .infinity)
                         }
@@ -428,7 +448,7 @@ struct ExternalDetailSheet: View {
                                 Label(model.isOnMyList(title) ? "On My List" : "Add to My List",
                                       systemImage: model.isOnMyList(title) ? "bookmark.fill" : "bookmark").frame(maxWidth: .infinity)
                             }
-                            .buttonStyle(.glassProminent)
+                            .buttonStyle(.tintedGlass)
                             Button { showMoreLike = true } label: {
                                 Label("More like this", systemImage: "square.stack.3d.up").frame(maxWidth: .infinity)
                             }
@@ -521,6 +541,8 @@ struct TMDBKeyCard: View {
             SecureField("TMDB API key or read access token", text: $key)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
+                .submitLabel(.done)
+                .keyboardDoneBar()
                 .padding(12)
                 .background(.fill.tertiary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             if let error { Text(error).font(.footnote).foregroundStyle(.red) }
@@ -529,7 +551,7 @@ struct TMDBKeyCard: View {
             } label: {
                 HStack { if checking { ProgressView() }; Text("Save and find picks").fontWeight(.semibold) }.frame(maxWidth: .infinity)
             }
-            .buttonStyle(.glassProminent)
+            .buttonStyle(.tintedGlass)
             .controlSize(.large)
             .disabled(key.trimmingCharacters(in: .whitespaces).isEmpty || checking)
             Text("Saved in your account's private JellyReco storage on your server, so your other devices have it too.")
@@ -540,13 +562,15 @@ struct TMDBKeyCard: View {
     }
 
     private func save() async {
+        Keyboard.dismiss()
         checking = true
         error = nil
         defer { checking = false }
+        let cleaned = key.components(separatedBy: .whitespacesAndNewlines).joined()
+            .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
         do {
-            try await TMDBClient(key: key).validate()
-            model.settings.tmdbKey = key.trimmingCharacters(in: .whitespacesAndNewlines)
-            await model.discovery.build(model.reco.currentSourceId, genre: nil)
+            try await TMDBClient(key: cleaned).validate()
+            model.settings.tmdbKey = cleaned   // starts building picks (discovery.keyChanged)
         } catch {
             self.error = error.localizedDescription
         }
