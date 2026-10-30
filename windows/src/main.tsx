@@ -8,7 +8,7 @@ import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import { getCurrent, onOpenUrl } from "@tauri-apps/plugin-deep-link";
 import { setFetch } from "./core/anilist";
 import { type EngineStatus, setEmbedder } from "./core/ai";
-import { type ExplainerStatus, setExplainer } from "./core/explainer";
+import { type WriterStatus, setWriter } from "./core/explainer";
 import { AppModel, type TokenStore } from "./core/model";
 import { App } from "./ui/app";
 import { Provider } from "./ui/state";
@@ -24,9 +24,29 @@ if (native) {
     cached: async (ids) => (ids.length ? toVectors(await invoke("ai_cached", { ids })) : new Map()),
     vectors: async (items) => (items.length ? toVectors(await invoke("ai_vectors", { items })) : new Map()),
   });
-  setExplainer({
-    status: () => invoke<ExplainerStatus>("winai_status"),
-    write: (prompt) => invoke<string>("winai_explain", { prompt }),
+  setWriter({
+    status: () => invoke<WriterStatus>("llm_status"),
+    download: () => invoke("llm_download"),
+    cancel: () => invoke("llm_cancel"),
+    remove: () => invoke("llm_remove"),
+    write: (system, user) => invoke<string>("llm_explain", { system, user }),
+  });
+}
+
+// Browser preview only: a pretend AI writer (localStorage "dev-writer" = its state).
+if (!native && localStorage.getItem("dev-writer")) {
+  let state = localStorage.getItem("dev-writer") as WriterStatus["state"];
+  let received = 0;
+  const size = 2_530_000_000;
+  setWriter({
+    status: async () => {
+      if (state === "downloading" && (received += 400_000_000) >= size) state = "ready";
+      return { state, model: "Qwen3 4B Instruct", sizeBytes: size, received, detail: "Qwen3 4B Instruct for Snapdragon(R) X Elite, runs on the NPU" };
+    },
+    download: async () => { state = "downloading"; received = 0; },
+    cancel: async () => { state = "notDownloaded"; },
+    remove: async () => { state = "notDownloaded"; },
+    write: async () => { await new Promise((r) => setTimeout(r, 1500)); return "Like Frieren, it's a quiet, reflective journey about what lingers after the adventure, with the same bittersweet warmth."; },
   });
 }
 

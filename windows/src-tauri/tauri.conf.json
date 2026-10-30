@@ -64,9 +64,7 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "resources/ai/": "ai/",
-      "resources/ai-helper/": "ai-helper/",
-      "resources/winai/": "winai/"
+      "resources/ai/": "ai/"
     },
     "shortDescription": "AniTrack",
     "longDescription": "Track, discover and get personal picks from your AniList.",

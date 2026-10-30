@@ -1,6 +1,6 @@
 # Fills src-tauri/resources/ai with what the on-device AI needs:
 #  - ONNX Runtime 1.31.1 (Windows ARM64) and Qualcomm's QNN execution provider plugin 2.7.0
-#    (onnxruntime-qnn) for the Snapdragon NPU, with the HTP (NPU) libraries for Snapdragon X
+#    (onnxruntime-qnn) for the Snapdragon NPU, plus Genie.dll (QAIRT 2.51) for the AI writer, with the HTP (NPU) libraries for Snapdragon X
 #    (V73), X2 (V81) and 8cx Gen 3 (V68). Both come from the official wheels (zip files).
 #  - BAAI bge-small-en-v1.5 as ONNX plus its vocab.txt, with its input fixed to 1 x 128 tokens
 #    (the NPU needs fixed shapes).
@@ -34,9 +34,10 @@ function Get-Wheel($name, $version, $folder, $files) {
 # 1. ONNX Runtime itself.
 Get-Wheel "onnxruntime" $OrtVersion "onnxruntime/capi" @("onnxruntime.dll", "onnxruntime_providers_shared.dll")
 
-# 2. The QNN plugin and Qualcomm's NPU libraries (the GPU, LLM and debugging ones are left out).
+# 2. The QNN plugin and Qualcomm's NPU libraries, including Genie (the NPU's language model
+#    runtime) for the AI writer; the GPU and debugging ones are left out.
 Get-Wheel "onnxruntime-qnn" $QnnVersion "onnxruntime_qnn" @(
-  "onnxruntime_providers_qnn.dll",
+  "onnxruntime_providers_qnn.dll", "Genie.dll", "Qualcomm_LICENSE.pdf",
   "QnnHtp.dll", "QnnHtpPrepare.dll", "QnnSystem.dll", "QnnHtpNetRunExtensions.dll",
   "QnnHtpV68Stub.dll", "QnnHtpV73Stub.dll", "QnnHtpV81Stub.dll",
   "libQnnHtpV68Skel.so", "libQnnHtpV73Skel.so", "libQnnHtpV81Skel.so",

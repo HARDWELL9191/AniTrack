@@ -33,10 +33,6 @@ jobs:
         with:
           python-version: "3.14"
 
-      - uses: actions/setup-dotnet@v5
-        with:
-          dotnet-version: "10.0.x"
-
       - name: Rust (aarch64-pc-windows-msvc)
         run: |
           if (-not (Get-Command rustup -ErrorAction SilentlyContinue)) {
@@ -56,9 +52,8 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            ~/.nuget/packages
             windows/src-tauri/target
-          key: cargo-win-arm64-${{ hashFiles('windows/src-tauri/Cargo.lock', 'windows/ai-helper/*.csproj') }}
+          key: cargo-win-arm64-${{ hashFiles('windows/src-tauri/Cargo.lock') }}
           restore-keys: cargo-win-arm64-
 
       - name: Install packages
@@ -67,8 +62,22 @@ jobs:
       - name: On-device AI files (ONNX Runtime + QNN plugin, bge-small)
         run: ./tools/prepare_ai.ps1
 
-      - name: Windows AI helper + identity package (AI explanations)
-        run: ./tools/package_winai.ps1
+      # The AI writer's model packages: size + SHA-256 for the app's download check, after the
+      # app's own unpack-and-check code ran on the real packages. Cached: only redone when the
+      # model links change (tools/llm_manifest.py).
+      - uses: actions/cache@v5
+        id: llm-manifest
+        with:
+          path: windows/src-tauri/resources/ai/llm-models.json
+          key: llm-models-${{ hashFiles('windows/tools/llm_manifest.py') }}
+
+      - name: AI writer model packages (Qwen3 4B for Snapdragon X / X2)
+        if: steps.llm-manifest.outputs.cache-hit != 'true'
+        working-directory: windows/src-tauri
+        run: |
+          cargo build --release --example llm_check --target aarch64-pc-windows-msvc
+          python -I ../tools/llm_manifest.py resources/ai/llm-models.json target/aarch64-pc-windows-msvc/release/examples/llm_check.exe "$env:RUNNER_TEMP/llm"
+          if ($LASTEXITCODE -ne 0) { throw "model package check failed" }
 
       - name: Build the installer
         run: npx tauri build --target aarch64-pc-windows-msvc --bundles nsis
@@ -85,8 +94,24 @@ jobs:
           python -I ../tools/ai_check.py target/aarch64-pc-windows-msvc/release/examples/embed_check.exe resources/ai "$env:RUNNER_TEMP/ai-check"
           if ($LASTEXITCODE -ne 0) { throw "AI check failed" }
 
-      - name: Windows AI check (identity, runtime and helper; this runner has no NPU)
-        run: ./tools/test_winai.ps1
+      - name: AI writer check (the installed app's helper process, with Genie.dll from the AI folder)
+        run: |
+          $exe = "src-tauri/target/aarch64-pc-windows-msvc/release/anitrack.exe"
+          $ai = (Resolve-Path src-tauri/resources/ai).Path
+          $bundle = New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/llm-empty"
+          '{"cmd":"status"}' | Set-Content "$bundle/genie_config.json"
+          # The app is a windowed exe: start it explicitly with pipes (as the app itself does).
+          $psi = [System.Diagnostics.ProcessStartInfo]::new((Resolve-Path $exe).Path)
+          foreach ($a in "--llm-helper", $ai, $bundle.FullName) { $psi.ArgumentList.Add($a) }
+          $psi.UseShellExecute = $false; $psi.RedirectStandardInput = $true; $psi.RedirectStandardOutput = $true
+          $p = [System.Diagnostics.Process]::Start($psi)
+          $p.StandardInput.WriteLine('{"cmd":"status"}'); $p.StandardInput.Close()
+          $reply = $p.StandardOutput.ReadToEnd()
+          if (-not $p.WaitForExit(60000)) { $p.Kill(); throw "the helper process didn't exit" }
+          Write-Host "::notice::AI writer helper (no model, expected to report a config error): $reply"
+          if (-not $reply) { throw "the helper process didn't answer" }
+          if ($reply -match "couldn't load|has no Genie") { throw "Genie.dll didn't load: $reply" }
+          Get-Content src-tauri/resources/ai/llm-models.json | Write-Host
 
       - name: Collect the .exe
         id: exe

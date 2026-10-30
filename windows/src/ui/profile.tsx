@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { type EngineStatus, getEmbedder } from "../core/ai";
-import { type ExplainerStatus, explainerStatus } from "../core/explainer";
+import { useWriterStatus, WriterControl } from "./writer";
 import { TITLE_LANGUAGES, type TitleLanguage } from "../core/models";
 import { REDIRECT_URL } from "./welcome";
 import { PageHeader } from "./components";
@@ -26,14 +26,21 @@ const backendText: Record<EngineStatus["backend"], string> = {
   off: "Off",
 };
 
+const writerLabel: Record<string, string> = {
+  ready: "On the NPU",
+  notDownloaded: "Not downloaded",
+  downloading: "Downloading…",
+  error: "Download failed",
+  unsupported: "Unavailable",
+};
+
 export function ProfilePage() {
   const model = useModel();
   const s = model.settings;
   const [token, setToken] = useState("");
   const [confirmLogout, setConfirmLogout] = useState(false);
   const [engine, setEngine] = useState<EngineStatus | null>(null);
-  const [writer, setWriter] = useState<ExplainerStatus | null>(null);
-  useEffect(() => { void explainerStatus().then(setWriter); }, []);
+  const [writer, refreshWriter] = useWriterStatus();
   useEffect(() => {
     let live = true;
     const poll = () => void getEmbedder().status().then((st) => live && setEngine(st));
@@ -92,9 +99,9 @@ export function ProfilePage() {
         {engine && <p className="footnote">{engine.detail}</p>}
         <div className="toggle-row">
           <span><Icon name="sparkles" size={16} /> AI explanations</span>
-          <span className="muted" title={writer?.detail}>{writer ? (writer.available ? "Windows AI ready" : "Unavailable") : "…"}</span>
+          <span className="muted" title={writer?.detail}>{writer ? writerLabel[writer.state] : "…"}</span>
         </div>
-        {writer && !writer.available && <p className="footnote">{writer.detail}</p>}
+        {writer && <WriterControl status={writer} refresh={refreshWriter} />}
         <Toggle label="Include unreleased shows" checked={s.includeUnreleased} onChange={(v) => { s.includeUnreleased = v; model.invalidatePicks(); }} />
         <button className="text-button" disabled={model.isLoadingFeed(null)} onClick={() => void model.generateRecommendations(null, true)}>Rebuild picks now</button>
         <button className="text-button" disabled={!s.dismissedPicks.size || model.isResettingNotForMe} onClick={() => model.resetDismissedPicks()}>
@@ -102,7 +109,8 @@ export function ProfilePage() {
         </button>
         <p className="footnote">
           Picks combine fan recommendations from the shows you rated highly, your favorite genres and tags, and (when on-device AI is on) the meaning
-          of each synopsis, compared on this PC by a small language model on the Snapdragon NPU (or the CPU). Nothing leaves your PC except normal
+          of each synopsis, compared on this PC by a small language model on the Snapdragon NPU (or the CPU). "Why would I like this?" can be written by
+          Qwen3 4B on the NPU after a one-time download from Qualcomm. Nothing leaves your PC except normal
           AniList requests. "Not for me" is saved to your AniList as a private, hidden custom list, so it follows you to your iPhone. Each synopsis is
           analyzed once and saved, and the AI pauses while battery saver is on.
         </p>

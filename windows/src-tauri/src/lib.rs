@@ -3,8 +3,8 @@
 //! anitrack:// login link.
 
 pub mod ai;
+pub mod llm;
 mod secure;
-mod winai;
 
 use base64::Engine as _;
 use serde::Deserialize;
@@ -14,7 +14,7 @@ use tauri::{Emitter, Manager};
 
 struct AppState {
     ai: Arc<ai::Engine>,
-    winai: Arc<winai::WinAi>,
+    llm: Arc<llm::Llm>,
 }
 
 #[derive(Deserialize)]
@@ -48,32 +48,44 @@ async fn ai_vectors(items: Vec<EmbedItem>, state: tauri::State<'_, AppState>) ->
         .map(keyed)
 }
 
-/// Whether "Why would I like this?" can be written by Windows' on-device language model.
+/// The AI writer ("Why would I like this?" on the NPU): downloaded, downloading, ready.
 #[tauri::command]
-async fn winai_status(state: tauri::State<'_, AppState>) -> Result<winai::Status, String> {
-    let w = state.winai.clone();
-    let status = tauri::async_runtime::spawn_blocking(move || w.status()).await.map_err(|e| e.to_string())?;
-    close_later(&state.winai);
-    Ok(status)
+fn llm_status(state: tauri::State<'_, AppState>) -> llm::Status {
+    state.llm.status()
 }
 
-/// Writes the explanation (off the UI thread; takes a few seconds on the NPU).
+/// Starts the model download in the background (progress through llm_status).
 #[tauri::command]
-async fn winai_explain(prompt: String, state: tauri::State<'_, AppState>) -> Result<String, String> {
-    let w = state.winai.clone();
-    let text = tauri::async_runtime::spawn_blocking(move || w.explain(&prompt)).await.map_err(|e| e.to_string())?;
-    close_later(&state.winai);
-    text
+fn llm_download(state: tauri::State<'_, AppState>) {
+    let llm = state.llm.clone();
+    tauri::async_runtime::spawn(async move {
+        let _ = llm.download().await;
+    });
 }
 
-/// The helper (and the model in it) is closed a minute after the last request; nothing runs
-/// in between, so it costs no battery while unused.
-fn close_later(w: &Arc<winai::WinAi>) {
-    let w = w.clone();
+#[tauri::command]
+fn llm_cancel(state: tauri::State<'_, AppState>) {
+    state.llm.cancel_download();
+}
+
+#[tauri::command]
+async fn llm_remove(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let llm = state.llm.clone();
+    tauri::async_runtime::spawn_blocking(move || llm.remove()).await.map_err(|e| e.to_string())?
+}
+
+/// Writes the explanation (off the UI thread; a few seconds on the NPU).
+#[tauri::command]
+async fn llm_explain(system: String, user: String, state: tauri::State<'_, AppState>) -> Result<String, String> {
+    let llm = state.llm.clone();
+    let text = tauri::async_runtime::spawn_blocking(move || llm.explain(&system, &user)).await.map_err(|e| e.to_string())?;
+    // The model is closed a minute after the last request, so it costs nothing while unused.
+    let llm = state.llm.clone();
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_secs(61));
-        w.close_if_idle();
+        llm.close_if_idle();
     });
+    text
 }
 
 #[tauri::command]
@@ -137,11 +149,32 @@ pub fn run() {
             let root = app.path().resource_dir().unwrap_or_default();
             let data = app.path().app_data_dir().unwrap_or_default();
             let ai = Arc::new(ai::Engine::new(ai::Paths { resources: root.join("ai"), data: data.clone() }));
-            let winai = Arc::new(winai::WinAi::new(root, data));
-            app.manage(AppState { ai, winai });
+            let llm = Arc::new(llm::Llm::new(root.join("ai"), data.clone()));
+            app.manage(AppState { ai, llm });
+            // Earlier builds used Windows' own language model through an identity package;
+            // remove that registration (it isn't used any more).
+            #[cfg(windows)]
+            cleanup_windows_ai(&data);
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![ai_status, ai_cached, ai_vectors, winai_status, winai_explain, token_get, token_set, power_saver, write_file])
+        .invoke_handler(tauri::generate_handler![ai_status, ai_cached, ai_vectors, llm_status, llm_download, llm_cancel, llm_remove, llm_explain, token_get, token_set, power_saver, write_file])
         .run(tauri::generate_context!())
         .expect("error while running AniTrack");
+}
+
+/// Removes the AniTrack.WindowsAI package an earlier build registered, once.
+#[cfg(windows)]
+fn cleanup_windows_ai(data: &std::path::Path) {
+    let note = data.join("winai-registered.txt");
+    if !note.exists() {
+        return;
+    }
+    let _ = std::fs::remove_file(&note);
+    std::thread::spawn(|| {
+        use std::os::windows::process::CommandExt;
+        let _ = std::process::Command::new("powershell.exe")
+            .args(["-NoProfile", "-NonInteractive", "-Command", "Get-AppxPackage -Name AniTrack.WindowsAI | Remove-AppxPackage"])
+            .creation_flags(0x0800_0000)
+            .status();
+    });
 }

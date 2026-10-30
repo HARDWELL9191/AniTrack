@@ -7,12 +7,13 @@ import {
   type AnimeCategory, categoryId, displayTitle, type EntryLite, formatLabel, LIST_STATUSES, type ListStatus, type Media, progressValue, scoreValue,
   seasonLabel, statusIcon, statusName, statusLabel, thumbURL, coverURL, visibleTags, isMovie,
 } from "../core/models";
-import { cachedExplanation, explainerStatus, explainPick } from "../core/explainer";
+import { cachedExplanation, explainPick } from "../core/explainer";
 import { entryWeight, scoreStats, TasteProfile } from "../core/recommender";
 import { SeasonRoots } from "../core/seasons";
 import * as X from "../core/xlsx";
 import { Chip, Cover, Empty, MatchBadge, MediaRow, Modal, SearchField, Spinner } from "./components";
 import { DetailPage } from "./detail";
+import { useWriterStatus, WriterControl } from "./writer";
 import { myScore } from "./fmt";
 import { Icon } from "./icons";
 import { InSheetContext, ui, useModel, useUI } from "./state";
@@ -252,35 +253,28 @@ function explain(media: Media, model: ReturnType<typeof useModel>): string {
   return sentences.join(" ") || "Rate a few shows on your list and this gets more specific.";
 }
 
-type Written = { kind: "checking" } | { kind: "writing" } | { kind: "done"; text: string } | { kind: "instant"; note?: string };
-
 function WhyThis({ media, onClose }: { media: Media; onClose: () => void }) {
   const model = useModel();
   const instant = useMemo(() => explain(media, model), [media, model]);
-  const cached = cachedExplanation(media.id);
-  const [written, setWritten] = useState<Written>(cached ? { kind: "done", text: cached } : { kind: "checking" });
+  const [writerStatus, refresh] = useWriterStatus();
+  const [text, setText] = useState<string | undefined>(() => cachedExplanation(media.id));
+  const [writing, setWriting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const ready = writerStatus?.state === "ready";
 
-  // Like the iPhone's sheet: opening it asks the on-device model right away.
+  // Like the iPhone's sheet: opening it asks the on-device model right away (when it's there).
   useEffect(() => {
-    if (cached) return;
+    if (!ready || text) return;
     let live = true;
-    void (async () => {
-      const status = await explainerStatus();
-      if (!live) return;
-      if (!status.available) return setWritten({ kind: "instant", note: status.detail });
-      setWritten({ kind: "writing" });
-      const r = reasons(media, model);
-      try {
-        const text = await explainPick(media, {
-          because: r.because, likedTitles: r.likedTitles, sharedHighlights: r.shared, language: model.settings.titleLanguage,
-        });
-        if (live) setWritten({ kind: "done", text });
-      } catch (e) {
-        if (live) setWritten({ kind: "instant", note: `Windows AI couldn't write this one (${(e as Error).message ?? String(e)}).` });
-      }
-    })();
+    setWriting(true);
+    setError(null);
+    const r = reasons(media, model);
+    explainPick(media, { because: r.because, likedTitles: r.likedTitles, sharedHighlights: r.shared, language: model.settings.titleLanguage })
+      .then((t) => { if (live) setText(t); })
+      .catch((e) => { if (live) setError(`The AI writer couldn't write this one (${(e as Error).message ?? String(e)}).`); })
+      .finally(() => { if (live) setWriting(false); });
     return () => { live = false; };
-  }, [media, model, cached]);
+  }, [ready, text, media, model]);
 
   return (
     <Modal title="Why you might like it" onClose={onClose} width={520}>
@@ -291,17 +285,20 @@ function WhyThis({ media, onClose }: { media: Media; onClose: () => void }) {
           <MatchBadge media={media} word />
         </div>
       </div>
-      {written.kind === "checking" || written.kind === "writing" ? (
-        <div className="why-text"><span className="spinner small" /><p className="muted">Thinking on-device…</p></div>
-      ) : written.kind === "done" ? (
+      {text ? (
         <>
-          <div className="why-text"><Icon name="sparkles" size={18} /><p>{written.text}</p></div>
-          <p className="footnote">Written on this PC by Windows' on-device language model.</p>
+          <div className="why-text"><Icon name="sparkles" size={18} /><p>{text}</p></div>
+          <p className="footnote">Written on this PC by {writerStatus?.model || "the AI writer"} on the Snapdragon NPU.</p>
         </>
+      ) : writing ? (
+        <div className="why-text"><span className="spinner small" /><p className="muted">Thinking on-device…</p></div>
       ) : (
         <>
           <div className="why-text"><Icon name="sparkles" size={18} /><p>{instant}</p></div>
-          <p className="footnote">Based on your list: fan recommendations, shared genres and tags, and the shows it's closest to.{written.note ? ` ${written.note}` : ""}</p>
+          <p className="footnote">Based on your list: fan recommendations, shared genres and tags, and the shows it's closest to.{error ? ` ${error}` : ""}</p>
+          {writerStatus && writerStatus.state !== "ready" && writerStatus.state !== "unsupported" && (
+            <WriterControl status={writerStatus} refresh={refresh} compact />
+          )}
         </>
       )}
     </Modal>

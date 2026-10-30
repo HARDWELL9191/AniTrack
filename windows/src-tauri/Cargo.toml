@@ -22,6 +22,12 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 base64 = "0.23"
 unicode-normalization = "0.1"
+# The AI writer: downloading Qualcomm's model package (the same reqwest/rustls the HTTP plugin
+# already uses), checking it, unpacking it, and loading Qualcomm's Genie runtime.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+sha2 = "0.11"
+zip = { version = "9", default-features = false, features = ["deflate"] }
+libloading = "0.9"
 # ONNX Runtime, loaded at run time from the app's folder (the build that includes Qualcomm's
 # QNN execution provider plugin for the Snapdragon NPU). API 31 = ONNX Runtime 1.31.
 ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "load-dynamic", "api-31"] }
@@ -30,7 +36,7 @@ ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "
 tauri-plugin-single-instance = { version = "2.5", features = ["deep-link"] }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Cryptography", "Win32_System_Power"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Cryptography", "Win32_System_Power", "Win32_System_LibraryLoader", "Win32_System_Registry"] }
 
 [profile.release]
 codegen-units = 1
