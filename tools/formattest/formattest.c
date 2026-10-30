@@ -99,7 +99,22 @@ static int test_file(const char *path) {
         errors_seen = 0;
         mpv_set_property_string(h, opt, idstr);
         drain(h, 1.2, NULL, &ended_error);
-        int ok = has_decoder(h, type) && errors_seen == 0 && !ended_error;
+        int ok;
+        if (strcmp(type, "sub") == 0) {
+            // Subtitles: jump to where the test line is shown and read the text mpv produced.
+            // (ASS goes straight to libass with no separate decoder, so the text is the real proof.)
+            const char *seek[] = {"seek", "2", "absolute+exact", NULL};
+            mpv_command(h, seek);
+            mpv_set_property_string(h, "pause", "yes");
+            drain(h, 1.0, NULL, &ended_error);
+            char *text = mpv_get_property_string(h, "sub-text");
+            ok = text && strstr(text, "JellyReco") && errors_seen == 0 && !ended_error;
+            if (!ok && !last_error[0]) snprintf(last_error, sizeof last_error, "no subtitle text (got \"%s\")", text ? text : "null");
+            if (text) mpv_free(text);
+            mpv_set_property_string(h, "pause", "no");
+        } else {
+            ok = has_decoder(h, type) && errors_seen == 0 && !ended_error;
+        }
         if (strcmp(type, "video") == 0) video++;
         else if (strcmp(type, "audio") == 0) audio++;
         else subs++;
