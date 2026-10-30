@@ -311,44 +311,64 @@ export class PlayerController {
     }
     if (token !== this.loadToken) return;
 
-    // Direct play only: the file as stored, decoded by mpv. Never transcoded or remuxed.
+    // Direct play first (the file as stored, decoded by mpv). Remuxing (direct stream) and then
+    // transcoding are fallbacks only, for when the server can't hand over the file as is, or when a
+    // lower quality is chosen on purpose.
+    const maxBitrate = this.state.maxBitrate || (this.isRemote() ? s.maxBitrateRemote : s.maxBitrateLocal);
     const info = await api.playbackInfo(item.Id, {
       StartTimeTicks: secondsToTicks(start),
       MediaSourceId: opts.mediaSourceId,
       AudioStreamIndex: opts.audioIndex,
       SubtitleStreamIndex: opts.subtitleIndex,
-      EnableDirectPlay: true,
-      EnableDirectStream: false,
-      EnableTranscoding: false,
-      AllowVideoStreamCopy: false,
-      AllowAudioStreamCopy: false,
+      MaxStreamingBitrate: maxBitrate || undefined,
+      EnableDirectPlay: !maxBitrate,
+      EnableDirectStream: !maxBitrate,
+      EnableTranscoding: true,
+      AllowVideoStreamCopy: true,
+      AllowAudioStreamCopy: true,
       AutoOpenLiveStream: true,
-      DeviceProfile: deviceProfile(),
+      DeviceProfile: deviceProfile(maxBitrate),
     });
     if (token !== this.loadToken) return;
-    if (info.ErrorCode) throw new Error(info.ErrorCode === "NotAllowed" ? "Your account isn't allowed to play this." : info.ErrorCode === "RateLimitExceeded" ? "The server's streaming limit was reached." : "The server won't direct play this file (JellyReco never transcodes).");
+    if (info.ErrorCode) throw new Error(info.ErrorCode === "NotAllowed" ? "Your account isn't allowed to play this." : info.ErrorCode === "RateLimitExceeded" ? "The server's streaming limit was reached." : "The server couldn't find a way to stream this.");
     const source = (opts.mediaSourceId && info.MediaSources.find((m) => m.Id === opts.mediaSourceId)) || info.MediaSources[0];
     if (!source) throw new Error("This item has no playable file.");
-    if (!source.SupportsDirectPlay) {
-      throw new Error("The server refused direct play for this file (JellyReco never transcodes). Check this user's playback permissions and bitrate limits in Dashboard → Users.");
+
+    let url: string;
+    let method: PlayMethod;
+    if (source.Protocol === "Http" && source.Path && source.IsRemote && !maxBitrate) {
+      method = "DirectPlay";
+      url = source.Path; // a remote URL (e.g. .strm) mpv opens itself
+    } else if (source.SupportsDirectPlay && !maxBitrate) {
+      method = "DirectPlay";
+      url = api.staticStreamUrl(item.Id, source.Id ?? item.Id, info.PlaySessionId, source.Container, isAudio);
+    } else if (source.SupportsDirectStream && !maxBitrate) {
+      method = "DirectStream";
+      url = api.staticStreamUrl(item.Id, source.Id ?? item.Id, info.PlaySessionId, source.Container, isAudio);
+    } else if (source.TranscodingUrl) {
+      method = "Transcode";
+      url = api.server + source.TranscodingUrl + (/[?&](ApiKey|api_key)=/.test(source.TranscodingUrl) ? "" : `&ApiKey=${encodeURIComponent(api.token ?? "")}`);
+    } else {
+      throw new Error("The server offered no way to play this file.");
     }
-    const method: PlayMethod = "DirectPlay";
-    // Remote sources (.strm / http) open directly; library files stream as stored.
-    let url = source.Protocol === "Http" && source.Path && source.IsRemote ? source.Path : api.staticStreamUrl(item.Id, source.Id ?? item.Id, info.PlaySessionId, source.Container, isAudio);
-    if (source.LiveStreamId && url.includes("/stream")) url += `&LiveStreamId=${encodeURIComponent(source.LiveStreamId)}`;
+    if (source.LiveStreamId && method !== "Transcode" && url.includes("/stream")) url += `&LiveStreamId=${encodeURIComponent(source.LiveStreamId)}`;
 
     const trickplay = pickTrickplay(item, source.Id ?? item.Id);
     this.pendingStart = { audio: opts.audioIndex ?? source.DefaultAudioStreamIndex ?? undefined, sub: opts.subtitleIndex ?? source.DefaultSubtitleStreamIndex ?? undefined };
     this.patch({
       item, mediaSource: source, playMethod: method, playSessionId: info.PlaySessionId ?? null, chapters: item.Chapters ?? [], isAudio,
-      trickplay: s.trickplay ? trickplay : null,
+      trickplay: s.trickplay ? trickplay : null, maxBitrate,
     });
 
-    await this.engine.set("start", start > 0 ? String(start) : "none");
+    // Transcoded streams already start at StartTimeTicks; files seek.
+    const startAt = method === "Transcode" ? 0 : start;
+    await this.engine.set("start", startAt > 0 ? String(startAt) : "none");
     const headers = source.RequiredHttpHeaders ? Object.entries(source.RequiredHttpHeaders).map(([k, v]) => `${k}: ${v}`) : [];
     await this.engine.set("http-header-fields", headers.join(","));
     await this.engine.set("force-media-title", mediaTitle(item));
     await this.engine.command(["loadfile", url, "replace"]);
+    this.transcodeOffset = method === "Transcode" ? start : 0;
+    if (method !== "DirectPlay") this.onError?.(method === "Transcode" ? "This file is being transcoded by the server (it couldn't be direct played)." : "This file is being remuxed by the server (it couldn't be direct played).");
 
     // Segments (intro/credits) and next episode, in the background.
     void api.segments(item.Id).then((r) => { if (token === this.loadToken) this.patch({ segments: r.Items ?? [] }); }).catch(() => {});
@@ -726,6 +746,14 @@ export class PlayerController {
     await this.load(st.index, { startSeconds: st.position, mediaSourceId });
   }
 
+  /** A deliberately lower quality (the server transcodes); 0 goes back to direct play. */
+  async setQuality(maxBitrate: number) {
+    const st = this.state;
+    this.state = { ...this.state, maxBitrate };
+    await this.reportStop();
+    await this.load(st.index, { startSeconds: st.position, mediaSourceId: st.mediaSource?.Id ?? undefined, audioIndex: this.currentAudioIndex() ?? undefined, subtitleIndex: this.currentSubIndex() ?? undefined });
+  }
+
   // MARK: Tracks
 
   private streams(type: MediaStream["Type"]): MediaStream[] {
@@ -947,18 +975,25 @@ export function pickTrickplay(item: Item, mediaSourceId: string): { info: Trickp
 }
 
 /** Everything direct plays (an empty container/codec list means "anything" in Jellyfin's
- * ContainerHelper); no transcoding profiles, and no bitrate cap (the default is 8 Mbps). */
-export function deviceProfile() {
-  const cap = 2_000_000_000;
+ * ContainerHelper) with no bitrate cap (Jellyfin's default is 8 Mbps). The transcoding profiles
+ * are only the fallback, or used when a lower quality is chosen. */
+export function deviceProfile(maxBitrate = 0) {
+  const cap = maxBitrate || 2_000_000_000;
   const subs = ["srt", "subrip", "ass", "ssa", "vtt", "webvtt", "ttml", "smi", "microdvd", "mpl2", "sub", "pgs", "pgssub", "sup", "dvdsub", "vobsub", "dvbsub", "dvb_subtitle", "xsub"];
   return {
-    Name: "JellyReco (mpv, direct play)",
+    Name: "JellyReco (mpv)",
     MaxStreamingBitrate: cap,
     MaxStaticBitrate: cap,
     MaxStaticMusicBitrate: cap,
     MusicStreamingTranscodingBitrate: 320_000,
     DirectPlayProfiles: [{ Type: "Video" }, { Type: "Audio" }, { Type: "Photo" }],
-    TranscodingProfiles: [],
+    TranscodingProfiles: [
+      {
+        Container: "ts", Type: "Video", Protocol: "hls", Context: "Streaming", VideoCodec: "hevc,h264", AudioCodec: "aac,ac3,eac3,mp3,opus,flac",
+        MaxAudioChannels: "8", BreakOnNonKeyFrames: true, MinSegments: 1, SegmentLength: 6, CopyTimestamps: false, EnableSubtitlesInManifest: false,
+      },
+      { Container: "mp3", Type: "Audio", Protocol: "http", Context: "Streaming", AudioCodec: "mp3", MaxAudioChannels: "2" },
+    ],
     ContainerProfiles: [],
     CodecProfiles: [],
     SubtitleProfiles: [...subs.map((f) => ({ Format: f, Method: "Embed" })), ...subs.map((f) => ({ Format: f, Method: "External" }))],
