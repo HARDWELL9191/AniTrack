@@ -225,7 +225,7 @@ final class ApplePlayerSession: NSObject, AVPlayerViewControllerDelegate {
         skipped = []
         segments = []
         startedPlaying = false
-        controller.contextualActions = []
+        controller.setSkip(nil)
         guard let url = streamURL(full, source: source, direct: direct) else {
             handOffToMPV(reason: "no stream address")
             return
@@ -365,8 +365,8 @@ final class ApplePlayerSession: NSObject, AVPlayerViewControllerDelegate {
             lastReport = Date()
             Task { await client.reportProgress(report()) }
         }
-        // Apple's own contextual buttons for Skip Intro / Credits and Next Episode.
-        var actions: [UIAction] = []
+        // Skip Intro / Credits and Next Episode buttons (glass, bottom right, like the TV app).
+        var wanted: (title: String, symbol: String, action: () -> Void)?
         let skippable = ["Intro", "Recap", "Outro", "Preview", "Commercial"]
         if let seg = segments.first(where: { skippable.contains($0.type) && now >= Fmt.seconds($0.startTicks)
             && now < Fmt.seconds($0.endTicks) - 1 }), !skipped.contains(seg.id) {
@@ -382,17 +382,15 @@ final class ApplePlayerSession: NSObject, AVPlayerViewControllerDelegate {
                 case "Commercial": title = "Skip Ad"
                 default: title = "Skip \(seg.type)"
                 }
-                actions.append(UIAction(title: title, image: UIImage(systemName: "forward.fill")) { [weak self] _ in self?.skip(seg) })
+                wanted = (title, "forward.fill", { [weak self] in self?.skip(seg) })
             }
         }
-        if actions.isEmpty, !queue.isEmpty, let duration = player.currentItem?.duration.seconds, duration.isFinite,
+        if wanted == nil, !queue.isEmpty, let duration = player.currentItem?.duration.seconds, duration.isFinite,
            duration - now < Double(max(model.settings.nextUpCountdown, 10)) + 5 {
-            actions.append(UIAction(title: "Next Episode", image: UIImage(systemName: "forward.end.fill")) { [weak self] _ in
-                Task { await self?.playNext() }
-            })
+            wanted = ("Next Episode", "forward.end.fill", { [weak self] in Task { await self?.playNext() } })
         }
-        if controller.contextualActions.map(\.title) != actions.map(\.title) {
-            controller.contextualActions = actions
+        if controller.skipTitle != wanted?.title {
+            controller.setSkip(wanted)
         }
     }
 
@@ -471,7 +469,7 @@ final class ApplePlayerSession: NSObject, AVPlayerViewControllerDelegate {
         rateObservation = nil
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
         endObserver = nil
-        controller.contextualActions = []
+        controller.setSkip(nil)
         let final = report()
         player.pause()
         if reportStop { await client.reportStopped(final) }
@@ -485,9 +483,58 @@ final class ApplePlayerSession: NSObject, AVPlayerViewControllerDelegate {
     nonisolated func playerViewControllerShouldAutomaticallyDismissAtPictureInPictureStart(_ playerViewController: AVPlayerViewController) -> Bool { false }
 }
 
-/// Apple's AVPlayerViewController, telling us when you close it (its X button or a swipe down).
+/// Apple's AVPlayerViewController, telling us when you close it (its X button or a swipe down),
+/// with a glass Skip / Next Episode button over the video.
 final class JellyRecoAVPlayerViewController: AVPlayerViewController {
     var onClose: (() -> Void)?
+    private let skipButton = UIButton(configuration: .glass())
+    private var skipAction: (() -> Void)?
+
+    private(set) var skipTitle: String?
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        skipButton.translatesAutoresizingMaskIntoConstraints = false
+        skipButton.isHidden = true
+        skipButton.alpha = 0
+        skipButton.addAction(UIAction { [weak self] _ in self?.skipAction?() }, for: .primaryActionTriggered)
+        view.addSubview(skipButton)
+        NSLayoutConstraint.activate([
+            skipButton.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -20),
+            skipButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -84),
+        ])
+    }
+
+    func setSkip(_ wanted: (title: String, symbol: String, action: () -> Void)?) {
+        loadViewIfNeeded()
+        skipAction = wanted?.action
+        skipTitle = wanted?.title
+        if let wanted {
+            var config = UIButton.Configuration.glass()
+            config.title = wanted.title
+            config.image = UIImage(systemName: wanted.symbol)
+            config.imagePlacement = .trailing
+            config.imagePadding = 8
+            config.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(textStyle: .subheadline, scale: .medium)
+            config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attrs in
+                var a = attrs
+                a.font = UIFont.preferredFont(forTextStyle: .headline)
+                return a
+            }
+            config.contentInsets = NSDirectionalEdgeInsets(top: 12, leading: 18, bottom: 12, trailing: 18)
+            skipButton.configuration = config
+            view.bringSubviewToFront(skipButton)
+            if skipButton.isHidden {
+                skipButton.isHidden = false
+                UIView.animate(withDuration: 0.25) { self.skipButton.alpha = 1 }
+            }
+        } else if !skipButton.isHidden {
+            UIView.animate(withDuration: 0.25, animations: { self.skipButton.alpha = 0 }) { _ in
+                if self.skipAction == nil { self.skipButton.isHidden = true }
+            }
+        }
+    }
+
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
         if isBeingDismissed || presentingViewController == nil {
