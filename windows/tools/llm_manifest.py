@@ -12,7 +12,7 @@ import sys
 import urllib.request
 
 MODEL = "Qwen3 4B Instruct"
-RELEASE = "v0.65.0"  # Qualcomm AI Hub release (QAIRT 2.50); AniTrack ships Genie 2.51
+RELEASE = "v0.65.0"  # Qualcomm AI Hub release (QAIRT 2.50); AniReco ships Genie 2.51
 BASE = "https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/qwen3_4b_instruct_2507/releases"
 VARIANTS = {
     "x_elite": "qualcomm_snapdragon_x_elite",

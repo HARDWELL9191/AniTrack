@@ -87,7 +87,7 @@ pub fn battery_saver_on() -> bool {
 mod tests {
     #[test]
     fn token_round_trip() {
-        let path = std::env::temp_dir().join(format!("anitrack-token-{}.bin", std::process::id()));
+        let path = std::env::temp_dir().join(format!("anireco-token-{}.bin", std::process::id()));
         super::store(&path, Some("abc.def")).unwrap();
         assert_eq!(super::load(&path).as_deref(), Some("abc.def"));
         super::store(&path, None).unwrap();

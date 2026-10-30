@@ -1,5 +1,5 @@
 // Entry point: connects the shared app logic to Windows (Tauri): HTTP without browser limits,
-// the on-device AI in the native side, the encrypted token, and the anitrack:// login link.
+// the on-device AI in the native side, the encrypted token, and the anireco:// login link.
 
 import { createRoot } from "react-dom/client";
 import { invoke, isTauri } from "@tauri-apps/api/core";
@@ -71,12 +71,12 @@ if (native) {
 }
 
 const model = new AppModel(tokens, () => !saver);
-(window as unknown as { anitrack: AppModel }).anitrack = model;
+(window as unknown as { anireco: AppModel }).anireco = model;
 
 // The login link: on first launch it's in the launch arguments, later a second launch hands it over.
 let lastLink = "";
 const handleLink = (url: string) => {
-  if (!url.startsWith("anitrack://") || url === lastLink) return;
+  if (!url.startsWith("anireco://") || url === lastLink) return;
   lastLink = url;
   void model.handleAuthCallback(url);
 };

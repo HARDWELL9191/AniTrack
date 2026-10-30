@@ -28,8 +28,14 @@ class MemoryStore implements Store {
 class IDBStore implements Store {
   private db: Promise<IDBDatabase>;
   constructor() {
+    // The cache from before the rename to AniReco: just a cache, so it's dropped rather than moved.
+    try {
+      indexedDB.deleteDatabase("anitrack");
+    } catch {
+      /* nothing to drop */
+    }
     this.db = new Promise((resolve, reject) => {
-      const req = indexedDB.open("anitrack", 1);
+      const req = indexedDB.open("anireco", 1);
       req.onupgradeneeded = () => req.result.createObjectStore("cache");
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);

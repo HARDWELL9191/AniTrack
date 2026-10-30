@@ -65,7 +65,7 @@ export function App() {
   return (
     <div className="shell">
       <nav className="sidebar">
-        <div className="brand"><img src={appIcon} alt="" /> AniTrack</div>
+        <div className="brand"><img src={appIcon} alt="" /> AniReco</div>
         {TABS.map((t) => (
           <button key={t.id} className={`nav-item ${model.selectedTab === t.id ? "on" : ""}`} onClick={() => select(t.id)}>
             <Icon name={t.icon} size={20} /> {t.label}

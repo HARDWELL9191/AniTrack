@@ -1,4 +1,4 @@
-//! `anitrack.exe --llm-helper <ai folder> <model folder>`: the background process that holds the
+//! `anireco.exe --llm-helper <ai folder> <model folder>`: the background process that holds the
 //! language model on the NPU. One JSON request per line on stdin, one reply per line on stdout:
 //!   {"cmd":"explain","system":"…","user":"…","maxTokens":120} -> {"ok":true,"text":"…"}
 //!   {"cmd":"status"}                                        -> {"ok":true,"genie":"1.x.y"}
@@ -61,7 +61,7 @@ pub fn main(args: &[String]) -> i32 {
 }
 
 /// Genie loads QnnHtp.dll / QnnSystem.dll by name and the NPU-side libraries through
-/// ADSP_LIBRARY_PATH; both live in AniTrack's AI folder.
+/// ADSP_LIBRARY_PATH; both live in AniReco's AI folder.
 fn prepare_libraries(lib_dir: &std::path::Path) {
     // SAFETY: called at the start of this single-purpose process, before any other thread exists.
     unsafe { std::env::set_var("ADSP_LIBRARY_PATH", lib_dir) };

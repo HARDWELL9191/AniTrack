@@ -137,7 +137,7 @@ impl Engine {
         let dylib = dir.join(if cfg!(windows) { "onnxruntime.dll" } else { "libonnxruntime.so" });
         let env = ort::init_from(&dylib)
             .map_err(|e| format!("ONNX Runtime not found ({e})"))?
-            .with_name("AniTrack")
+            .with_name("AniReco")
             .build()
             .map_err(|e| e.to_string())?;
         let model = dir.join("model.onnx");

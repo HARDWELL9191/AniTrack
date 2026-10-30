@@ -2,7 +2,7 @@
 //! so they can be compared with the reference Python pipeline.
 //! cargo run --example embed_check -- <resources dir> <data dir> <texts.json>
 
-use anitrack_lib::ai::{tokenizer::WordPiece, Engine, Paths, SEQ_LEN};
+use anireco_lib::ai::{tokenizer::WordPiece, Engine, Paths, SEQ_LEN};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();

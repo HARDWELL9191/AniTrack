@@ -1,4 +1,4 @@
-// Simple line icons (drawn for AniTrack), 24×24 grid, current color.
+// Simple line icons (drawn for AniReco), 24×24 grid, current color.
 
 import type { JSX } from "react";
 

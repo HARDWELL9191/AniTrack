@@ -14,7 +14,7 @@ $ModelRepo = "https://huggingface.co/BAAI/bge-small-en-v1.5/resolve/main"
 
 $root = Split-Path -Parent $PSScriptRoot
 $out = Join-Path $root "src-tauri/resources/ai"
-$work = Join-Path ([System.IO.Path]::GetTempPath()) "anitrack-ai"
+$work = Join-Path ([System.IO.Path]::GetTempPath()) "anireco-ai"
 New-Item -ItemType Directory -Force -Path $out, $work | Out-Null
 
 function Get-Wheel($name, $version, $folder, $files) {

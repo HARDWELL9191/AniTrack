@@ -156,7 +156,7 @@ export class AppModel {
 
   // MARK: Auth
 
-  /** anitrack://auth#access_token=...&token_type=Bearer&expires_in=... */
+  /** anireco://auth#access_token=...&token_type=Bearer&expires_in=... */
   async handleAuthCallback(url: string) {
     const raw = url.includes("#") ? url.split("#")[1] : url.split("?")[1] ?? "";
     const pair = raw.split("&").map((p) => p.split("=")).find(([k]) => k === "access_token");

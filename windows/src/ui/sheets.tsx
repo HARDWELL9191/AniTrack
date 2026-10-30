@@ -381,7 +381,7 @@ function ExportSheet({ onClose }: { onClose: () => void }) {
       const data = X.xlsx(CHOICES.filter((c) => selected.has(c.id)).map(sheet));
       const user = (model.viewer?.name ?? "").replace(/[^\p{L}\p{N}_-]/gu, "");
       const day = new Date().toISOString().slice(0, 10);
-      const path = await saveDialog({ defaultPath: `AniTrack${user ? " " + user : ""} lists ${day}.xlsx`, filters: [{ name: "Excel workbook", extensions: ["xlsx"] }] });
+      const path = await saveDialog({ defaultPath: `AniReco${user ? " " + user : ""} lists ${day}.xlsx`, filters: [{ name: "Excel workbook", extensions: ["xlsx"] }] });
       if (!path) return;
       let binary = "";
       for (let i = 0; i < data.length; i += 0x8000) binary += String.fromCharCode(...data.subarray(i, i + 0x8000));

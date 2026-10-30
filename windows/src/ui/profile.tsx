@@ -61,7 +61,7 @@ export function ProfilePage() {
         </div>
         {confirmLogout ? (
           <div className="confirm">
-            <span>Log out of AniTrack?</span>
+            <span>Log out of AniReco?</span>
             <button className="glass-button danger" onClick={() => void model.logOut()}>Log out</button>
             <button className="glass-button" onClick={() => setConfirmLogout(false)}>Cancel</button>
           </div>
@@ -133,7 +133,7 @@ export function ProfilePage() {
       <section className="group panel">
         <div className="group-title">About</div>
         <div className="toggle-row"><span>Version</span><span className="muted">1.0.0 (Windows on ARM)</span></div>
-        <p className="footnote">AniTrack is an unofficial client and isn't affiliated with AniList.co.</p>
+        <p className="footnote">AniReco is an unofficial client and isn't affiliated with AniList.co.</p>
       </section>
     </div>
   );

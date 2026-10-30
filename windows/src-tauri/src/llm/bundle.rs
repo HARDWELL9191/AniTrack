@@ -157,7 +157,7 @@ mod tests {
 
     #[test]
     fn unpacks_patches_and_validates() {
-        let dir = std::env::temp_dir().join(format!("anitrack-bundle-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("anireco-bundle-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let zip_path = dir.join("model.zip");

@@ -6,9 +6,9 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     let (zip, dest) = (std::path::Path::new(&args[1]), std::path::Path::new(&args[2]));
     let result = (|| {
-        let root = anitrack_lib::llm::extract(zip, dest)?;
-        anitrack_lib::llm::patch_config(&root)?;
-        let summary = anitrack_lib::llm::validate(&root)?;
+        let root = anireco_lib::llm::extract(zip, dest)?;
+        anireco_lib::llm::patch_config(&root)?;
+        let summary = anireco_lib::llm::validate(&root)?;
         let config: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(root.join("genie_config.json")).map_err(|e| e.to_string())?)
             .map_err(|e| e.to_string())?;
         let files: Vec<String> = std::fs::read_dir(&root)

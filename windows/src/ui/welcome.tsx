@@ -1,5 +1,5 @@
 // Welcome / login (port of WelcomeView in RootView.swift). AniList's implicit login opens in your
-// browser and comes back through the anitrack:// link, the same redirect the iPhone app uses.
+// browser and comes back through the anireco:// link (the redirect URL set in your AniList client).
 
 import { useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -7,7 +7,7 @@ import logo from "../assets/logo.png";
 import { Icon } from "./icons";
 import { useModel } from "./state";
 
-export const REDIRECT_URL = "anitrack://auth";
+export const REDIRECT_URL = "anireco://auth";
 
 export function authorizeURL(clientId: string): string | null {
   const id = clientId.trim();
@@ -39,19 +39,19 @@ export function WelcomePage() {
     <div className="welcome">
       <div className="welcome-card panel">
         <img className="welcome-logo" src={logo} alt="" />
-        <h1>AniTrack</h1>
+        <h1>AniReco</h1>
         <p className="muted">Track, discover and get personal picks from your AniList.</p>
 
         <label className="field">
           <span>AniList Client ID</span>
           <input value={clientId} inputMode="numeric" onChange={(e) => setClientId(e.target.value.replace(/\D/g, ""))} placeholder="e.g. 12345" />
         </label>
-        <p className="footnote">Create one once at anilist.co/settings/developer with the redirect URL <strong>{REDIRECT_URL}</strong> (the same client as the iPhone app works).</p>
+        <p className="footnote">Create one once at anilist.co/settings/developer with the redirect URL <strong>{REDIRECT_URL}</strong>.</p>
 
         <button className="glass-button prominent big wide" disabled={!url || working} onClick={logIn}>
           <Icon name="key" size={18} /> Log in with AniList
         </button>
-        {waiting && <p className="footnote center-text">Finish logging in in your browser; AniTrack opens again by itself.</p>}
+        {waiting && <p className="footnote center-text">Finish logging in in your browser; AniReco opens again by itself.</p>}
         <button className="glass-button big wide" onClick={() => setShowUsername(!showUsername)}>
           <Icon name="eye" size={18} /> Just browse with my username
         </button>

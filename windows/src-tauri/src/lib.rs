@@ -1,6 +1,6 @@
-//! AniTrack for Windows: the native side. The app itself (screens, AniList, picks) is the web
+//! AniReco for Windows: the native side. The app itself (screens, AniList, picks) is the web
 //! front end; this part runs the on-device AI, keeps the AniList token safe, and handles the
-//! anitrack:// login link.
+//! anireco:// login link.
 
 pub mod ai;
 pub mod llm;
@@ -115,15 +115,36 @@ fn write_file(path: String, base64: String) -> Result<(), String> {
     std::fs::write(&path, bytes).map_err(|e| e.to_string())
 }
 
+/// The app's identifier before it was renamed from AniTrack to AniReco.
+const OLD_IDENTIFIER: &str = "com.tim.anitrack";
+
+/// First start after the rename: moves AniTrack's data folders to AniReco's, so the login,
+/// settings, cached lists and the downloaded AI writer carry over. `%APPDATA%\<identifier>` holds
+/// the token and the AI files, `%LOCALAPPDATA%\<identifier>` the window's browser data (settings
+/// and cache), which is why this runs before the window opens. Same folders Tauri resolves.
+/// Returns true if anything was moved.
+fn move_old_data(identifier: &str) -> bool {
+    let mut moved = false;
+    for base in [dirs::data_dir(), dirs::data_local_dir()].into_iter().flatten() {
+        let (old, new) = (base.join(OLD_IDENTIFIER), base.join(identifier));
+        if old.is_dir() && !new.exists() && std::fs::rename(&old, &new).is_ok() {
+            moved = true;
+        }
+    }
+    moved
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let context = tauri::generate_context!();
+    let moved = move_old_data(&context.config().identifier);
     let mut builder = tauri::Builder::default();
 
-    // A second launch (e.g. the anitrack:// login link) hands its link to the running window.
+    // A second launch (e.g. the anireco:// login link) hands its link to the running window.
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
     {
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
-            if let Some(url) = argv.iter().find(|a| a.starts_with("anitrack://")) {
+            if let Some(url) = argv.iter().find(|a| a.starts_with("anireco://")) {
                 let _ = app.emit("auth-link", url.clone());
             }
             if let Some(window) = app.get_webview_window("main") {
@@ -138,13 +159,17 @@ pub fn run() {
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .setup(|app| {
-            // Registers anitrack:// for this user (also done by the installer), so AniList's
+        .setup(move |app| {
+            // Registers anireco:// for this user (also done by the installer), so AniList's
             // login can come back to the app.
             #[cfg(windows)]
             {
                 use tauri_plugin_deep_link::DeepLinkExt;
-                let _ = app.deep_link().register("anitrack");
+                let _ = app.deep_link().register("anireco");
+                // The old app's anitrack:// link pointed at the AniTrack exe, which is gone now.
+                if moved {
+                    let _ = app.deep_link().unregister("anitrack");
+                }
             }
             let root = app.path().resource_dir().unwrap_or_default();
             let data = app.path().app_data_dir().unwrap_or_default();
@@ -158,11 +183,11 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![ai_status, ai_cached, ai_vectors, llm_status, llm_download, llm_cancel, llm_remove, llm_explain, token_get, token_set, power_saver, write_file])
-        .run(tauri::generate_context!())
-        .expect("error while running AniTrack");
+        .run(context)
+        .expect("error while running AniReco");
 }
 
-/// Removes the AniTrack.WindowsAI package an earlier build registered, once.
+/// Removes the AniTrack.WindowsAI package an earlier build (still named AniTrack) registered, once.
 #[cfg(windows)]
 fn cleanup_windows_ai(data: &std::path::Path) {
     let note = data.join("winai-registered.txt");

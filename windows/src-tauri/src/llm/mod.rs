@@ -4,7 +4,7 @@
 //! Model: Qwen3-4B-Instruct-2507 (Apache-2.0), as Qualcomm's ready-made Genie package for the
 //! Snapdragon X Elite / X Plus (Hexagon v73) or X2 Elite, 4-bit weights. It's downloaded from
 //! Qualcomm the first time you ask for it (about 2.5 GB), checked against the size and SHA-256
-//! the build recorded, unpacked into AniTrack's data folder, and run by Qualcomm's Genie runtime
+//! the build recorded, unpacked into AniReco's data folder, and run by Qualcomm's Genie runtime
 //! in a background process (see `process.rs`) that only lives while it's being used.
 
 mod bundle;
@@ -73,7 +73,7 @@ pub struct Llm {
 
 impl Llm {
     /// `lib_dir`: the AI folder (Genie.dll, the QNN libraries, llm-models.json);
-    /// `data`: AniTrack's data folder.
+    /// `data`: AniReco's data folder.
     pub fn new(lib_dir: PathBuf, data: PathBuf) -> Self {
         let manifest = std::fs::read_to_string(lib_dir.join("llm-models.json")).ok().and_then(|t| serde_json::from_str(&t).ok());
         Self {
@@ -294,7 +294,7 @@ fn processor_name() -> Option<String> {
 
 #[cfg(not(windows))]
 fn processor_name() -> Option<String> {
-    std::env::var("ANITRACK_TEST_CPU").ok()
+    std::env::var("ANIRECO_TEST_CPU").ok()
 }
 
 #[cfg(test)]

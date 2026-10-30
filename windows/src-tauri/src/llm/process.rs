@@ -1,4 +1,4 @@
-//! The writer's background process: AniTrack's own exe started with `--llm-helper`, talking one
+//! The writer's background process: AniReco's own exe started with `--llm-helper`, talking one
 //! JSON object per line over stdin/stdout. It's started on the first request and closed after a
 //! quiet minute, so the language model (about 2.5 GB in the NPU's memory) is only loaded while
 //! explanations are being written. A crash in it can't take the app down.
@@ -127,7 +127,7 @@ mod tests {
 
     #[test]
     fn talks_restarts_and_closes() {
-        let dir = std::env::temp_dir().join(format!("anitrack-proc-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("anireco-proc-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let exe = dir.join("helper.sh");
         std::fs::write(

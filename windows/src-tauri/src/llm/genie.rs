@@ -1,5 +1,5 @@
 //! Qualcomm Genie (the Snapdragon NPU's language model runtime, Genie.dll from the QAIRT
-//! libraries AniTrack ships), loaded at run time from the app's AI folder. Function signatures
+//! libraries AniReco ships), loaded at run time from the app's AI folder. Function signatures
 //! follow GenieDialog.h / GenieCommon.h (QAIRT 2.4x-2.5x).
 
 use std::ffi::{c_char, c_void, CStr, CString};

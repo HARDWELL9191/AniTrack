@@ -127,7 +127,7 @@ mod tests {
 
     #[test]
     fn round_trip_and_compaction() {
-        let dir = std::env::temp_dir().join(format!("anitrack-store-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("anireco-store-{}", std::process::id()));
         let path = dir.join("v.bin");
         let _ = fs::remove_dir_all(&dir);
         let mut s = VectorStore::open(path.clone());
