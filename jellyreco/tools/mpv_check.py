@@ -44,19 +44,21 @@ for r in report["files"]:
     audio = [t for t in tracks if t.get("type") == "audio"]
     subs = [t for t in tracks if t.get("type") == "sub"]
     video = [t for t in tracks if t.get("type") == "video"]
-    status = "ok"
+    # Every check is reported, not just the first one that fails.
+    fails = []
     if not r["ok"]:
-        status = f"FAILED: {r['error']}"
-    elif not video:
-        status = "FAILED: no video track"
-    elif len(audio) != m["audio"]:
-        status = f"FAILED: {len(audio)} audio tracks, expected {m['audio']}"
-    elif len(subs) != m["subs"]:
-        status = f"FAILED: {len(subs)} subtitle tracks, expected {m['subs']}"
-    elif not r.get("propertyEvents") or r.get("observedTracks") != len(tracks):
-        status = f"FAILED: property events {r.get('propertyEvents')}, observed tracks {r.get('observedTracks')} of {len(tracks)}"
-    elif float(r.get("lastTimePos") or 0) < 3.0:
-        status = f"FAILED: playback stopped at {r.get('lastTimePos')}s"
+        fails.append(str(r["error"]))
+    if not video:
+        fails.append("no video track")
+    if len(audio) != m["audio"]:
+        fails.append(f"{len(audio)} audio tracks, expected {m['audio']}")
+    if len(subs) != m["subs"]:
+        fails.append(f"{len(subs)} subtitle tracks, expected {m['subs']}")
+    if not r.get("propertyEvents") or r.get("observedTracks") != len(tracks):
+        fails.append(f"property events {r.get('propertyEvents')}, observed tracks {r.get('observedTracks')} of {len(tracks)}")
+    if float(r.get("lastTimePos") or 0) < 3.0:
+        fails.append(f"playback stopped at {r.get('lastTimePos')}s")
+    status = "ok" if not fails else "FAILED: " + "; ".join(fails)
     if status != "ok":
         problems.append(f"{m['name']}: {status}")
     vcodec = (video[0].get("codec") if video else "?")
@@ -65,7 +67,7 @@ for r in report["files"]:
     lines.append(f"{m['name']:<24} {status:<10} video {vcodec}; audio {acodecs}; subs {scodecs}")
 
 summary = [
-    f"libmpv {report.get('mpv_version')} · FFmpeg {report.get('ffmpeg_version')} · client API {report.get('client_api')}",
+    f"libmpv {report.get('mpv_version')} | FFmpeg {report.get('ffmpeg_version')} | client API {report.get('client_api')}",
     f"{len(decoders)} decoders, {len(demuxers)} demuxers; hwdec interop: {report.get('hwdec_interop')}",
     *lines,
     *[f"skipped (encoder not in this FFmpeg): {s['file']} {s.get('missing') or s.get('error', '')}" for s in manifest["skipped"]],

@@ -79,11 +79,15 @@ fn play(api: &Api, path: &str) -> serde_json::Value {
                 let value = if p.format == ffi::FORMAT_STRING && !p.data.is_null() { unsafe { cstr(*(p.data as *const *const c_char)) } } else { None };
                 property_events += 1;
                 if name == "time-pos" {
-                    if let Some(v) = &value { last_time = v.clone(); }
+                    // The furthest position reached (time-pos becomes unavailable as the file unloads).
+                    if let Some(v) = &value {
+                        if v.parse::<f64>().unwrap_or(0.0) >= last_time.parse::<f64>().unwrap_or(0.0) { last_time = v.clone(); }
+                    }
                 }
                 if name == "track-list" {
                     if let Some(v) = &value {
-                        observed_tracks = serde_json::from_str::<Vec<serde_json::Value>>(v).map(|t| t.len()).unwrap_or(0);
+                        // The most tracks seen while playing (newer mpv empties the list as the file unloads, before END_FILE).
+                        observed_tracks = observed_tracks.max(serde_json::from_str::<Vec<serde_json::Value>>(v).map(|t| t.len()).unwrap_or(0));
                     }
                 }
             }
