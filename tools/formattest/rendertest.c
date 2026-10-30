@@ -53,10 +53,19 @@ int main(int argc, char **argv) {
         mpv_command(h, cmd);
         if (!wait_for(h, MPV_EVENT_FILE_LOADED, 20)) { printf("FAIL %s: not loaded\n", file); failures++; goto done; }
         mpv_set_property_string(h, "sid", "1");
+        // Play from the start like a viewer would (a TS seek can skip a subtitle's only packet),
+        // then pause inside the subtitle's display time.
+        for (int n = 0; n < 200; n++) {
+            mpv_wait_event(h, 0.05);
+            mpv_render_context_update(ctx);
+            double pos = 0;
+            if (mpv_get_property(h, "time-pos", MPV_FORMAT_DOUBLE, &pos) >= 0 && pos >= 1.5) break;
+            int size0[2] = {64, 36}; size_t stride0 = 64 * 4; unsigned char tmp[64 * 36 * 4];
+            mpv_render_param rp0[] = {{MPV_RENDER_PARAM_SW_SIZE, size0}, {MPV_RENDER_PARAM_SW_FORMAT, "rgb0"},
+                                      {MPV_RENDER_PARAM_SW_STRIDE, &stride0}, {MPV_RENDER_PARAM_SW_POINTER, tmp}, {0}};
+            mpv_render_context_render(ctx, rp0);   // keep frames flowing
+        }
         mpv_set_property_string(h, "pause", "yes");
-        const char *seek[] = {"seek", "2", "absolute+exact", NULL};
-        mpv_command(h, seek);
-        wait_for(h, MPV_EVENT_PLAYBACK_RESTART, 20);
 
         int size[2] = {1280, 720};
         size_t stride = 1280 * 4;

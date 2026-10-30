@@ -185,8 +185,8 @@ jobs:
             [ -f "$f" ] && ln -sf "$f" fonts/
           done
           ls -la fonts | tee rendertest.log
-          ./rendertest samples/render/* 2>&1 | grep -v "^$" | tee -a rendertest.log || true
-          ./rendertest --fonts "$PWD/fonts" "Helvetica" samples/render/* 2>&1 | tee -a rendertest.log
+          ./rendertest samples/render/*.mkv samples/render/*.ts 2>&1 | grep -v "^$" | tee -a rendertest.log || true
+          ./rendertest --fonts "$PWD/fonts" "Helvetica" samples/render/*.mkv samples/render/*.ts 2>&1 | tee -a rendertest.log
 
       - name: Publish format test log to the ci-logs branch
         if: always()

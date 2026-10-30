@@ -295,7 +295,9 @@ final class PlaybackController {
         let expectsSubs = streams.contains(where: \.isSubtitle)
         let subsReady = !expectsSubs || !player.subtitleTracks.isEmpty
         let waitedEnough = playingSince.map { Date().timeIntervalSince($0) > 3 } ?? false
-        if !didApplyTracks, !player.audioTracks.isEmpty, subsReady || waitedEnough {
+        // After a renderer switch, wait for the exact subtitle track (external ones load a moment later).
+        let restoreReady = restoreTracks?.subtitle.map { id in player.subtitleTracks.contains { $0.mpvID == id } } ?? true
+        if !didApplyTracks, !player.audioTracks.isEmpty, (subsReady && restoreReady) || waitedEnough {
             didApplyTracks = true
             applyInitialTracks()
         }
@@ -356,8 +358,13 @@ final class PlaybackController {
     func switchRenderer(toMetal: Bool) async {
         guard toMetal == usesNativeOutput else { return }
         let at = currentSeconds
+        // Same file, same track numbers: restore exactly the tracks that were playing (mpv ids),
+        // never through Jellyfin's numbering, which could turn the subtitle off.
+        restoreTracks = RestoreTracks(audio: player.audioTracks.first(where: \.isSelected)?.mpvID,
+                                      subtitle: player.selectedSubtitle()?.mpvID,
+                                      secondary: player.selectedSubtitle(for: .secondary)?.mpvID)
         request.audioIndex = player.audioTracks.first(where: \.isSelected).flatMap { stream(for: $0)?.index }
-        request.subtitleIndex = player.selectedSubtitle().flatMap { stream(for: $0)?.index } ?? -1
+        request.subtitleIndex = player.selectedSubtitle().flatMap { stream(for: $0)?.index } ?? request.subtitleIndex
         triedMetal = toMetal
         rebuildPlayer(output: toMetal ? .metal : .sampleBuffer)
         await open(item, start: at, fallback: method == .transcode)
@@ -454,7 +461,26 @@ final class PlaybackController {
     /// Like Jellyfin and Swiftfin: the tracks chosen on the item page win; otherwise the server's
     /// defaults, which follow your Jellyfin settings (preferred languages, subtitle mode,
     /// "play default audio track", remembered selections). -1 = subtitles off.
+    private struct RestoreTracks { let audio: Int?; let subtitle: Int?; let secondary: Int? }
+    @ObservationIgnored private var restoreTracks: RestoreTracks?
+
     private func applyInitialTracks() {
+        if let restore = restoreTracks {
+            restoreTracks = nil
+            if let a = restore.audio, let t = player.audioTracks.first(where: { $0.mpvID == a }), !t.isSelected {
+                player.selectTrack(t.id)
+            }
+            if let sid = restore.subtitle, let t = player.subtitleTracks.first(where: { $0.mpvID == sid }) {
+                subtitleCheckDone.insert(sid)        // already on the renderer that draws it
+                player.selectSubtitle(t.id)
+            } else {
+                player.disableTrack(.subtitle)
+            }
+            if let sec = restore.secondary, let t = player.subtitleTracks.first(where: { $0.mpvID == sec }) {
+                player.selectSubtitle(t.id, for: .secondary)
+            }
+            return
+        }
         let audioIndex = request.audioIndex ?? source?.defaultAudioStreamIndex
         if let idx = audioIndex, let t = track(forJellyfinIndex: idx, type: .audio), !t.isSelected {
             player.selectTrack(t.id)
