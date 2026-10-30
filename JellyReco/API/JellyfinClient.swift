@@ -109,10 +109,12 @@ final class JellyfinClient: @unchecked Sendable {
                 items.append(URLQueryItem(name: key, value: "\(value)"))
             }
         }
-        if !items.isEmpty { comps?.queryItems = items }
+        guard var built = comps else { return nil }
+        if !items.isEmpty { built.queryItems = items }
         // "+" in values (e.g. search) must be encoded or servers read it as a space.
-        comps?.percentEncodedQuery = comps?.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
-        return comps?.url
+        let encoded = built.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
+        built.percentEncodedQuery = encoded
+        return built.url
     }
 
     // MARK: Requests

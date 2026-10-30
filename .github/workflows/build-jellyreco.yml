@@ -121,7 +121,9 @@ jobs:
           echo "Framework: $FW"
           BIN="$FW/Libmpv"; [ -f "$FW/Versions/A/Libmpv" ] && BIN="$FW/Versions/A/Libmpv"
           HDR="$FW/Headers"; [ -d "$HDR" ] || HDR="$FW/Versions/A/Headers"
-          clang -O2 -arch arm64 -I"$HDR" tools/formattest/formattest.c "$BIN" \
+          # The framework keeps client.h at the top of Headers; the C API expects <mpv/client.h>.
+          mkdir -p inc/mpv && cp "$HDR"/*.h inc/mpv/
+          clang -O2 -arch arm64 -Iinc tools/formattest/formattest.c "$BIN" \
             -framework AVFoundation -framework AVKit -framework AudioToolbox -framework CoreAudio \
             -framework CoreFoundation -framework CoreGraphics -framework CoreImage -framework CoreMedia \
             -framework CoreText -framework CoreVideo -framework Foundation -framework IOSurface \
