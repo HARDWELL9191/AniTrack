@@ -1,4 +1,4 @@
-# AniTrack
+# AniReco
 
 A personal AniList client for iPhone (iOS 26+, built against the iOS 27 SDK).
 
@@ -28,7 +28,7 @@ Battery: embeddings are cached on disk (each show is processed once), picks are 
 ### 1. Register an AniList API client
 
 1. Go to <https://anilist.co/settings/developer> and click **Create New Client**.
-2. Name: `AniTrack`. Redirect URL: **`anitrack://auth`**
+2. Name: `AniReco`. Redirect URL: **`anireco://auth`**
 3. Save, then copy the **Client ID** (a number). You'll enter it in the app.
 
 ### 2. Build the IPA on GitHub (no Mac needed)
@@ -37,7 +37,7 @@ Battery: embeddings are cached on disk (each show is processed once), picks are 
 2. Upload **everything in this folder**, including the hidden `.github` folder.
    Easiest: on the empty repo page choose *uploading an existing file* and drag the whole folder in, or use `git push`.
 3. Open the **Actions** tab. The **Build IPA** workflow runs on every push to `main` (or click *Run workflow*).
-4. When it's green (about 5–10 min), open the run and download **AniTrack-ipa**. It's a zip containing `AniTrack.ipa`.
+4. When it's green (about 5–10 min), open the run and download **AniReco-ipa**. It's a zip containing `AniReco.ipa`.
 
 If the build fails, download **build-log** from the failed run and send it to Claude to fix.
 
@@ -49,12 +49,12 @@ First, on the iPhone: **Settings → Privacy & Security → Developer Mode → O
 
 **Option A – from your PC: [Sideloadly](https://sideloadly.io)**
 1. Install Sideloadly (and iTunes / Apple Devices on Windows), connect the iPhone by cable.
-2. Drag in `AniTrack.ipa`, enter your Apple ID, click **Start**.
+2. Drag in `AniReco.ipa`, enter your Apple ID, click **Start**.
 3. On the iPhone: **Settings → General → VPN & Device Management → trust your developer certificate**.
 4. Turn on Sideloadly's auto-refresh, or re-run it within 7 days.
 
 **Option B – on the iPhone only: SideStore**
-Install SideStore (the official SideStore guides, or SideInstaller for an on-device setup on iOS 27), then open `AniTrack.ipa` in SideStore. SideStore refreshes the app over Wi-Fi.
+Install SideStore (the official SideStore guides, or SideInstaller for an on-device setup on iOS 27), then open `AniReco.ipa` in SideStore. SideStore refreshes the app over Wi-Fi.
 
 Only download these tools from their official sites; you're typing your Apple ID into them.
 

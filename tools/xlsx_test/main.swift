@@ -1,4 +1,4 @@
-// CI check for AniTrack/Services/XLSXWriter.swift: builds a sample workbook with tricky
+// CI check for AniReco/Services/XLSXWriter.swift: builds a sample workbook with tricky
 // content; tools/xlsx_test/verify.py then opens it with openpyxl and checks every cell.
 import Foundation
 

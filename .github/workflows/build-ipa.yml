@@ -26,7 +26,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p build-test
-          xcrun swiftc AniTrack/Services/XLSXWriter.swift tools/xlsx_test/main.swift -o build-test/xlsx_test
+          xcrun swiftc AniReco/Services/XLSXWriter.swift tools/xlsx_test/main.swift -o build-test/xlsx_test
           build-test/xlsx_test build-test/sample.xlsx
           python3 -m venv build-test/venv
           build-test/venv/bin/pip install --quiet openpyxl
@@ -46,7 +46,7 @@ jobs:
           for f in custom-icon.png custom-icon.jpg custom-icon.jpeg; do
             if [ -f "$f" ]; then
               echo "Using $f as the app icon"
-              sips -s format png -z 1024 1024 "$f" --out AniTrack/Assets.xcassets/AppIcon.appiconset/AppIcon.png
+              sips -s format png -z 1024 1024 "$f" --out AniReco/Assets.xcassets/AppIcon.appiconset/AppIcon.png
               break
             fi
           done
@@ -61,8 +61,8 @@ jobs:
         run: |
           set -o pipefail
           xcodebuild \
-            -project AniTrack.xcodeproj \
-            -scheme AniTrack \
+            -project AniReco.xcodeproj \
+            -scheme AniReco \
             -configuration Release \
             -sdk iphoneos \
             -destination 'generic/platform=iOS' \
@@ -74,18 +74,18 @@ jobs:
 
       - name: Package IPA
         run: |
-          APP=build/Build/Products/Release-iphoneos/AniTrack.app
+          APP=build/Build/Products/Release-iphoneos/AniReco.app
           test -d "$APP"
           mkdir -p Payload
           cp -R "$APP" Payload/
-          zip -qry AniTrack.ipa Payload
-          ls -lh AniTrack.ipa
+          zip -qry AniReco.ipa Payload
+          ls -lh AniReco.ipa
 
       - name: Upload IPA
         uses: actions/upload-artifact@v7
         with:
-          name: AniTrack-ipa
-          path: AniTrack.ipa
+          name: AniReco-ipa
+          path: AniReco.ipa
           if-no-files-found: error
 
       - name: Upload build log on failure

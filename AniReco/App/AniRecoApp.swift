@@ -1,7 +1,7 @@
 import SwiftUI
 
 @main
-struct AniTrackApp: App {
+struct AniRecoApp: App {
     @State private var model = AppModel()
     @Environment(\.scenePhase) private var scenePhase
 

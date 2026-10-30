@@ -87,7 +87,7 @@ struct WelcomeView: View {
                         .frame(width: 104, height: 104)
                         .padding(14)
                         .glassEffect(.regular.tint(Theme.accent.opacity(0.25)), in: .circle)
-                    Text("AniTrack").font(.largeTitle.bold())
+                    Text("AniReco").font(.largeTitle.bold())
                     Text("Track, discover and get personal picks from your AniList.")
                         .multilineTextAlignment(.center)
                         .foregroundStyle(.secondary)

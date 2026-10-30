@@ -1,4 +1,4 @@
-name: AniTrack
+name: AniReco
 options:
   bundleIdPrefix: com.tim
   deploymentTarget:
@@ -13,15 +13,15 @@ settings:
     IPHONEOS_DEPLOYMENT_TARGET: "26.0"
 
 targets:
-  AniTrack:
+  AniReco:
     type: application
     platform: iOS
     sources:
-      - path: AniTrack
+      - path: AniReco
     info:
-      path: AniTrack/Info.plist
+      path: AniReco/Info.plist
       properties:
-        CFBundleDisplayName: AniTrack
+        CFBundleDisplayName: AniReco
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSRequiresIPhoneOS: true
@@ -36,20 +36,20 @@ targets:
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
         CFBundleURLTypes:
-          - CFBundleURLName: com.tim.anitrack.auth
+          - CFBundleURLName: com.tim.anireco.auth
             CFBundleURLSchemes:
-              - anitrack
+              - anireco
         ITSAppUsesNonExemptEncryption: false
         UIBackgroundModes:
           - fetch
           - processing
         BGTaskSchedulerPermittedIdentifiers:
-          - com.tim.anitrack.prefetch
-          - com.tim.anitrack.seasons
+          - com.tim.anireco.prefetch
+          - com.tim.anireco.seasons
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.tim.anitrack
-        PRODUCT_NAME: AniTrack
+        PRODUCT_BUNDLE_IDENTIFIER: com.tim.anireco
+        PRODUCT_NAME: AniReco
         TARGETED_DEVICE_FAMILY: "1"
         GENERATE_INFOPLIST_FILE: NO
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

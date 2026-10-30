@@ -15,8 +15,8 @@ import Foundation
 /// Kept deliberately light: at most `maxNewPerRun` new shows per charge, in small chunks at
 /// background priority, stopping immediately if iOS asks, the phone gets hot, or power is unplugged.
 enum BackgroundPrefetch {
-    static let identifier = "com.tim.anitrack.prefetch"
-    static let seasonsIdentifier = "com.tim.anitrack.seasons"
+    static let identifier = "com.tim.anireco.prefetch"
+    static let seasonsIdentifier = "com.tim.anireco.seasons"
     private static let maxNewPerRun = 250
     private static let chunkSize = 25
     /// Season lookups at most this often (both jobs share it, so they never repeat each other).

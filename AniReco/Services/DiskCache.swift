@@ -7,7 +7,7 @@ enum DiskCache {
     }
 
     /// Serial background queue so big writes (a 1,000-show list is several MB) never block scrolling.
-    private static let queue = DispatchQueue(label: "AniTrack.DiskCache", qos: .utility)
+    private static let queue = DispatchQueue(label: "AniReco.DiskCache", qos: .utility)
 
     static func save<T: Encodable>(_ value: T, name: String) {
         let url = directory.appendingPathComponent("\(name).json")

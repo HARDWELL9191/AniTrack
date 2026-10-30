@@ -3,7 +3,7 @@ import Security
 
 /// Tiny Keychain wrapper for the AniList access token.
 enum Keychain {
-    private static let service = "AniTrack"
+    private static let service = "AniReco"
 
     private static func baseQuery(_ key: String) -> [String: Any] {
         [kSecClass as String: kSecClassGenericPassword,
@@ -33,8 +33,8 @@ enum Keychain {
 
 enum AniListAuth {
     /// Must match the redirect URL registered at https://anilist.co/settings/developer
-    static let callbackScheme = "anitrack"
-    static let redirectURL = "anitrack://auth"
+    static let callbackScheme = "anireco"
+    static let redirectURL = "anireco://auth"
 
     /// Implicit grant: AniList sends the token back in the URL fragment.
     static func authorizeURL(clientId: String) -> URL? {
@@ -43,7 +43,7 @@ enum AniListAuth {
         return URL(string: "https://anilist.co/api/v2/oauth/authorize?client_id=\(trimmed)&response_type=token")
     }
 
-    /// Pulls access_token out of anitrack://auth#access_token=...&token_type=Bearer&expires_in=...
+    /// Pulls access_token out of anireco://auth#access_token=...&token_type=Bearer&expires_in=...
     static func token(from url: URL) -> String? {
         let raw = url.fragment ?? url.query ?? ""
         for pair in raw.split(separator: "&") {

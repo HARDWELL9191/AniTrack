@@ -7,7 +7,7 @@ import time
 import urllib.error
 import urllib.request
 
-SRC = open("AniTrack/Services/AniListClient.swift").read()
+SRC = open("AniReco/Services/AniListClient.swift").read()
 blocks = dict(re.findall(r'static let (\w+) = """\n(.*?)\n\s*"""', SRC, re.S))
 fragment = blocks["mediaFragment"]
 relfrag = blocks.get("relFragment", "")
@@ -28,7 +28,7 @@ def note(title, msg, level="notice"):
     print(f"::{level} title={title}::{msg[:3500]}", flush=True)
 
 
-UA = os.environ.get("TEST_UA", "AniTrack/1 CFNetwork/3860.100.1 Darwin/27.0.0")
+UA = os.environ.get("TEST_UA", "AniReco/1 CFNetwork/3860.100.1 Darwin/27.0.0")
 
 
 def run(q, variables):

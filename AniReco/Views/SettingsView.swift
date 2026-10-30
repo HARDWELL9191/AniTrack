@@ -103,7 +103,7 @@ struct SettingsView: View {
 
                 Section("About") {
                     LabeledContent("Version", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0")
-                    Text("AniTrack is an unofficial client and isn't affiliated with AniList.co.")
+                    Text("AniReco is an unofficial client and isn't affiliated with AniList.co.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
             }
@@ -122,7 +122,7 @@ struct SettingsView: View {
                 ListExportSheet()
                     .presentationDetents([.large])
             }
-            .confirmationDialog("Log out of AniTrack?", isPresented: $confirmLogout, titleVisibility: .visible) {
+            .confirmationDialog("Log out of AniReco?", isPresented: $confirmLogout, titleVisibility: .visible) {
                 Button("Log out", role: .destructive) { model.logOut() }
             }
         }

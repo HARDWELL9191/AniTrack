@@ -145,7 +145,7 @@ struct ListExportSheet: View {
         let user = (model.viewer?.name ?? "")
             .filter { $0.isLetter || $0.isNumber || $0 == "_" || $0 == "-" }
         let who = user.isEmpty ? "" : " \(user)"
-        return "AniTrack\(who) lists \(formatter.string(from: Date()))"   // ".xlsx" is added by the Save dialog
+        return "AniReco\(who) lists \(formatter.string(from: Date()))"   // ".xlsx" is added by the Save dialog
     }
 
     private func sheet(for choice: Choice) -> XLSXWriter.Sheet {
