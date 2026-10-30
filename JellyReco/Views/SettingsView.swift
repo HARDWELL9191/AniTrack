@@ -423,12 +423,16 @@ struct HomeSettingsView: View {
                     ForEach([7, 14, 30, 60, 90, 180, 365], id: \.self) { Text("\($0) days").tag($0) }
                 }
             }
-            Section("Recently added rows") {
-                ForEach(model.libraries) { lib in
+            Section {
+                ForEach(model.libraries.filter { lib in
+                    !(model.user?.configuration?.latestItemsExcludes ?? []).contains { $0.lowercased().replacingOccurrences(of: "-", with: "") == lib.id.lowercased().replacingOccurrences(of: "-", with: "") }
+                }) { lib in
                     Toggle(lib.displayName, isOn: Binding(
                         get: { !s.hiddenLatestLibraries.contains(lib.id) },
                         set: { on in if on { s.hiddenLatestLibraries.remove(lib.id) } else { s.hiddenLatestLibraries.insert(lib.id) } }))
                 }
+            } header: { Text("Recently added rows") } footer: {
+                Text("Libraries you hid from the home screen in Jellyfin's own settings stay hidden and aren't listed here.")
             }
         }
         .navigationTitle("Home")

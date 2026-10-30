@@ -454,6 +454,20 @@ final class AppModel {
               mediaSourceId: String? = nil) {
         Task {
             var target = item
+            // A plain folder plays its first video (in name order).
+            if item.isFolder == true && ![.series, .season, .boxSet].contains(item.kind), let client {
+                var q = JellyfinClient.ItemQuery()
+                q.parentId = item.id
+                q.recursive = true
+                q.sortBy = ["SortName"]
+                q.mediaTypesVideo = true
+                q.limit = 1
+                guard let first = try? await client.items(q).items?.first else {
+                    errorMessage = "There's no video in this folder."
+                    return
+                }
+                target = first
+            }
             // A series/season plays its next-up (or first) episode.
             if item.kind == .series || item.kind == .season {
                 guard let ep = await nextEpisode(for: item) else {

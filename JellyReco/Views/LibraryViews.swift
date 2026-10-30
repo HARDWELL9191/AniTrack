@@ -45,6 +45,8 @@ struct LibrariesView: View {
     private func destination(for lib: BaseItem) -> some View {
         if lib.collectionType == "livetv" {
             LiveTVView()
+        } else if FolderBrowserView.isFolderLibrary(lib) {
+            FolderBrowserView(folder: lib)
         } else {
             LibraryView(library: lib)
         }
@@ -617,5 +619,122 @@ struct WatchlistView: View {
         .navigationTitle("My List")
         .refreshable { await model.loadWatchlist(); items = await Self.fetch(model) }
         .task(id: model.watchlist) { items = await Self.fetch(model); loaded = true }
+    }
+}
+
+/// Folder-style libraries (Jellyfin "folders", mixed content, home videos): browsed as folders,
+/// the way Jellyfin shows them, with files playable straight from the list.
+struct FolderBrowserView: View {
+    @Environment(AppModel.self) private var model
+    let folder: BaseItem
+    @State private var children: [BaseItem] = []
+    @State private var loaded = false
+    @State private var search = ""
+
+    static func isFolderLibrary(_ lib: BaseItem) -> Bool {
+        let type = lib.collectionType ?? ""
+        return type.isEmpty || ["folders", "mixed", "homevideos"].contains(type)
+    }
+
+    private var shown: [BaseItem] {
+        guard !search.isEmpty else { return children }
+        return children.filter { $0.displayName.localizedCaseInsensitiveContains(search) }
+    }
+
+    var body: some View {
+        List {
+            ForEach(shown) { item in
+                if item.isFolder == true && !(item.kind == .series || item.kind == .season || item.kind == .boxSet) {
+                    NavigationLink { FolderBrowserView(folder: item) } label: { FolderRow(item: item) }
+                } else if item.kind.isPlayableVideo {
+                    FileRow(item: item)
+                } else {
+                    NavigationLink(value: ItemLink(item: item)) { FileRow(item: item, showsPlay: false) }
+                }
+            }
+        }
+        .listStyle(.plain)
+        .overlay {
+            if !loaded { ProgressView() }
+            else if children.isEmpty { ContentUnavailableView("Empty folder", systemImage: "folder") }
+        }
+        .navigationTitle(folder.displayName)
+        .searchable(text: $search, prompt: "Filter this folder")
+        .refreshable { await load() }
+        .task { if !loaded { await load() } }
+    }
+
+    private func load() async {
+        guard let client = model.client else { return }
+        var q = JellyfinClient.ItemQuery()
+        q.parentId = folder.id
+        q.recursive = false
+        q.sortBy = ["SortName"]
+        q.limit = 2000
+        q.isMissing = nil
+        q.fields = JellyfinClient.listFields + ["Path", "MediaSources"]
+        let items = (try? await client.items(q).items) ?? []
+        // Folders first, then files, each by name (like a file browser).
+        children = items.sorted { a, b in
+            let fa = a.isFolder == true, fb = b.isFolder == true
+            if fa != fb { return fa }
+            return a.displayName.localizedStandardCompare(b.displayName) == .orderedAscending
+        }
+        loaded = true
+    }
+}
+
+private struct FolderRow: View {
+    @Environment(AppModel.self) private var model
+    let item: BaseItem
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "folder.fill")
+                .font(.title3)
+                .foregroundStyle(Theme.accent)
+                .frame(width: 44, height: 44)
+                .glassEffect(.regular.tint(Theme.accent.opacity(0.15)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.displayName).font(.subheadline.weight(.semibold)).lineLimit(2)
+                if let n = item.childCount ?? item.recursiveItemCount {
+                    Text(n == 1 ? "1 item" : "\(n) items").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(.vertical, 2)
+    }
+}
+
+/// A video file in a folder: tap to play (long-press for watched, favourite, details…).
+private struct FileRow: View {
+    @Environment(AppModel.self) private var model
+    let item: BaseItem
+    var showsPlay = true
+
+    var body: some View {
+        let data = model.userData(for: item)
+        Button {
+            if showsPlay { model.play(item) }
+        } label: {
+            HStack(spacing: 12) {
+                RemoteImage(url: model.client?.landscapeURL(item, width: 300), placeholderSymbol: "film")
+                    .frame(width: 96, height: 54)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay(alignment: .bottom) {
+                        if let p = data?.playedPercentage, p > 0, p < 100 { ProgressBar(value: p / 100).padding(4) }
+                    }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.displayName).font(.subheadline.weight(.semibold)).lineLimit(2)
+                    Text([item.runtimeSeconds.map(Fmt.runtime), item.container?.uppercased()].compactMap { $0 }.joined(separator: " · "))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                if data?.played ?? false { Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.accent) }
+                if showsPlay { Image(systemName: "play.circle.fill").font(.title2).foregroundStyle(Theme.accent) }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .itemActions(item)
     }
 }

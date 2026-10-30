@@ -286,6 +286,7 @@ final class JellyfinClient: @unchecked Sendable {
         var hasOverview: Bool?
         var enableUserData = true
         var imageTypeLimit = 1
+        var mediaTypesVideo = false
     }
 
     func items(_ q: ItemQuery) async throws -> QueryResult<BaseItem> {
@@ -317,6 +318,7 @@ final class JellyfinClient: @unchecked Sendable {
             "enableTotalRecordCount": true,
         ]
         if let missing = q.isMissing { query["isMissing"] = missing }
+        if q.mediaTypesVideo { query["mediaTypes"] = ["Video"] }
         if let hasOverview = q.hasOverview { query["hasOverview"] = hasOverview }
         return try await get("/Items", query)
     }
@@ -546,18 +548,22 @@ final class JellyfinClient: @unchecked Sendable {
 
     /// The original file, untouched (mpv and AVPlayer both read it straight off the server).
     func directStreamURL(itemId: String, source: MediaSourceInfo, playSessionId: String?) -> URL? {
-        // Live TV and other remote sources: the server's own direct-stream URL when it gives one.
-        if let direct = source.directStreamUrl, !direct.isEmpty, source.liveStreamId != nil || source.isRemote == true {
+        // Remote files (.strm links, remote paths): play the link itself, like Jellyfin's web player.
+        if source.protocol?.lowercased() == "http", let path = source.path,
+           path.lowercased().hasPrefix("http"), let remote = URL(string: path) {
+            return remote
+        }
+        // Live TV: the server's own direct-stream URL.
+        if let direct = source.directStreamUrl, !direct.isEmpty, source.liveStreamId != nil {
             return absolute(direct)
         }
-        let container = source.container?.split(separator: ",").first.map(String.init)
         var query: [String: Any?] = [
             "static": true, "mediaSourceId": source.id, "deviceId": Self.deviceId,
             "playSessionId": playSessionId, "ApiKey": token, "Tag": source.eTag,
         ]
         if let live = source.liveStreamId { query["LiveStreamId"] = live }
-        let ext = (container.map { ".\($0)" } ?? "")
-        return url("/Videos/\(itemId)/stream" + (source.liveStreamId == nil ? ext : ""), query)
+        // No container extension: the original file is sent as it is and mpv reads the format itself.
+        return url("/Videos/\(itemId)/stream", query)
     }
 
     /// Server-relative URLs (TranscodingUrl, DeliveryUrl) made absolute, with the token attached.

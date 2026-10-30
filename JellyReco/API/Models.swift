@@ -170,6 +170,13 @@ struct UserConfiguration: Codable, Hashable {
     var rememberAudioSelections: Bool?
     var rememberSubtitleSelections: Bool?
     var hidePlayedInLatest: Bool?
+    /// Libraries hidden from the home screen's "Recently added" rows (Jellyfin → Home settings).
+    var latestItemsExcludes: [String]?
+    /// Libraries hidden from My Media (the server already leaves them out of /UserViews).
+    var myMediaExcludes: [String]?
+    /// Library order set in Jellyfin.
+    var orderedViews: [String]?
+    var groupedFolders: [String]?
 }
 
 struct AuthenticationResult: Codable {

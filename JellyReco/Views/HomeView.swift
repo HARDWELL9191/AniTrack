@@ -105,13 +105,21 @@ struct HomeView: View {
         var lat: [(BaseItem, [BaseItem])] = []
         var anyError: Error?
         if model.libraries.isEmpty { await model.refreshSession() }
+        // Jellyfin's own "hide from Recently added" choice (Settings → Home on the server) first,
+        // then JellyReco's.
+        let jellyfinHidden = Set((model.user?.configuration?.latestItemsExcludes ?? []).map { $0.lowercased().replacingOccurrences(of: "-", with: "") })
         let shelves = model.libraries.filter {
             !["music", "books", "photos", "playlists", "livetv", "boxsets"].contains($0.collectionType ?? "")
                 && !s.hiddenLatestLibraries.contains($0.id)
+                && !jellyfinHidden.contains($0.id.lowercased().replacingOccurrences(of: "-", with: ""))
         }
+        let hidePlayed = model.user?.configuration?.hidePlayedInLatest ?? false
         await withTaskGroup(of: (Int, BaseItem, [BaseItem]).self) { group in
             for (i, lib) in shelves.enumerated() {
-                group.addTask { (i, lib, (try? await client.latest(parentId: lib.id, limit: 20)) ?? []) }
+                group.addTask {
+                    let items = (try? await client.latest(parentId: lib.id, limit: 20)) ?? []
+                    return (i, lib, hidePlayed ? items.filter { !($0.userData?.played ?? false) } : items)
+                }
             }
             var tmp: [(Int, BaseItem, [BaseItem])] = []
             for await x in group { tmp.append(x) }
