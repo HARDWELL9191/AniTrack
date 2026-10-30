@@ -156,10 +156,10 @@ export class TasteProfile {
 }
 
 /** How strongly your history says "I liked this" (positive) or "not for me" (negative). */
-export function historyWeight(i: Item, dismissed: Set<string>): number {
-  if (dismissed.has(i.Id)) return -0.8;
+export function historyWeight(i: Item, dismissed: Set<string>, watchLater?: Set<string>): number {
+  if (dismissed.has(i.Id)) return -1.0;
   const ud = i.UserData;
-  if (!ud) return 0;
+  if (!ud) return watchLater?.has(i.Id) ? 0.5 : 0;
   if (ud.Likes === false) return -1.0;
   let w = 0;
   if (i.Type === "Series") {
@@ -184,12 +184,15 @@ export function historyWeight(i: Item, dismissed: Set<string>): number {
     w = 0.3 + 1.7 * t * t; // like AniReco's scored entries
   }
   if (ud.Likes === true) w = Math.max(w, 1.4);
-  if (ud.IsFavorite) w = Math.max(w, ud.Played || w > 0.2 ? 1.6 : 0.5); // favorite, unwatched = your watch list
+  if (ud.IsFavorite) w = Math.max(w, ud.Played || w > 0.2 ? 1.6 : 0.6);
+  // Watch later = AniReco's Plan to watch: interested, not seen yet.
+  if (watchLater?.has(i.Id) && w >= 0 && w < 0.5) w = 0.5;
   return w;
 }
 
-/** Started, finished, favorited or rated: not a pick any more. */
-export function onYourList(i: Item): boolean {
+/** Started, finished, favorited, rated or on Watch later: not a pick any more. */
+export function onYourList(i: Item, watchLater?: Set<string>): boolean {
+  if (watchLater?.has(i.Id)) return true;
   const ud = i.UserData;
   if (!ud) return false;
   if (ud.Played || ud.IsFavorite || (ud.Likes !== null && ud.Likes !== undefined)) return true;
@@ -207,6 +210,7 @@ export interface RecOptions {
   category: string;
   minRating: number;
   dismissed: Set<string>;
+  watchLater: Set<string>;
   useAI: boolean;
   exclude: Set<string>;
 }
@@ -216,12 +220,12 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /** Builds the next batch of picks (40). `exclude` holds ids already shown. */
 export async function recommend(api: Jellyfin, lib: Library, o: RecOptions, round = 1): Promise<Feed> {
   const scope = lib.items.filter((i) => inLibrary(i, o.libraryId, lib));
-  const categories = categoriesFor(scope.filter((i) => !onYourList(i) && !o.dismissed.has(i.Id)));
+  const categories = categoriesFor(scope.filter((i) => !onYourList(i, o.watchLater) && !o.dismissed.has(i.Id)));
 
   // Taste: from the same library first (anime taste for anime picks); all history if that's thin.
   const weights = new Map<string, number>();
   for (const i of lib.items) {
-    const w = historyWeight(i, o.dismissed);
+    const w = historyWeight(i, o.dismissed, o.watchLater);
     if (w !== 0) weights.set(i.Id, w);
   }
   const history = (pool: Item[]) => pool.filter((i) => (weights.get(i.Id) ?? 0) !== 0);
@@ -232,7 +236,7 @@ export async function recommend(api: Jellyfin, lib: Library, o: RecOptions, roun
   profile.finalize();
 
   const allowed = (i: Item) => {
-    if (onYourList(i) || o.dismissed.has(i.Id) || o.exclude.has(i.Id)) return false;
+    if (onYourList(i, o.watchLater) || o.dismissed.has(i.Id) || o.exclude.has(i.Id)) return false;
     if (o.category && !(i.Genres ?? []).some((g) => g.toLowerCase() === o.category.toLowerCase())) return false;
     if (o.minRating && (i.CommunityRating ?? 0) < o.minRating) return false;
     return true;

@@ -136,6 +136,8 @@ export class PlayerController {
   /** Set by the UI: shows "Resume from …?" and resolves true to resume. */
   askResume: ((seconds: number, item: Item) => Promise<boolean | null>) | null = null;
   onClose: (() => void) | null = null;
+  /** SyncPlay: while in a group, play/pause/seek go through the server. */
+  sync: { pause(): Promise<unknown>; unpause(): Promise<unknown>; seek(s: number): Promise<unknown>; buffering(): void; ready(): void } | null = null;
   onDataChanged: (() => void) | null = null;
   onError: ((msg: string) => void) | null = null;
 
@@ -392,7 +394,7 @@ export class PlayerController {
     switch (e.type) {
       case "property": this.onProperty(e.name, e.value); break;
       case "file-loaded": void this.onFileLoaded(); break;
-      case "playback-restart": this.patch({ loading: false, buffering: false }); break;
+      case "playback-restart": this.patch({ loading: false, buffering: false }); this.sync?.ready(); break;
       case "end-file": void this.onEndFile(e.reason, e.error); break;
       case "shutdown": this.started = false; break;
       default: break;
@@ -412,7 +414,7 @@ export class PlayerController {
         break;
       }
       case "duration": if (value !== null) this.patch({ duration: num(value) + this.transcodeOffset }); break;
-      case "paused-for-cache": this.patch({ buffering: flag(value) }); break;
+      case "paused-for-cache": this.patch({ buffering: flag(value) }); if (flag(value)) this.sync?.buffering(); else this.sync?.ready(); break;
       case "cache-buffering-state": this.patch({ bufferingPercent: num(value) }); break;
       case "demuxer-cache-time": this.state = { ...this.state, cachedUntil: num(value) + this.transcodeOffset }; break;
       case "volume": this.patch({ volume: num(value, 100) }); break;
@@ -650,10 +652,19 @@ export class PlayerController {
 
   // MARK: Controls
 
-  async togglePause() { await this.engine.command(["cycle", "pause"]); }
+  async togglePause() {
+    if (this.sync) { await (this.state.paused ? this.sync.unpause() : this.sync.pause()); return; }
+    await this.engine.command(["cycle", "pause"]);
+  }
   async setPaused(p: boolean) { await this.engine.set("pause", p ? "yes" : "no"); }
 
   async seek(seconds: number) {
+    if (this.sync) { await this.sync.seek(seconds); return; }
+    return this.seekLocal(seconds);
+  }
+
+  /** Seeks this player only (SyncPlay commands land here). */
+  async seekLocal(seconds: number) {
     const st = this.state;
     const target = Math.max(0, Math.min(seconds, st.duration || seconds));
     if (st.playMethod === "Transcode") {

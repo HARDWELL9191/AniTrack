@@ -83,12 +83,13 @@ export interface Settings {
   forYouMinRating: number; // community rating floor (0 = any)
 }
 
-export type HomeSection = "resume" | "nextUp" | "forYouRow" | "latest" | "favorites" | "libraries" | "liveTv" | "none";
+export type HomeSection = "resume" | "nextUp" | "forYouRow" | "watchLater" | "latest" | "favorites" | "libraries" | "liveTv" | "none";
 
 export const ALL_HOME_SECTIONS: { id: HomeSection; label: string }[] = [
   { id: "resume", label: "Continue watching" },
   { id: "nextUp", label: "Next up" },
   { id: "forYouRow", label: "Picked for you" },
+  { id: "watchLater", label: "Watch later" },
   { id: "latest", label: "Latest in each library" },
   { id: "favorites", label: "Favorites" },
   { id: "libraries", label: "My media" },
@@ -111,7 +112,7 @@ export const DEFAULT_SETTINGS: Settings = {
   theme: "system",
   showBackdrops: true,
   blurUnwatched: false,
-  homeSections: ["resume", "nextUp", "forYouRow", "libraries", "latest", "favorites"],
+  homeSections: ["resume", "nextUp", "forYouRow", "watchLater", "libraries", "latest", "favorites"],
   libraryCardSize: 168,
   showRatings: true,
   hideWatchedInLatest: false,

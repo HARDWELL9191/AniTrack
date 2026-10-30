@@ -37,6 +37,7 @@ function Section({ section, refreshKey }: { section: HomeSection; refreshKey: nu
     case "resume": return <ResumeShelf refreshKey={refreshKey} />;
     case "nextUp": return <NextUpShelf refreshKey={refreshKey} />;
     case "forYouRow": return <ForYouShelf />;
+    case "watchLater": return <WatchLaterShelf refreshKey={refreshKey} />;
     case "libraries": return <MyMedia />;
     case "latest": return <LatestShelves refreshKey={refreshKey} />;
     case "favorites": return <FavoritesShelf refreshKey={refreshKey} />;
@@ -90,6 +91,24 @@ function ForYouShelf() {
   return (
     <Shelf title="Picked for you" icon="wand" action={{ label: "For You", run: () => { model.tab = "forYou"; model.notify(); } }}>
       {feed.picks.slice(0, 20).map((p) => <ItemCard key={p.item.Id} item={p.item} badge={<span className="bubble bubble-match">{p.match}%</span>} />)}
+    </Shelf>
+  );
+}
+
+function WatchLaterShelf({ refreshKey }: { refreshKey: number }) {
+  const model = useModel();
+  const navigate = useNavigate();
+  const ids = model.lists?.watchLater.map((e) => e.id) ?? [];
+  const key = ids.join(",");
+  const { data } = useLoad(async () => {
+    if (!ids.length) return [];
+    const r = await model.api!.items({ ids, fields: LIST_FIELDS, enableUserData: true });
+    return ids.map((id) => r.Items.find((i) => i.Id === id)).filter((x): x is Item => !!x && !x.UserData?.Played);
+  }, [key, refreshKey]);
+  if (!data?.length) return null;
+  return (
+    <Shelf title="Watch later" icon="bookmark" action={{ label: "See all", run: () => navigate({ kind: "browse", title: "Watch later", query: { watchLater: true } }) }}>
+      {data.map((i) => <ItemCard key={i.Id} item={i} />)}
     </Shelf>
   );
 }

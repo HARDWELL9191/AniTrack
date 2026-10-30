@@ -2,6 +2,7 @@
 // screen shares. Screens subscribe through useModel() and re-render on notify().
 
 import { ApiError, deviceIdFor, Jellyfin } from "./api";
+import { ServerLists } from "./lists";
 import type { PlayerController } from "./player";
 import type { Feed, Library } from "./recommender";
 import { loadSettings, saveSettings, type Settings } from "./settings";
@@ -44,10 +45,13 @@ export class AppModel {
   /** Bumped when user data (played, favorite, progress) changes anywhere, so lists refetch. */
   dataVersion = 0;
   player: PlayerController | null = null;
-  /** For You: the library snapshot, feeds per (type, category), and "Not for me" choices. */
+  /** For You: the library snapshot and feeds per (library, category). */
   forYouLibrary: Library | null = null;
   feeds = new Map<string, Feed>();
+  /** "Not for me" set this session (the server keeps them as thumbs-down). */
   dismissed: Set<string> = new Set();
+  /** Watch later, saved on the server. */
+  lists: ServerLists | null = null;
   readonly deviceId = deviceIdFor(localStorage);
   readonly deviceName: string;
   private store: TokenStore;
@@ -158,8 +162,10 @@ export class AppModel {
     this.libraryId = null;
     this.forYouLibrary = null;
     this.feeds.clear();
-    this.dismissed = loadSet(`dismissed-${server.id}-${user.Id}`);
+    this.dismissed = new Set();
+    this.lists = new ServerLists(api);
     await this.persist();
+    void this.lists.load().then(() => this.notify());
     void api.reportCapabilities().catch(() => {});
     await this.loadViews();
     this.notify();
@@ -226,6 +232,7 @@ export class AppModel {
     this.views = [];
     this.forYouLibrary = null;
     this.feeds.clear();
+    this.lists = null;
     await this.player?.shutdown();
     await this.persist();
     this.notify();
@@ -274,14 +281,6 @@ export class AppModel {
       this.fail(e);
     }
   }
-}
-
-export function loadSet(key: string): Set<string> {
-  try { return new Set(JSON.parse(localStorage.getItem(key) ?? "[]") as string[]); } catch { return new Set(); }
-}
-
-export function saveSet(key: string, set: Set<string>) {
-  try { localStorage.setItem(key, JSON.stringify([...set].slice(-5000))); } catch { /* full */ }
 }
 
 export function applyTheme(theme: Settings["theme"]) {

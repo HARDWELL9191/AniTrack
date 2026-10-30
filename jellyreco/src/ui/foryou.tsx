@@ -4,9 +4,9 @@
 
 import { useEffect, useState } from "react";
 import type { AppModel } from "../core/model";
-import { saveSet } from "../core/model";
+import { setNotForMe } from "../core/lists";
 import { defaultLibrary, type Feed, loadLibrary, type Pick, recommend } from "../core/recommender";
-import { backdropUrl, cardImage, Chip, Cover, Dropdown, Empty, ItemCard, PageHeader, Rating, Shelf, Spinner } from "./components";
+import { backdropUrl, cardImage, Chip, Cover, Dropdown, Empty, ItemCard, PageHeader, Rating, Shelf } from "./components";
 import { itemSubtitle, relativeTime, runtime } from "./fmt";
 import { Icon } from "./icons";
 import { routeFor, ui, useModel, useNavigate } from "./state";
@@ -30,6 +30,9 @@ async function ensureLibrary(model: AppModel, force = false) {
   if (!force && model.forYouLibrary && Date.now() - model.forYouLibrary.loadedAt < LIBRARY_TTL) return;
   model.forYouLibrary = await loadLibrary(api, model.views);
   model.feeds.clear();
+  // Watched titles leave Watch later on their own (like AniReco's Completed).
+  const watched = model.forYouLibrary.items.filter((i) => i.UserData?.Played && model.lists?.has(i.Id)).map((i) => i.Id);
+  if (watched.length) await model.lists?.remove(watched).catch(() => {});
 }
 
 /** Builds (or extends, with `more`) the feed for a library and category. */
@@ -49,6 +52,7 @@ export function buildFeed(model: AppModel, libraryId: string, category: string, 
       const round = opts.more && existing ? Math.floor(existing.picks.length / 40) + 1 : 1;
       const feed = await recommend(model.api!, lib, {
         libraryId: lid, category, minRating: model.settings.forYouMinRating, dismissed: model.dismissed,
+        watchLater: new Set(model.lists?.watchLater.map((e) => e.id) ?? []),
         useAI: model.settings.useOnDeviceAI && !powerSaver.on, exclude,
       }, round);
       model.feeds.set(k, opts.more && existing ? { ...feed, picks: [...existing.picks, ...feed.picks], categories: existing.categories } : feed);
@@ -77,10 +81,33 @@ export function useForYouFeed() {
   return { feed: model.feeds.get(key), loading: [...loading.keys()].some((k) => k.startsWith(key) || k.startsWith(feedKey("", cat))) };
 }
 
-export function dismiss(model: AppModel, id: string) {
+/** "Not for me": thumbs-down on the server, gone from For You at once. */
+export async function dismiss(model: AppModel, id: string) {
   model.dismissed.add(id);
-  saveSet(`dismissed-${model.server?.id}-${model.user?.Id}`, model.dismissed);
   removeFromFeeds(model, id);
+  const item = model.forYouLibrary?.items.find((i) => i.Id === id);
+  if (item) item.UserData = { ...(item.UserData ?? {}), Likes: false };
+  try { await setNotForMe(model.api!, id, true); } catch (e) { model.fail(e, "Couldn't save Not for me"); }
+}
+
+export async function undismiss(model: AppModel, id: string) {
+  model.dismissed.delete(id);
+  const item = model.forYouLibrary?.items.find((i) => i.Id === id);
+  if (item) item.UserData = { ...(item.UserData ?? {}), Likes: null };
+  model.feeds.clear(); // rebuilt on the next visit, with the title back in the pool
+  try { await setNotForMe(model.api!, id, false); } catch (e) { model.fail(e); }
+  model.notify();
+}
+
+/** Watch later (AniReco's Plan to watch), saved on the server. */
+export async function toggleWatchLater(model: AppModel, id: string) {
+  const lists = model.lists;
+  if (!lists) return;
+  try {
+    if (lists.has(id)) { await lists.remove([id]); model.toast("Removed from Watch later", "success"); }
+    else { await lists.add(id); removeFromFeeds(model, id); model.toast("Added to Watch later", "success"); }
+    model.dataChanged();
+  } catch (e) { model.fail(e, "Couldn't save Watch later"); }
 }
 
 export function removeFromFeeds(model: AppModel, id: string) {
@@ -139,7 +166,7 @@ export function ForYouPage({ refreshKey }: { refreshKey: number }) {
     content = (
       <>
         <PickCard key={shown.item.Id} pick={shown} position={safe + 1} total={picks.length} moreComing={!feed?.exhausted} onNext={next}
-          onDismiss={() => dismiss(model, shown.item.Id)} onHandled={() => removeFromFeeds(model, shown.item.Id)} />
+          onDismiss={() => void dismiss(model, shown.item.Id)} onHandled={() => removeFromFeeds(model, shown.item.Id)} />
         {picks.length > 1 && (
           <Shelf title="More picks">
             {picks.map((p, i) => <ItemCard key={p.item.Id} item={p.item} width={140} onClick={() => setIndex(i)} badge={<span className="bubble bubble-match">{p.match}%</span>} />)}
@@ -160,9 +187,14 @@ export function ForYouPage({ refreshKey }: { refreshKey: number }) {
         <button className="round-button" title="Fresh picks (F5)" onClick={() => void buildFeed(model, libId, cat, { force: true })}><Icon name="refresh" size={16} /></button>
       </PageHeader>
       {content}
-      <button className="text-button small" onClick={() => navigate({ kind: "browse", title: "Not for me", query: { ids: [...model.dismissed].slice(-200), dismissed: true } })}>
-        <Icon name="thumbsDown" size={14} /> Shows you marked "Not for me"
-      </button>
+      <div className="row-line">
+        <button className="text-button small" onClick={() => navigate({ kind: "browse", title: "Watch later", query: { watchLater: true } })}>
+          <Icon name="bookmark" size={14} /> Watch later ({model.lists?.watchLater.length ?? 0})
+        </button>
+        <button className="text-button small" onClick={() => navigate({ kind: "browse", title: "Not for me", query: { dismissed: true } })}>
+          <Icon name="thumbsDown" size={14} /> Not for me
+        </button>
+      </div>
     </div>
   );
 }
@@ -211,7 +243,7 @@ function PickCard({ pick, position, total, moreComing, onNext, onDismiss, onHand
         <button className="glass-button" onClick={() => ui.openSheet({ kind: "why", item: i, because: pick.because, highlights: pick.highlights })}><Icon name="sparkles" size={16} /> Why would I like this?</button>
         <div className="pick-actions">
           <button className="glass-button prominent" onClick={() => void model.player?.playItem(i, { resume: true })}><Icon name="playFill" size={16} /> Play</button>
-          <button className="glass-button" onClick={async () => { await model.toggleFavorite(i); onHandled(); }}><Icon name="bookmark" size={16} /> Watch later</button>
+          <button className="glass-button" onClick={() => { void toggleWatchLater(model, i.Id); onHandled(); }}><Icon name="bookmark" size={16} /> Watch later</button>
           <button className="glass-button" onClick={open}><Icon name="info" size={16} /> Details</button>
           <button className="glass-button danger" onClick={onDismiss}><Icon name="thumbsDown" size={16} /> Not for me</button>
           <button className="glass-button" onClick={async () => { await model.togglePlayed(i); onHandled(); }}><Icon name="eye" size={16} /> Already watched</button>
@@ -231,4 +263,3 @@ export function WhyText({ because, highlights, name }: { because: string[]; high
   return <p>{parts.join(" ")}</p>;
 }
 
-export { Spinner };

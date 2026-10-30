@@ -471,9 +471,13 @@ export function BrowsePage({ title, query, back }: { title: string; query: Recor
       return r.Items.filter((i) => !i.UserData?.Played);
     }
     if (query.dismissed) {
-      const ids = (query.ids as string[]) ?? [];
+      return (await model.api!.items({ filters: ["Dislikes"], recursive: true, includeItemTypes: ["Series", "Movie"], sortBy: ["SortName"], fields: LIST_FIELDS, limit: 1000 })).Items;
+    }
+    if (query.watchLater) {
+      const ids = model.lists?.watchLater.map((e) => e.id) ?? [];
       if (!ids.length) return [];
-      return (await model.api!.items({ ids, fields: LIST_FIELDS })).Items;
+      const r = await model.api!.items({ ids, fields: LIST_FIELDS, enableUserData: true });
+      return ids.map((id) => r.Items.find((i) => i.Id === id)).filter((x): x is Item => !!x);
     }
     return (await model.api!.items({ ...(query as Query), fields: LIST_FIELDS, limit: 300 })).Items;
   }, [JSON.stringify(query), model.dataVersion]);
@@ -482,7 +486,8 @@ export function BrowsePage({ title, query, back }: { title: string; query: Recor
       <PageHeader title={title} back={back} />
       {error ? <ErrorNote text={error} /> : !data ? <Spinner /> : !data.length ? <Empty icon="search" title="Nothing here" /> : (
         <>
-          {query.dismissed && <p className="muted small">Right-click a title and choose "Undo Not for me" to bring it back to For You.</p>}
+          {query.dismissed && <p className="muted small">Saved on your server as a thumbs-down. Right-click a title and choose "Undo Not for me" to bring it back to For You.</p>}
+          {query.watchLater && <p className="muted small">Saved on your server. Titles leave this list once you've watched them.</p>}
           <Grid min={query.nextUp ? 280 : model.settings.libraryCardSize}>{data.map((i) => <ItemCard key={i.Id} item={i} width={undefined} shape={query.nextUp ? "landscape" : undefined} />)}</Grid>
         </>
       )}
