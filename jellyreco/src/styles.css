@@ -475,7 +475,6 @@ input[type="color"] { width: 44px; height: 30px; border: 0; background: none; pa
 .grid { display: grid; gap: 22px 18px; }
 .grid .card { width: 100% !important; }
 .grid .card .cover { width: 100% !important; height: auto !important; aspect-ratio: var(--ar, 2 / 3); }
-.grid .card:has(.cover[style*="height: 1"]) .cover { aspect-ratio: auto; }
 .library-tile { display: flex; flex-direction: column; gap: 8px; border: 0; background: none; padding: 0; text-align: left; flex: none; }
 .library-tile-name { display: flex; gap: 8px; align-items: center; font-weight: 650; }
 .person-card { display: flex; flex-direction: column; align-items: center; gap: 4px; width: 120px; flex: none; border: 0; background: none; text-align: center; padding: 0; }

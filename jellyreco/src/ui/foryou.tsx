@@ -35,20 +35,33 @@ export function currentLibraryChoice(model: AppModel): string {
   return lib ? defaultLibrary(lib) : "";
 }
 
-/** Your library and watch history, read with a read-only handle. */
+/** What For You is doing right now (shown while it builds). */
+export const forYouStage = { text: "" };
+
+let libraryJob: Promise<void> | null = null;
+
+/** Your library and watch history, read with a read-only handle (one load at a time). */
 export async function ensureLibrary(model: AppModel, force = false) {
   const api = model.api;
-  if (!api) return;
-  if (!force && model.forYouLibrary && Date.now() - model.forYouLibrary.loadedAt < LIBRARY_TTL) return;
-  model.forYouLibrary = await loadLibrary(new ReadOnlyJellyfin(api), model.views);
-  model.feeds.clear();
-  // Watched titles leave Watch later on their own (like AniReco's Completed).
-  const watched = model.forYouLibrary.items.filter((i) => i.UserData?.Played && model.lists?.has(i.Id)).map((i) => i.Id);
-  if (watched.length) await model.lists?.remove(watched).catch(() => {});
-  // A Watch later title you've since added to the server leaves the outside list.
-  const lib = model.forYouLibrary;
-  const nowOwned = (model.lists?.watchLater ?? []).filter((e) => e.id.startsWith("tmdb:") && lib.owned.tmdb.has(e.id)).map((e) => e.id);
-  if (nowOwned.length) await model.lists?.remove(nowOwned).catch(() => {});
+  // Before the libraries are known there's nothing to read (and an empty snapshot mustn't be kept).
+  if (!api || !model.views.length) return;
+  const fresh = model.forYouLibrary && Date.now() - model.forYouLibrary.loadedAt < LIBRARY_TTL;
+  if (!force && fresh) return;
+  if (libraryJob) return libraryJob;
+  libraryJob = (async () => {
+    forYouStage.text = "Reading your library and watch history…";
+    model.notify();
+    model.forYouLibrary = await loadLibrary(new ReadOnlyJellyfin(api), model.views);
+    model.feeds.clear();
+    // Watched titles leave Watch later on their own (like AniReco's Completed).
+    const watched = model.forYouLibrary.items.filter((i) => i.UserData?.Played && model.lists?.has(i.Id)).map((i) => i.Id);
+    if (watched.length) await model.lists?.remove(watched).catch(() => {});
+    // A Watch later title you've since added to the server leaves the outside list.
+    const lib = model.forYouLibrary;
+    const nowOwned = (model.lists?.watchLater ?? []).filter((e) => e.id.startsWith("tmdb:") && lib.owned.tmdb.has(e.id)).map((e) => e.id);
+    if (nowOwned.length) await model.lists?.remove(nowOwned).catch(() => {});
+  })();
+  try { await libraryJob; } finally { libraryJob = null; }
 }
 
 /** Builds (or extends, with `more`) the feed for a library and category. */
@@ -59,26 +72,35 @@ export function buildFeed(model: AppModel, libraryId: string, category: string, 
   const job = (async () => {
     try {
       const tmdb = getTmdb(model);
-      if (!tmdb.configured) return;
+      if (!tmdb.configured || !model.api || !model.views.length) return;
       await ensureLibrary(model, opts.force);
-      const lib = model.forYouLibrary!;
-      const lid = libraryId || defaultLibrary(lib);
-      const k = feedKey(lid, category);
+      const lib = model.forYouLibrary;
+      if (!lib) return;
+      // The default library is only known once the library is read: hand over to that feed's job
+      // (the page asks for it too), so the same feed is never built twice at once.
+      if (!libraryId) { await buildFeed(model, defaultLibrary(lib), category, { more: opts.more }); return; }
+      const k = feedKey(libraryId, category);
       const existing = model.feeds.get(k);
       if (existing && !opts.force && !opts.more) return;
       if (opts.more && existing?.exhausted) return;
       const round = opts.more && existing ? Math.floor(existing.picks.length / 40) + 1 : 1;
       const lists = model.lists?.lists ?? { watchLater: [], notForMe: [], seen: [] };
-      const feed = await recommend(new ReadOnlyJellyfin(model.api!), tmdb, lib, {
-        libraryId: lid, category, minRating: model.settings.forYouMinRating, dismissed: model.dismissed,
+      const feed = await recommend(new ReadOnlyJellyfin(model.api), tmdb, lib, {
+        libraryId, category, minRating: model.settings.forYouMinRating, dismissed: model.dismissed,
         watchLater: lists.watchLater, notForMe: lists.notForMe, seen: lists.seen,
         useAI: model.settings.useOnDeviceAI && !powerSaver.on, exclude: new Set(opts.more && existing ? existing.picks.map((p) => p.key) : []),
-      }, round);
-      model.feeds.set(k, opts.more && existing ? { ...feed, picks: [...existing.picks, ...feed.picks], categories: existing.categories } : feed);
+      }, round, (text) => { forYouStage.text = text; model.notify(); });
+      // A "more" round that found nothing new ends the feed (no endless retries).
+      const more = opts.more && existing;
+      model.feeds.set(k, more ? { ...feed, picks: [...existing.picks, ...feed.picks], categories: existing.categories, exhausted: feed.exhausted || !feed.picks.length } : feed);
     } catch (e) {
       model.fail(e, "Couldn't build your picks");
+      // Show the problem on the page instead of a spinner.
+      const k = feedKey(libraryId, category);
+      if (libraryId && !model.feeds.get(k)) model.feeds.set(k, { picks: [], generatedAt: Date.now(), usedAI: false, exhausted: true, categories: [], watchedCount: 0, error: (e as Error).message });
     } finally {
       loading.delete(key);
+      if (!loading.size) forYouStage.text = "";
       model.notify();
     }
   })();
@@ -94,7 +116,7 @@ export function useForYouFeed() {
   const cat = model.settings.forYouCategory;
   const key = feedKey(libId, cat);
   useEffect(() => { void buildFeed(model, libId, cat); }, [model, key, model.views.length, model.settings.tmdbKey]); // eslint-disable-line react-hooks/exhaustive-deps
-  return { feed: model.feeds.get(key), loading: [...loading.keys()].some((k) => k.startsWith(key) || k.startsWith(feedKey("", cat))) };
+  return { feed: model.feeds.get(key), loading: [...loading.keys()].some((k) => k === key || k === key + "+" || k === feedKey("", cat) || k === feedKey("", cat) + "+") };
 }
 
 export function removeFromFeeds(model: AppModel, key: string) {
@@ -269,6 +291,7 @@ function Building({ text }: { text: string }) {
     <div className="building">
       <span className="spinner" />
       <h3>{text}</h3>
+      {forYouStage.text && <p className="small">{forYouStage.text}</p>}
       <p className="muted">{model.settings.useOnDeviceAI ? "Comparing what you watched with TMDB's catalog using on-device AI. Nothing on your server is changed." : "Comparing what you watched with TMDB's catalog."}</p>
     </div>
   );

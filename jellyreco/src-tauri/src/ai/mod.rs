@@ -108,8 +108,23 @@ impl Engine {
         if missing.is_empty() {
             return Ok(result);
         }
-        let mut guard = self.model.lock().unwrap();
+        // Another call is starting the model or embedding: wait a while, but never forever (the
+        // app falls back to ranking without the AI and asks again later).
+        let started = std::time::Instant::now();
+        let mut guard = loop {
+            match self.model.try_lock() {
+                Ok(g) => break g,
+                Err(std::sync::TryLockError::Poisoned(p)) => break p.into_inner(),
+                Err(std::sync::TryLockError::WouldBlock) => {
+                    if started.elapsed() > std::time::Duration::from_secs(30) {
+                        return Err("The on-device AI is busy (still starting). Try again in a moment.".into());
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+            }
+        };
         if guard.is_none() {
+            *self.status.lock().unwrap() = Status { backend: "cpu".into(), detail: "Starting (the first start prepares the model for the NPU)…".into() };
             let loaded = self.load();
             let status = match &loaded {
                 Ok((_, s)) => s.clone(),

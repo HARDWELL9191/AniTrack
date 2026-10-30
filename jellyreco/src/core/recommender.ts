@@ -249,9 +249,25 @@ export interface RecOptions {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** The value, or null if it takes longer than `ms` (the work itself carries on in the background). */
+export function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | null> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => resolve(null), ms);
+    p.then((v) => { clearTimeout(t); resolve(v); }, (e) => { clearTimeout(t); reject(e); });
+  });
+}
+
+/** How long For You waits for the on-device AI. Its first start (compiling the model for the NPU)
+ * can take longer; it finishes in the background and the next build uses it. */
+export const AI_WAIT_MS = 25_000;
+/** After a wait ran out, later builds only wait briefly until the AI has finished starting. */
+let aiTimedOutAt = 0;
+const aiWait = () => (Date.now() - aiTimedOutAt < 120_000 ? 3_000 : AI_WAIT_MS);
+
 /** Builds a batch of picks (40). `round` > 1 digs deeper (next pages). */
-export async function recommend(api: Jellyfin, tmdb: Tmdb, lib: Library, o: RecOptions, round = 1): Promise<Feed> {
+export async function recommend(api: Jellyfin, tmdb: Tmdb, lib: Library, o: RecOptions, round = 1, stage: (text: string) => void = () => {}): Promise<Feed> {
   void api; // reads go through `lib` (already loaded) and TMDB; kept for symmetry with moreLikeThis
+  stage("Asking TMDB for titles like yours…");
   const info = o.libraryId === "all" ? null : lib.libraries.find((l) => l.id === o.libraryId) ?? null;
   const kinds: TmdbKind[] = !info || info.kind === "both" ? ["tv", "movie"] : [info.kind];
   const animeOnly = info?.anime === true;
@@ -343,6 +359,7 @@ export async function recommend(api: Jellyfin, tmdb: Tmdb, lib: Library, o: RecO
   }
   if (firstError && !candidates.size && seeds.length) throw new Error(firstError);
 
+  stage("Exploring your favorite genres on TMDB…");
   // 3) Explore beyond what's linked: your top genres (or the chosen category), best rated and popular.
   const topGenres = [...profile.features].filter(([k, v]) => k.startsWith("g:") && v > 0).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k]) => k.slice(2));
   for (const kind of kinds) {
@@ -389,10 +406,18 @@ export async function recommend(api: Jellyfin, tmdb: Tmdb, lib: Library, o: RecO
   let usedAI = false;
   let ranked = shortList.map((s) => ({ t: s.t, score: s.score }));
   if (o.useAI && shortList.length) {
+    stage("Ranking with on-device AI…");
     try {
       const anchors = basis.filter((i) => Math.abs(weights.get(i.Id) ?? 0) >= 0.4 && (i.Overview ?? "").length > 40)
         .sort((a, b) => Math.abs(weights.get(b.Id)!) - Math.abs(weights.get(a.Id)!)).slice(0, 40);
-      const anchorVecs = await vectorsFor(anchors);
+      const text = (x: TmdbItem) => `${x.title}. ${x.genreIds.map((g) => allGenreNames.get(g)).filter(Boolean).join(", ")}. ${x.overview.slice(0, 500)}`;
+      const got = await withTimeout((async () => ({
+        anchorVecs: await vectorsFor(anchors),
+        vecs: await getEmbedder().vectors(shortList.map((s) => ({ id: tmdbVectorId(s.t), text: text(s.t) }))),
+      }))(), aiWait());
+      if (!got) { aiTimedOutAt = Date.now(); throw new Error("on-device AI is still starting"); }
+      aiTimedOutAt = 0;
+      const { anchorVecs, vecs } = got;
       let taste: Float32Array | null = null;
       for (const a of anchors) {
         const v = anchorVecs.get(a.Id);
@@ -402,8 +427,6 @@ export async function recommend(api: Jellyfin, tmdb: Tmdb, lib: Library, o: RecO
       }
       if (taste) {
         const tv = normalized(taste);
-        const text = (x: TmdbItem) => `${x.title}. ${x.genreIds.map((g) => allGenreNames.get(g)).filter(Boolean).join(", ")}. ${x.overview.slice(0, 500)}`;
-        const vecs = await getEmbedder().vectors(shortList.map((s) => ({ id: tmdbVectorId(s.t), text: text(s.t) })));
         const sims = shortList.map((s) => { const v = vecs.get(tmdbVectorId(s.t)); return v ? cosine(tv, v) : null; });
         const known = sims.filter((x): x is number => x !== null);
         if (known.length) {
@@ -467,7 +490,7 @@ export async function moreLikeThis(api: Jellyfin, lib: Library, item: Item, useA
   let ranked = pre.map((x) => ({ i: x.i, score: x.score }));
   if (useAI && (item.Overview ?? "").length > 30) {
     try {
-      const vecs = await vectorsFor([item, ...pre.map((x) => x.i)]);
+      const vecs = (await withTimeout(vectorsFor([item, ...pre.map((x) => x.i)]), aiWait())) ?? new Map<string, Float32Array>();
       const me = vecs.get(item.Id);
       if (me) {
         const sims = pre.map((x) => { const v = vecs.get(x.i.Id); return v ? cosine(me, v) : null; });

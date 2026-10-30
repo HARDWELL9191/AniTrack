@@ -34,10 +34,21 @@ export function shapeFor(item: Item): Shape {
     case "Genre":
     case "MusicGenre":
       return "square";
+    case "Folder":
+    case "BoxSet": {
+      // Folders take their picture's shape (a folder without one gets a square tile).
+      const ar = item.PrimaryImageAspectRatio;
+      if (item.Type === "BoxSet" && !ar) return "poster";
+      if (!ar) return "square";
+      return ar > 1.25 ? "landscape" : ar > 0.85 ? "square" : "poster";
+    }
     default:
       return "poster";
   }
 }
+
+/** CSS aspect ratio for a card shape (grids size cards by width, so the height comes from this). */
+export const aspectFor = (s: Shape) => (s === "landscape" ? "16 / 9" : s === "square" ? "1 / 1" : "2 / 3");
 
 /** The best image for a card of this shape (falls back to the series/album/parent images). */
 export function cardImage(api: Jellyfin, item: Item, shape: Shape, width: number): string | undefined {
@@ -79,13 +90,27 @@ const typeIcon: Partial<Record<string, string>> = {
 };
 
 export function Cover({ url, width, height, radius = 12, icon, className, style }: { url?: string; width: number | string; height: number | string; radius?: number; icon?: string; className?: string; style?: CSSProperties }) {
-  const [failed, setFailed] = useState(false);
-  const [loaded, setLoaded] = useState(false);
-  useEffect(() => { setFailed(false); setLoaded(false); }, [url]);
+  // Which URL has loaded / failed (no reset effect: a cached image that loads before an effect
+  // runs would otherwise stay invisible).
+  const [loadedUrl, setLoadedUrl] = useState<string | null>(null);
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const failed = !!url && failedUrl === url;
   return (
     <div className={`cover ${className ?? ""}`} style={{ width, height, borderRadius: radius, ...style }}>
       {url && !failed ? (
-        <img src={url} alt="" loading="lazy" decoding="async" draggable={false} className={loaded ? "loaded" : ""} onLoad={() => setLoaded(true)} onError={() => setFailed(true)} />
+        <img
+          key={url}
+          src={url}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          draggable={false}
+          className={loadedUrl === url ? "loaded" : ""}
+          // Already complete (memory cache) when it mounts: show it right away.
+          ref={(img) => { if (img && img.complete && img.naturalWidth > 0 && loadedUrl !== url) setLoadedUrl(url); }}
+          onLoad={() => setLoadedUrl(url)}
+          onError={() => setFailedUrl(url)}
+        />
       ) : (
         <div className="cover-placeholder"><Icon name={icon ?? "film"} size={28} strokeWidth={1.5} /></div>
       )}
@@ -137,7 +162,7 @@ export function ItemCard({ item, width, shape, onClick, subtitle, showPlay = tru
   const percent = playedPercent(item);
   const blur = model.settings.blurUnwatched && item.Type === "Episode" && !item.UserData?.Played;
   return (
-    <div className="card" style={{ width: w }} onContextMenu={onMenu}>
+    <div className="card" style={{ width: w, ["--ar" as string]: aspectFor(s) }} onContextMenu={onMenu}>
       <button className="card-cover" onClick={onClick ?? (() => navigate(routeFor(item)))} title={itemTitle(item)} aria-label={itemTitle(item)}>
         <Cover url={cardImage(api, item, s, w)} width={w} height={h} radius={s === "square" && (item.Type === "Person" || item.Type === "MusicArtist") ? w / 2 : 12} icon={typeIcon[item.Type]} style={blur ? { filter: "blur(10px)" } : undefined} />
         <WatchedBadge item={item} />

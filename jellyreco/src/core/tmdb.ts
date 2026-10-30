@@ -106,7 +106,8 @@ export class Tmdb {
       for (let attempt = 1; ; attempt++) {
         let res: Response;
         try {
-          res = await fetchImpl(url, { method: "GET", headers: { Accept: "application/json", ...(bearer ? { Authorization: `Bearer ${key}` } : {}) } });
+          // Never wait forever on one request (a stalled connection would hold up For You).
+          res = await fetchImpl(url, { method: "GET", signal: AbortSignal.timeout(20_000), headers: { Accept: "application/json", ...(bearer ? { Authorization: `Bearer ${key}` } : {}) } });
         } catch {
           if (attempt < 3) { await sleep(800 * attempt); continue; }
           throw new TmdbError(0, "Couldn't reach TMDB. Check your connection.");

@@ -6,7 +6,7 @@ import { LIST_FIELDS, type Query } from "../core/api";
 import type { Item, ItemsResult } from "../core/types";
 import { ticksToSeconds } from "../core/types";
 import {
-  backdropUrl, cardImage, Cover, Dropdown, Empty, ErrorNote, Grid, isPlayable, ItemCard, ItemRow, LoadMore, PageHeader, Segmented, Shelf, Spinner, useLoad,
+  backdropUrl, cardImage, Cover, Dropdown, Empty, ErrorNote, Grid, isPlayable, ItemCard, ItemRow, LoadMore, PageHeader, Segmented, shapeFor, Shelf, Spinner, useLoad,
 } from "./components";
 import { clock, dateOnly } from "./fmt";
 import { Icon } from "./icons";
@@ -261,19 +261,20 @@ export function ItemBrowser({ base, scopeKey, types, folders, refreshKey = 0, sh
       {error && !items.length ? <ErrorNote text={error} retry={() => { setError(null); setTotal(null); }} />
         : total === 0 ? <Empty icon="search" title="Nothing here" text={activeCount ? "No items match these filters." : undefined} />
         : v.layout === "list" ? <div className="rows columns">{items.map((i) => <ItemRow key={i.Id} item={i} />)}</div>
-        : <Grid min={gridMin(items[0], model.settings.libraryCardSize)}>{items.map((i) => <ItemCard key={i.Id} item={i} width={undefined} />)}</Grid>}
+        : <Grid min={gridMin(items, model.settings.libraryCardSize)}>{items.map((i) => <ItemCard key={i.Id} item={i} width={undefined} />)}</Grid>}
       <LoadMore onVisible={() => void loadMore()} active={!busy && total !== null && items.length < total} />
       {busy && <Spinner />}
     </>
   );
 }
 
-function gridMin(sample: Item | undefined, poster: number) {
-  if (!sample) return poster;
-  const t = sample.Type;
-  if (t === "Episode" || t === "Video" || t === "Photo" || t === "TvChannel" || t === "Folder" || t === "CollectionFolder") return 260;
-  if (t === "MusicAlbum" || t === "Audio" || t === "MusicArtist" || t === "Playlist") return 170;
-  return poster;
+/** Column width for a grid: from the shape most of its cards have. */
+function gridMin(items: Item[], poster: number) {
+  if (!items.length) return poster;
+  const counts = { poster: 0, landscape: 0, square: 0 };
+  for (const i of items.slice(0, 60)) counts[shapeFor(i)]++;
+  const top = (Object.keys(counts) as (keyof typeof counts)[]).sort((a, b) => counts[b] - counts[a])[0];
+  return top === "landscape" ? 260 : top === "square" ? Math.max(150, poster) : poster;
 }
 
 async function playAll(model: ReturnType<typeof useModel>, query: Query, shuffle: boolean) {
