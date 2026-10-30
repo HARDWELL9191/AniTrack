@@ -271,6 +271,20 @@ export class Jellyfin {
   sessions(activeWithinSeconds = 960) { return this.get<SessionInfo[]>("/Sessions", { activeWithinSeconds }); }
 }
 
+/**
+ * The same server and sign-in, but it can only read: any request other than GET throws before it
+ * leaves the app. The For You engine and "More like this" only ever get this one.
+ */
+export class ReadOnlyJellyfin extends Jellyfin {
+  constructor(from: Jellyfin) {
+    super(from.server, from.deviceId, from.deviceName, from.token, from.userId);
+  }
+  override request<T>(method: string, path: string, opts: Parameters<Jellyfin["request"]>[2] = {}): Promise<T> {
+    if (method.toUpperCase() !== "GET") return Promise.reject(new Error(`Read-only: ${method} ${path} is not allowed here.`));
+    return super.request<T>(method, path, opts);
+  }
+}
+
 /** A stable id for this install, used as the Jellyfin DeviceId. */
 export function deviceIdFor(storage: Storage): string {
   try {

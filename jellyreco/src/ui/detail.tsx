@@ -3,7 +3,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { LIST_FIELDS } from "../core/api";
-import { quickMatch } from "../core/recommender";
+import { moreLikeThis, quickMatch } from "../core/recommender";
+import { ReadOnlyJellyfin } from "../core/api";
+import { ensureLibrary, toggleWatchLater } from "./foryou";
 import type { Item, MediaStream } from "../core/types";
 import { ticksToSeconds } from "../core/types";
 import {
@@ -112,6 +114,11 @@ function Detail({ item, full, onChange }: { item: Item; full: boolean; onChange:
               <Icon name={item.UserData?.IsFavorite ? "heartFill" : "heart"} size={19} />
             </button>
             <LikeButtons item={item} onChange={onChange} />
+            {["Series", "Movie"].includes(item.Type) && !item.UserData?.Played && (
+              <button className={`glass-button big icon-only ${model.lists?.has(item.Id) ? "on" : ""}`} title={model.lists?.has(item.Id) ? "Remove from Watch later" : "Watch later"} onClick={() => void toggleWatchLater(model, item.Id)}>
+                <Icon name="bookmark" size={18} />
+              </button>
+            )}
             <Dropdown label="" compact icon="more" title="More" align="left" items={itemMenuItems(model, item)} onPick={(fn) => fn()} />
           </div>
           {playable && !isFolderish && full && (sources.length > 1 || audios.length > 1 || subs.length > 0) && (
@@ -388,10 +395,24 @@ function Extras({ item }: { item: Item }) {
   return <Shelf title="Extras">{data.map((x, i) => <ItemCard key={x.Id} item={x} shape="landscape" width={260} onClick={() => void model.player?.playNow(data, i)} />)}</Shelf>;
 }
 
+/** More like this: titles in your library, ranked by the on-device AI (overview meaning) with
+ * genres/tags/studios and the server's own similarity list. Read only. */
 function Similar({ item }: { item: Item }) {
   const model = useModel();
-  const id = item.Type === "Episode" ? item.SeriesId ?? item.Id : item.Id;
-  const { data } = useLoad(() => model.api!.similar(id, 20), [id]);
-  if (!data?.Items.length) return null;
-  return <Shelf title="More like this" icon="layers">{data.Items.map((i) => <ItemCard key={i.Id} item={i} />)}</Shelf>;
+  const base: Item | null = item.Type === "Episode" || item.Type === "Season" ? null : item;
+  const seriesId = item.Type === "Episode" || item.Type === "Season" ? item.SeriesId : null;
+  const { data } = useLoad(async () => {
+    await ensureLibrary(model);
+    const lib = model.forYouLibrary;
+    const ro = new ReadOnlyJellyfin(model.api!);
+    const target = base ?? (seriesId ? lib?.items.find((i) => i.Id === seriesId) ?? (await ro.itemFull(seriesId)) : null);
+    if (!lib || !target) return [];
+    return moreLikeThis(ro, lib, target, model.settings.useOnDeviceAI);
+  }, [item.Id]);
+  if (!data?.length) return null;
+  return (
+    <Shelf title="More like this" icon="layers" subtitle="from your library">
+      {data.map((x) => <ItemCard key={x.item.Id} item={x.item} badge={<span className="bubble bubble-match">{x.match}%</span>} />)}
+    </Shelf>
+  );
 }

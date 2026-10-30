@@ -2,6 +2,7 @@
 
 import { createContext, type ReactNode, useContext, useSyncExternalStore } from "react";
 import type { AppModel, Tab } from "../core/model";
+import type { TmdbItem } from "../core/tmdb";
 import type { Item } from "../core/types";
 
 export const ModelContext = createContext<AppModel | null>(null);
@@ -38,6 +39,7 @@ export type Sheet =
   | { kind: "remoteControl" }
   | { kind: "versions"; item: Item; onPick: (mediaSourceId: string) => void }
   | { kind: "why"; item: Item; because: string[]; highlights: string[] }
+  | { kind: "tmdb"; item: TmdbItem; genres: string[] }
   | { kind: "confirm"; title: string; text: string; danger?: boolean; confirmLabel?: string; run: () => void | Promise<void> }
   | { kind: "prompt"; title: string; label: string; initial?: string; confirmLabel?: string; run: (value: string) => void | Promise<void> };
 

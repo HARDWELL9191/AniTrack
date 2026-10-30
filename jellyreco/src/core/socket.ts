@@ -29,7 +29,11 @@ export class ServerSocket {
   syncGroup: SyncPlayGroup | null = null;
   private syncPlaylist: { ItemId: string; PlaylistItemId: string }[] = [];
 
-  constructor(private api: Jellyfin, private hooks: SocketHooks) {
+  private api: Jellyfin;
+  private hooks: SocketHooks;
+  constructor(api: Jellyfin, hooks: SocketHooks) {
+    this.api = api;
+    this.hooks = hooks;
     this.connect();
     void this.syncClock();
   }
@@ -104,7 +108,7 @@ export class ServerSocket {
       case "Play": {
         const d = m.Data as { ItemIds: string[]; StartPositionTicks?: number; PlayCommand: string; StartIndex?: number; MediaSourceId?: string; AudioStreamIndex?: number; SubtitleStreamIndex?: number };
         if (!p || !d.ItemIds?.length) break;
-        void this.api.items({ ids: d.ItemIds, fields: ["MediaSources", "Chapters", "Trickplay"] }).then((r) => {
+        void this.api.items({ ids: d.ItemIds, fields: ["MediaSources", "Chapters", "Trickplay"] }).then(async (r): Promise<unknown> => {
           const ordered = d.ItemIds.map((id) => r.Items.find((i) => i.Id === id)).filter((x): x is Item => !!x);
           if (d.PlayCommand === "PlayNext") return Promise.all(ordered.map((i) => p.enqueue(i, true)));
           if (d.PlayCommand === "PlayLast") return Promise.all(ordered.map((i) => p.enqueue(i)));

@@ -8,7 +8,7 @@ import { viewIcon } from "./app";
 import { Cover, Empty, ItemCard, Shelf, useLoad } from "./components";
 import { Icon } from "./icons";
 import { ui, useModel, useNavigate } from "./state";
-import { useForYouFeed } from "./foryou";
+import { TmdbCard, useForYouFeed } from "./foryou";
 
 export function HomePage({ refreshKey }: { refreshKey: number }) {
   const model = useModel();
@@ -90,7 +90,7 @@ function ForYouShelf() {
   if (!feed?.picks.length) return loading ? <Shelf title="Picked for you" icon="wand"><div className="shelf-spinner"><span className="spinner" /></div></Shelf> : null;
   return (
     <Shelf title="Picked for you" icon="wand" action={{ label: "For You", run: () => { model.tab = "forYou"; model.notify(); } }}>
-      {feed.picks.slice(0, 20).map((p) => <ItemCard key={p.item.Id} item={p.item} badge={<span className="bubble bubble-match">{p.match}%</span>} />)}
+      {feed.picks.slice(0, 20).map((p) => <TmdbCard key={p.key} t={p.tmdb} match={p.match} genres={p.genres} width={model.settings.libraryCardSize} />)}
     </Shelf>
   );
 }
@@ -98,17 +98,17 @@ function ForYouShelf() {
 function WatchLaterShelf({ refreshKey }: { refreshKey: number }) {
   const model = useModel();
   const navigate = useNavigate();
-  const ids = model.lists?.watchLater.map((e) => e.id) ?? [];
-  const key = ids.join(",");
+  const entries = model.lists?.watchLater ?? [];
+  const localIds = entries.filter((e) => !e.id.startsWith("tmdb:")).map((e) => e.id);
+  const key = entries.map((e) => e.id).join(",");
   const { data } = useLoad(async () => {
-    if (!ids.length) return [];
-    const r = await model.api!.items({ ids, fields: LIST_FIELDS, enableUserData: true });
-    return ids.map((id) => r.Items.find((i) => i.Id === id)).filter((x): x is Item => !!x && !x.UserData?.Played);
+    const r = localIds.length ? await model.api!.items({ ids: localIds, fields: LIST_FIELDS, enableUserData: true }) : { Items: [] as Item[] };
+    return entries.map((e) => (e.id.startsWith("tmdb:") ? { entry: e } : { item: r.Items.find((i) => i.Id === e.id) })).filter((x) => ("entry" in x) || (x.item && !x.item.UserData?.Played));
   }, [key, refreshKey]);
   if (!data?.length) return null;
   return (
     <Shelf title="Watch later" icon="bookmark" action={{ label: "See all", run: () => navigate({ kind: "browse", title: "Watch later", query: { watchLater: true } }) }}>
-      {data.map((i) => <ItemCard key={i.Id} item={i} />)}
+      {data.map((x) => ("entry" in x ? <TmdbCard key={x.entry!.id} t={x.entry!} width={model.settings.libraryCardSize} /> : <ItemCard key={x.item!.Id} item={x.item!} />))}
     </Shelf>
   );
 }

@@ -5,7 +5,7 @@ import { ApiError, deviceIdFor, Jellyfin } from "./api";
 import { ServerLists } from "./lists";
 import type { PlayerController } from "./player";
 import type { Feed, Library } from "./recommender";
-import { loadSettings, saveSettings, type Settings } from "./settings";
+import { loadSettings, mergeServerSettings, saveSettings, type Settings, syncedPart } from "./settings";
 import type { Item, User } from "./types";
 
 export type Tab = "home" | "forYou" | "search" | "favorites" | "library" | "settings" | "dashboard";
@@ -78,7 +78,9 @@ export class AppModel {
   updateSettings(patch: Partial<Settings>) {
     this.settings = { ...this.settings, ...patch };
     saveSettings(this.settings);
+    this.lists?.saveSettings(syncedPart(this.settings));
     applyTheme(this.settings.theme);
+    void this.player?.applySettings(this.settings);
     this.notify();
   }
 
@@ -165,7 +167,18 @@ export class AppModel {
     this.dismissed = new Set();
     this.lists = new ServerLists(api);
     await this.persist();
-    void this.lists.load().then(() => this.notify());
+    void this.lists.load().then(() => {
+      // Your settings follow you: what's saved on the server wins over this PC's copy.
+      const lists = this.lists;
+      if (!lists) return;
+      if (lists.settings) {
+        this.settings = mergeServerSettings(this.settings, lists.settings);
+        saveSettings(this.settings);
+        applyTheme(this.settings.theme);
+        this.feeds.clear();
+      } else lists.saveSettings(syncedPart(this.settings)); // first time: upload this PC's settings
+      this.notify();
+    });
     void api.reportCapabilities().catch(() => {});
     await this.loadViews();
     this.notify();

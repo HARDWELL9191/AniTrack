@@ -3,10 +3,10 @@
 // episode. mpv plays every container/codec FFmpeg knows, so the file is played as stored
 // (direct play) unless a lower quality is chosen, which asks the server to transcode.
 
-import { ApiError, DETAIL_FIELDS, type Jellyfin } from "./api";
+import { ApiError, type Jellyfin } from "./api";
 import { type Engine, type EngineEvent, getEngine } from "./engine";
 import type { Settings } from "./settings";
-import type { Chapter, Item, MediaSegment, MediaSource, MediaStream, SegmentType, TrickplayInfo } from "./types";
+import type { Chapter, Item, MediaSegment, MediaSource, MediaStream, TrickplayInfo } from "./types";
 import { secondsToTicks, ticksToSeconds } from "./types";
 
 export interface MpvTrack {
@@ -141,7 +141,11 @@ export class PlayerController {
   onDataChanged: (() => void) | null = null;
   onError: ((msg: string) => void) | null = null;
 
-  constructor(private getApi: () => Jellyfin | null, private getSettings: () => Settings) {
+  private getApi: () => Jellyfin | null;
+  private getSettings: () => Settings;
+  constructor(getApi: () => Jellyfin | null, getSettings: () => Settings) {
+    this.getApi = getApi;
+    this.getSettings = getSettings;
     this.state = initial(getSettings());
   }
 
@@ -294,6 +298,13 @@ export class PlayerController {
     this.skippedSegments.clear();
     this.reportedStart = false;
     this.upNextDismissed = false;
+    // A file opened with the app from this PC: mpv plays it directly, nothing goes to the server.
+    if (base.Id.startsWith("local:")) {
+      this.patch({ index, item: base, loading: true, error: null, ended: false, position: 0, duration: 0, tracks: [], audioOptions: [], subOptions: [], chapters: [], segments: [], trickplay: null, activeSegment: null, mediaSource: null, playMethod: "DirectPlay", isAudio: false });
+      await this.engine.set("start", "none");
+      await this.engine.command(["loadfile", base.Path ?? base.Id.slice(6), "replace"]);
+      return;
+    }
     this.patch({ index, item: base, loading: true, error: null, ended: false, position: 0, duration: ticksToSeconds(base.RunTimeTicks), tracks: [], audioOptions: [], subOptions: [], chapters: [], segments: [], trickplay: null, activeSegment: null, stats: {}, abLoop: [null, null] });
 
     const item = await api.itemFull(base.Id).catch(() => base);
@@ -446,8 +457,10 @@ export class PlayerController {
   private async onFileLoaded() {
     const api = this.getApi();
     const s = this.state;
-    if (!api || !s.item) return;
+    if (!s.item) return;
     this.patch({ loading: false, error: null });
+    if (s.item.Id.startsWith("local:")) { this.rebuildTrackOptions(); return; }
+    if (!api) return;
     await this.applyStartTracks();
     await this.engine.set("volume", String(this.state.volume)).catch(() => {});
     await this.engine.set("speed", String(this.getSettings().defaultSpeed)).catch(() => {});
@@ -627,7 +640,7 @@ export class PlayerController {
 
   private reportProgress(event?: string) {
     const api = this.getApi();
-    if (!api || !this.state.item || !this.reportedStart) return;
+    if (!api || !this.state.item || !this.reportedStart || this.state.item.Id.startsWith("local:")) return;
     void api.reportProgress(this.progressBody(event ? { EventName: event } : {})).catch(() => {});
   }
 

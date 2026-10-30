@@ -84,7 +84,7 @@ export function PlayerOverlay() {
         const size = await w.outerSize();
         const pos = await w.outerPosition();
         pipRestore.current = { w: size.width, h: size.height, x: pos.x, y: pos.y };
-        const mon = await w.currentMonitor();
+        const mon = await windowApi.currentMonitor();
         const scale = mon?.scaleFactor ?? 1;
         const width = Math.round(480 * scale), height = Math.round(270 * scale);
         await w.setMinSize(null);

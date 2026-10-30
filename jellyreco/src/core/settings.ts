@@ -80,7 +80,9 @@ export interface Settings {
   /** First dropdown: a library id, "all", or "" = the library named "Anime" (else all). */
   forYouLibrary: string;
   forYouCategory: string; // second dropdown: "" = all categories
-  forYouMinRating: number; // community rating floor (0 = any)
+  forYouMinRating: number; // TMDB rating floor (0 = any)
+  /** Your TMDB API key (v3) or read access token (v4): For You's outside source. */
+  tmdbKey: string;
 }
 
 export type HomeSection = "resume" | "nextUp" | "forYouRow" | "watchLater" | "latest" | "favorites" | "libraries" | "liveTv" | "none";
@@ -160,9 +162,36 @@ export const DEFAULT_SETTINGS: Settings = {
   forYouLibrary: "",
   forYouCategory: "",
   forYouMinRating: 0,
+  tmdbKey: "",
 };
 
 const KEY = "settings-v1";
+
+/** Settings that belong to this PC, not your account: they never sync through the server. */
+export const DEVICE_KEYS: (keyof Settings)[] = ["audioDevice", "screenshotFolder", "hwdec", "startFullscreen"];
+
+/** Your synced settings (everything but the per-device ones). */
+export function syncedPart(s: Settings): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...s };
+  for (const k of DEVICE_KEYS) delete out[k];
+  return out;
+}
+
+/** Server settings on top of this PC's (the server wins, except per-device keys). */
+export function mergeServerSettings(local: Settings, server: Record<string, unknown> | null): Settings {
+  if (!server) return local;
+  const merged = { ...local } as Record<string, unknown>;
+  for (const [k, v] of Object.entries(server)) {
+    if ((DEVICE_KEYS as string[]).includes(k) || !(k in DEFAULT_SETTINGS) || v === undefined) continue;
+    merged[k] = v;
+  }
+  const m = merged as unknown as Settings;
+  return {
+    ...m,
+    segmentActions: { ...DEFAULT_SETTINGS.segmentActions, ...(m.segmentActions ?? {}) },
+    subtitleStyle: { ...DEFAULT_SUB_STYLE, ...(m.subtitleStyle ?? {}) },
+  };
+}
 
 export function loadSettings(): Settings {
   try {
