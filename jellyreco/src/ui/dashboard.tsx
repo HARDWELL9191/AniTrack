@@ -1,67 +1,128 @@
-// The admin Dashboard: everything jellyfin-web's dashboard has, regrouped. An overview (server,
-// storage, live sessions, activity, tasks) and pages for settings, users, libraries, playback,
-// networking, devices, activity, Live TV, plugins, tasks, API keys, logs and backups.
-// Every config page shows the common options first, then every other option the server reports,
-// so nothing is missing even when the server adds settings.
+// The admin Dashboard, organized like jellyfin-web's: a menu of categories on the left (Server,
+// Playback, Devices, Live TV, Plugins, Advanced) and the chosen page on the right. Settings pages
+// have the same sections, options and conditions as jellyfin-web, with switches, dropdowns and
+// pickers instead of typing values in (see serverpages.tsx).
 
 import { LibraryOptionsEditor, type LibraryOptions } from "./libraryadmin";
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { getSocket } from "../core/socket";
 import type {
-  ActivityLogEntry, ApiKey, BackupManifest, BackupOptions, Culture, Country, DeviceInfo, FileSystemEntry, LogFile, PackageInfo, PluginInfo, RepositoryInfo,
+  ActivityLogEntry, ApiKey, BackupManifest, BackupOptions, DeviceInfo, LogFile, PackageInfo, PluginInfo, RepositoryInfo,
   SessionInfo, TaskInfo, TaskTrigger, User, UserPolicy, VirtualFolder,
 } from "../core/types";
 import { secondsToTicks, ticksToSeconds } from "../core/types";
 import { cardImage, Cover, Empty, ErrorNote, Field, Group, Modal, PageHeader, Segmented, Spinner, Toggle, useAction, useLoad } from "./components";
+import { FolderPicker, TagInput } from "./configform";
 import { bitrate, bytes, clock, dateTime, relativeTime } from "./fmt";
 import { Icon } from "./icons";
 import { writeTextFile } from "./native";
+import { ServerSettingsPage, SERVER_PAGES } from "./serverpages";
 import { ui, useModel } from "./state";
 
-const PAGES: { id: string; label: string; icon: string; group: string }[] = [
-  { id: "general", label: "General", icon: "settings", group: "Server" },
-  { id: "branding", label: "Branding", icon: "palette", group: "Server" },
-  { id: "users", label: "Users", icon: "users", group: "Server" },
-  { id: "libraries", label: "Libraries", icon: "folder", group: "Server" },
-  { id: "display", label: "Display", icon: "grid", group: "Server" },
-  { id: "metadata", label: "Metadata", icon: "tag", group: "Server" },
-  { id: "nfo", label: "NFO settings", icon: "edit", group: "Server" },
-  { id: "transcoding", label: "Transcoding", icon: "zap", group: "Playback" },
-  { id: "resume", label: "Resume & streaming", icon: "play", group: "Playback" },
-  { id: "trickplay", label: "Trickplay", icon: "image", group: "Playback" },
-  { id: "networking", label: "Networking", icon: "network", group: "Server" },
-  { id: "devices", label: "Devices", icon: "devices", group: "Devices" },
-  { id: "activity", label: "Activity", icon: "activity", group: "Devices" },
-  { id: "livetv", label: "Live TV", icon: "live", group: "Live TV" },
-  { id: "plugins", label: "Plugins", icon: "puzzle", group: "Advanced" },
-  { id: "catalog", label: "Plugin catalog", icon: "download", group: "Advanced" },
-  { id: "repositories", label: "Repositories", icon: "link", group: "Advanced" },
-  { id: "tasks", label: "Scheduled tasks", icon: "clock", group: "Advanced" },
-  { id: "apikeys", label: "API keys", icon: "key2", group: "Advanced" },
-  { id: "logs", label: "Logs", icon: "terminal", group: "Advanced" },
-  { id: "backups", label: "Backups", icon: "archive", group: "Advanced" },
+// jellyfin-web's dashboard menu, in its order.
+const NAV: { group: string; items: { id: string; label: string; icon: string }[] }[] = [
+  { group: "Server", items: [
+    { id: "overview", label: "Dashboard", icon: "dashboard" },
+    { id: "general", label: "General", icon: "settings" },
+    { id: "branding", label: "Branding", icon: "palette" },
+    { id: "users", label: "Users", icon: "users" },
+  ] },
+  { group: "Libraries", items: [
+    { id: "libraries", label: "Libraries", icon: "folder" },
+    { id: "display", label: "Display", icon: "grid" },
+    { id: "metadata", label: "Metadata", icon: "tag" },
+    { id: "nfo", label: "NFO settings", icon: "edit" },
+  ] },
+  { group: "Playback", items: [
+    { id: "transcoding", label: "Transcoding", icon: "zap" },
+    { id: "resume", label: "Resume", icon: "play" },
+    { id: "streaming", label: "Streaming", icon: "network" },
+    { id: "trickplay", label: "Trickplay", icon: "image" },
+  ] },
+  { group: "Devices", items: [
+    { id: "devices", label: "Devices", icon: "devices" },
+    { id: "activity", label: "Activity", icon: "activity" },
+  ] },
+  { group: "Live TV", items: [
+    { id: "livetv", label: "Live TV", icon: "live" },
+    { id: "dvr", label: "DVR", icon: "calendar" },
+  ] },
+  { group: "Plugins", items: [
+    { id: "plugins", label: "My plugins", icon: "puzzle" },
+    { id: "catalog", label: "Catalog", icon: "download" },
+    { id: "repositories", label: "Repositories", icon: "link" },
+  ] },
+  { group: "Advanced", items: [
+    { id: "networking", label: "Networking", icon: "network" },
+    { id: "apikeys", label: "API keys", icon: "key2" },
+    { id: "backups", label: "Backups", icon: "archive" },
+    { id: "logs", label: "Logs", icon: "terminal" },
+    { id: "tasks", label: "Scheduled tasks", icon: "clock" },
+  ] },
 ];
+const NAV_ITEMS = NAV.flatMap((g) => g.items);
 
+// The chosen menu item (kept while you move around the app).
+let section = "overview";
+const listeners = new Set<() => void>();
+function useSection() {
+  return useSyncExternalStore((fn) => { listeners.add(fn); return () => listeners.delete(fn); }, () => section);
+}
+function choose(id: string) {
+  section = id;
+  listeners.forEach((fn) => fn());
+  ui.popToRoot("dashboard");
+}
+
+/** Opens a menu page, or a page inside one (a user, a library, a plugin, a task, a log). */
 function open(page: string, arg?: string) {
-  ui.push("dashboard", { kind: "dashboard", page, arg });
+  if (!arg && NAV_ITEMS.some((i) => i.id === page)) choose(page);
+  else ui.push("dashboard", { kind: "dashboard", page, arg });
+}
+
+export function DashboardRoot() {
+  const current = useSection();
+  const item = NAV_ITEMS.find((i) => i.id === current) ?? NAV_ITEMS[0];
+  const top = useRef<HTMLDivElement>(null);
+  // A new page starts at the top.
+  useEffect(() => { top.current?.closest(".scroll")?.scrollTo({ top: 0 }); }, [item.id]);
+  return (
+    <div className="page" ref={top}>
+      <PageHeader title={item.id === "overview" ? "Dashboard" : item.label} subtitle={item.id === "overview" ? undefined : NAV.find((g) => g.items.includes(item))?.group} />
+      <div className="settings-layout dash-layout">
+        <nav className="settings-nav dash-nav">
+          {NAV.map((g) => (
+            <div key={g.group} className="nav-group">
+              <div className="nav-group-title">{g.group}</div>
+              {g.items.map((i) => <button key={i.id} className={`nav-item ${i.id === item.id ? "on" : ""}`} onClick={() => choose(i.id)}><Icon name={i.icon} size={17} /> {i.label}</button>)}
+            </div>
+          ))}
+        </nav>
+        <div className="settings-body dash-body" key={item.id}>
+          {item.id === "overview" ? <Overview /> : <SectionPage page={item.id} />}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // MARK: Overview
 
-export function DashboardRoot() {
+function Overview() {
   const model = useModel();
   const api = model.api!;
   const { data: info, reload: reloadInfo } = useLoad(() => api.systemInfo(), []);
   const { data: storage } = useLoad(() => api.get<{ ProgramDataFolder?: Folder; CacheFolder?: Folder; LogFolder?: Folder; TranscodingTempFolder?: Folder; LibraryFolders?: Folder[] }>("/System/Info/Storage").catch(() => null), []);
-  const groups = [...new Set(PAGES.map((p) => p.group))];
   const { busy, run } = useAction();
   return (
-    <div className="page">
-      <PageHeader title="Dashboard" subtitle={info?.ServerName ? `${info.ServerName}${info.Version ? ` · Jellyfin ${info.Version}` : ""}` : undefined}>
+    <>
+      <div className="toolbar-row">
+        {info?.ServerName && <span className="muted">{info.ServerName}{info.Version ? ` · Jellyfin ${info.Version}` : ""}</span>}
+        <div className="toolbar-spacer" />
         <button className="glass-button" disabled={busy} onClick={() => void run(() => api.post("/Library/Refresh"), "Scanning all libraries")}><Icon name="refresh" size={15} /> Scan all libraries</button>
         <button className="glass-button" onClick={() => ui.openSheet({ kind: "confirm", title: "Restart the server?", text: "Playback on every device stops for a moment.", confirmLabel: "Restart", run: async () => { await api.post("/System/Restart"); model.toast("Restarting…"); setTimeout(reloadInfo, 15000); } })}><Icon name="repeat" size={15} /> Restart</button>
         <button className="glass-button danger" onClick={() => ui.openSheet({ kind: "confirm", danger: true, title: "Shut down the server?", text: "You'll need to start it again on the server machine.", confirmLabel: "Shut down", run: () => api.post("/System/Shutdown") })}><Icon name="power" size={15} /> Shut down</button>
-      </PageHeader>
+      </div>
       {info?.HasPendingRestart && <div className="banner warn"><Icon name="info" size={16} /> The server needs a restart to apply changes.</div>}
       {info?.HasUpdateAvailable && <div className="banner"><Icon name="download" size={16} /> A Jellyfin update is available.</div>}
       <div className="dash-grid">
@@ -85,17 +146,7 @@ export function DashboardRoot() {
         <RunningTasks />
         <RecentActivity />
       </div>
-      {groups.map((g) => (
-        <section key={g}>
-          <h2 className="section-title">{g}</h2>
-          <div className="dash-tiles">
-            {PAGES.filter((p) => p.group === g).map((p) => (
-              <button key={p.id} className="dash-tile panel" onClick={() => open(p.id)}><Icon name={p.icon} size={22} /><span>{p.label}</span><Icon name="chevronRight" size={16} className="row-chevron" /></button>
-            ))}
-          </div>
-        </section>
-      ))}
-    </div>
+    </>
   );
 }
 
@@ -222,75 +273,55 @@ function ActivityRows({ entries }: { entries: ActivityLogEntry[] }) {
 
 // MARK: Pages
 
+/** A page from the menu. */
+function SectionPage({ page }: { page: string }) {
+  if (SERVER_PAGES.includes(page)) return <ServerSettingsPage page={page} />;
+  switch (page) {
+    case "users": return <UsersPage />;
+    case "libraries": return <LibrariesPage />;
+    case "devices": return <DevicesPage />;
+    case "activity": return <ActivityPage />;
+    case "livetv": return <LiveTvPage />;
+    case "plugins": return <PluginsPage />;
+    case "catalog": return <CatalogPage />;
+    case "repositories": return <RepositoriesPage />;
+    case "tasks": return <TasksPage />;
+    case "apikeys": return <ApiKeysPage />;
+    case "logs": return <LogsPage />;
+    case "backups": return <BackupsPage />;
+    default: return null;
+  }
+}
+
+/** A page inside a menu page (opened on top of the Dashboard, with a back button). */
 export function DashboardPage({ page, arg, back }: { page: string; arg?: string; back: () => void }) {
-  const title = PAGES.find((p) => p.id === page)?.label ?? (page === "user" ? "User" : page === "library" ? "Library" : page === "plugin" ? "Plugin" : page === "log" ? arg ?? "Log" : page);
+  const title = page === "user" ? "User" : page === "library" ? arg ?? "Library" : page === "plugin" ? "Plugin" : page === "task" ? "Scheduled task" : page === "log" ? arg ?? "Log" : NAV_ITEMS.find((i) => i.id === page)?.label ?? page;
   return (
     <div className="page">
       <PageHeader title={title} back={back} />
-      {page === "general" && <ServerConfigPage curated={["ServerName", "UICulture", "PreferredMetadataLanguage", "MetadataCountryCode", "QuickConnectAvailable", "EnableMetrics", "IsStartupWizardCompleted", "CachePath", "MetadataPath", "LibraryScanFanoutConcurrency", "LibraryMetadataRefreshConcurrency", "ParallelImageEncodingLimit", "LogFileRetentionDays", "ActivityLogRetentionDays", "EnableLegacyAuthorization"]} />}
-      {page === "branding" && <NamedConfigPage name="branding" curated={["LoginDisclaimer", "CustomCss", "SplashscreenEnabled"]} />}
-      {page === "display" && <ServerConfigPage curated={["EnableFolderView", "DisplaySpecialsWithinSeasons", "EnableGroupingMoviesIntoCollections", "EnableGroupingShowsIntoCollections", "EnableExternalContentInSuggestions", "SortReplaceCharacters", "SortRemoveCharacters", "SortRemoveWords"]} only />}
-      {page === "metadata" && <><ServerConfigPage curated={["PreferredMetadataLanguage", "MetadataCountryCode", "DummyChapterDuration", "ChapterImageResolution", "ImageExtractionTimeoutMs", "SaveMetadataHidden", "EnableSlowResponseWarning", "ContentTypes", "MetadataOptions", "PathSubstitutions"]} only /><NamedConfigPage name="metadata" title="Image extraction" /></>}
-      {page === "nfo" && <NamedConfigPage name="xbmcmetadata" curated={["UserId", "ReleaseDateFormat", "SaveImagePathsInNfo", "EnablePathSubstitution", "EnableExtraThumbsDuplication"]} />}
-      {page === "transcoding" && <NamedConfigPage name="encoding" curated={[
-        "HardwareAccelerationType", "EnableHardwareEncoding", "HardwareDecodingCodecs", "EnableDecodingColorDepth10Hevc", "EnableDecodingColorDepth10Vp9", "EnableDecodingColorDepth10HevcRext",
-        "EnableDecodingColorDepth12HevcRext", "AllowHevcEncoding", "AllowAv1Encoding", "EnableTonemapping", "TonemappingAlgorithm", "TonemappingMode", "TonemappingRange", "TonemappingPeak",
-        "EncoderPreset", "H264Crf", "H265Crf", "EncodingThreadCount", "EnableThrottling", "ThrottleDelaySeconds", "EnableSegmentDeletion", "SegmentKeepSeconds", "DownMixAudioBoost",
-        "DownMixStereoAlgorithm", "MaxMuxingQueueSize", "EnableFallbackFont", "FallbackFontPath", "TranscodingTempPath", "EncoderAppPathDisplay", "VaapiDevice", "QsvDevice",
-      ]} />}
-      {page === "resume" && <ServerConfigPage curated={["MinResumePct", "MaxResumePct", "MinResumeDurationSeconds", "MinAudiobookResume", "MaxAudiobookResume", "InactiveSessionThreshold", "RemoteClientBitrateLimit", "MaxAudioChannels"]} only />}
-      {page === "trickplay" && <ServerConfigPage curated={["TrickplayOptions"]} only />}
-      {page === "networking" && <NamedConfigPage name="network" curated={[
-        "BaseUrl", "EnableHttps", "RequireHttps", "CertificatePath", "CertificatePassword", "InternalHttpPort", "InternalHttpsPort", "PublicHttpPort", "PublicHttpsPort",
-        "EnableRemoteAccess", "LocalNetworkSubnets", "LocalNetworkAddresses", "KnownProxies", "IgnoreVirtualInterfaces", "VirtualInterfaceNames", "EnableIPv4", "EnableIPv6",
-        "RemoteIPFilter", "IsRemoteIPFilterBlacklist", "EnablePublishedServerUriByRequest", "PublishedServerUriBySubnet", "AutoDiscovery",
-      ]} warn="Wrong network settings can make the server unreachable. Change with care." />}
-      {page === "users" && <UsersPage />}
-      {page === "user" && arg && <UserPage id={arg} />}
-      {page === "libraries" && <LibrariesPage />}
-      {page === "library" && arg && <LibraryEditPage name={arg} />}
-      {page === "devices" && <DevicesPage />}
-      {page === "activity" && <ActivityPage />}
-      {page === "livetv" && <LiveTvPage />}
-      {page === "plugins" && <PluginsPage />}
-      {page === "plugin" && arg && <PluginPage id={arg} />}
-      {page === "catalog" && <CatalogPage />}
-      {page === "repositories" && <RepositoriesPage />}
-      {page === "tasks" && <TasksPage />}
-      {page === "task" && arg && <TaskPage id={arg} />}
-      {page === "apikeys" && <ApiKeysPage />}
-      {page === "logs" && <LogsPage />}
-      {page === "log" && arg && <LogPage name={arg} />}
-      {page === "backups" && <BackupsPage />}
+      <div className="dash-sub">
+        {page === "user" && arg && <UserPage id={arg} />}
+        {page === "library" && arg && <LibraryEditPage name={arg} />}
+        {page === "plugin" && arg && <PluginPage id={arg} />}
+        {page === "task" && arg && <TaskPage id={arg} />}
+        {page === "log" && arg && <LogPage name={arg} />}
+        {!arg && <SectionPage page={page} />}
+      </div>
     </div>
   );
 }
 
-// MARK: Generic config editor
-
-const LABELS: Record<string, string> = {
-  UICulture: "Display language", QuickConnectAvailable: "Allow Quick Connect", EnableMetrics: "Prometheus metrics (/metrics)", IsStartupWizardCompleted: "Setup wizard completed",
-  LibraryScanFanoutConcurrency: "Parallel library scan tasks (0 = automatic)", LibraryMetadataRefreshConcurrency: "Parallel metadata refreshes (0 = automatic)",
-  ParallelImageEncodingLimit: "Parallel image encodings (0 = automatic)", EnableLegacyAuthorization: "Accept old clients' authorization (api_key, X-Emby-Token)",
-  MinResumePct: "Minimum resume percentage", MaxResumePct: "Maximum resume percentage", MinResumeDurationSeconds: "Shortest resumable length (seconds)",
-  RemoteClientBitrateLimit: "Internet streaming bitrate limit (bits/s, 0 = none)", HardwareAccelerationType: "Hardware acceleration", EncoderPreset: "Encoder preset",
-  H264Crf: "H.264 quality (CRF)", H265Crf: "HEVC quality (CRF)", BaseUrl: "Base URL", EnableHttps: "Enable HTTPS", RequireHttps: "Require HTTPS",
-  EnableRemoteAccess: "Allow remote connections", LocalNetworkSubnets: "LAN networks", KnownProxies: "Known proxies", InternalHttpPort: "HTTP port", InternalHttpsPort: "HTTPS port",
-  PublicHttpPort: "Public HTTP port", PublicHttpsPort: "Public HTTPS port", LoginDisclaimer: "Login disclaimer", CustomCss: "Custom CSS", SplashscreenEnabled: "Splash screen",
-  EnableFolderView: "Show a folder view", DisplaySpecialsWithinSeasons: "Show specials within their seasons", EnableGroupingMoviesIntoCollections: "Group movies into collections",
-  EnableGroupingShowsIntoCollections: "Group shows into collections", EnableExternalContentInSuggestions: "External content in suggestions",
-};
+// MARK: Plugin settings (each plugin has its own options, so they're read from its config)
 
 function label(key: string) {
-  return LABELS[key] ?? key.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2").replace(/^./, (c) => c.toUpperCase());
+  return key.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2").replace(/^./, (c) => c.toUpperCase());
 }
 
-/** Edits one JSON object: booleans, numbers, text, lists; nested objects open in place. */
-function ObjectEditor({ value, onChange, keys, skip }: { value: Record<string, unknown>; onChange: (v: Record<string, unknown>) => void; keys?: string[]; skip?: Set<string> }) {
-  const all = keys ?? Object.keys(value);
+/** Edits one JSON object: switches, numbers, text, lists as chips; nested objects open in place. */
+function ObjectEditor({ value, onChange }: { value: Record<string, unknown>; onChange: (v: Record<string, unknown>) => void }) {
   return (
     <div className="form">
-      {all.filter((k) => k in value && !skip?.has(k)).map((k) => <ValueEditor key={k} name={k} value={value[k]} onChange={(v) => onChange({ ...value, [k]: v })} />)}
+      {Object.keys(value).map((k) => <ValueEditor key={k} name={k} value={value[k]} onChange={(v) => onChange({ ...value, [k]: v })} />)}
     </div>
   );
 }
@@ -300,17 +331,22 @@ function ValueEditor({ name, value, onChange }: { name: string; value: unknown; 
   if (typeof value === "boolean") return <Toggle label={label(name)} checked={value} onChange={onChange} />;
   if (typeof value === "number") return <Field label={label(name)}><input type="number" step="any" value={value} onChange={(e) => onChange(e.target.value === "" ? 0 : Number(e.target.value))} /></Field>;
   if (typeof value === "string" || value === null) {
-    const long = name.toLowerCase().includes("css") || name.toLowerCase().includes("disclaimer");
-    return <Field label={label(name)}>{long ? <textarea rows={6} value={value ?? ""} onChange={(e) => onChange(e.target.value)} /> : <input value={value ?? ""} onChange={(e) => onChange(e.target.value)} type={name.toLowerCase().includes("password") ? "password" : "text"} />}</Field>;
+    const long = /css|script|template|description/i.test(name) || (typeof value === "string" && (value.length > 120 || value.includes("\n")));
+    return <Field label={label(name)}>{long ? <textarea rows={6} value={value ?? ""} onChange={(e) => onChange(e.target.value)} /> : <input value={value ?? ""} onChange={(e) => onChange(e.target.value)} type={/password|secret|token|apikey/i.test(name) ? "password" : "text"} autoComplete="off" spellCheck={false} />}</Field>;
   }
   if (Array.isArray(value)) {
     if (value.every((x) => typeof x === "string" || typeof x === "number")) {
-      return <Field label={label(name)} hint="One per line"><textarea rows={Math.min(8, Math.max(2, value.length + 1))} value={value.join("\n")} onChange={(e) => onChange(e.target.value.split("\n").map((x) => x.trim()).filter(Boolean).map((x) => (value.length && typeof value[0] === "number" ? Number(x) : x)))} /></Field>;
+      return <Field label={label(name)}><TagInput value={value as (string | number)[]} numeric={value.length > 0 && typeof value[0] === "number"} onChange={onChange} /></Field>;
     }
     return (
       <div className="nested">
         <button className="text-button" onClick={() => setOpen(!open)}><Icon name={open ? "chevronDown" : "chevronRight"} size={14} /> {label(name)} <span className="muted small">({value.length})</span></button>
-        {open && <Field label="As JSON"><JsonArea value={value} onChange={onChange} /></Field>}
+        {open && value.map((v, i) => (
+          <div key={i} className="nested-item">
+            {v && typeof v === "object" ? <ObjectEditor value={v as Record<string, unknown>} onChange={(nv) => onChange(value.map((x, j) => (j === i ? nv : x)))} /> : <ValueEditor name={`${name} ${i + 1}`} value={v} onChange={(nv) => onChange(value.map((x, j) => (j === i ? nv : x)))} />}
+            <button className="link-button small danger" onClick={() => onChange(value.filter((_, j) => j !== i))}>Remove</button>
+          </div>
+        ))}
       </div>
     );
   }
@@ -325,56 +361,27 @@ function ValueEditor({ name, value, onChange }: { name: string; value: unknown; 
   return null;
 }
 
-function JsonArea({ value, onChange }: { value: unknown; onChange: (v: unknown) => void }) {
-  const [text, setText] = useState(() => JSON.stringify(value, null, 2));
-  const [bad, setBad] = useState(false);
-  return <textarea className={`mono ${bad ? "bad" : ""}`} rows={10} value={text} onChange={(e) => { setText(e.target.value); try { onChange(JSON.parse(e.target.value)); setBad(false); } catch { setBad(true); } }} />;
-}
-
-/** A config with the chosen fields first and every other field under "All options". */
-function ConfigEditor({ load, save, curated, only, warn, title }: { load: () => Promise<Record<string, unknown>>; save: (v: Record<string, unknown>) => Promise<unknown>; curated?: string[]; only?: boolean; warn?: string; title?: string }) {
-  const { data, error, reload } = useLoad(load, []);
+function PluginConfig({ id }: { id: string }) {
+  const model = useModel();
+  const api = model.api!;
+  const { data, error, reload } = useLoad(() => api.get<Record<string, unknown>>(`/Plugins/${id}/Configuration`), [id]);
   const [draft, setDraft] = useState<Record<string, unknown> | null>(null);
-  const [showAll, setShowAll] = useState(false);
   useEffect(() => { if (data) setDraft(structuredClone(data)); }, [data]);
   const { busy, run } = useAction();
   const dirty = useMemo(() => JSON.stringify(draft) !== JSON.stringify(data), [draft, data]);
   if (error) return <ErrorNote text={error} retry={reload} />;
   if (!draft) return <Spinner />;
-  const first = (curated ?? []).filter((k) => k in draft);
-  const rest = Object.keys(draft).filter((k) => !first.includes(k));
+  const save = () => run(async () => { await api.post(`/Plugins/${id}/Configuration`, draft); reload(); }, "Saved");
   return (
-    <Group title={title} actions={<button className="glass-button prominent" disabled={busy || !dirty} onClick={() => void run(async () => { await save(draft); reload(); }, "Saved")}>Save</button>}>
-      {warn && <div className="banner warn"><Icon name="info" size={15} /> {warn}</div>}
-      {first.length > 0 && <ObjectEditor value={draft} onChange={setDraft} keys={first} />}
-      {(!first.length || !only) && rest.length > 0 && (
-        <div className="nested">
-          {first.length > 0 && <button className="text-button" onClick={() => setShowAll(!showAll)}><Icon name={showAll ? "chevronDown" : "chevronRight"} size={14} /> All options ({rest.length})</button>}
-          {(showAll || !first.length) && <ObjectEditor value={draft} onChange={setDraft} keys={rest} />}
-        </div>
-      )}
-      {dirty && <div className="sticky-save"><span>Unsaved changes</span><button className="glass-button" onClick={() => setDraft(structuredClone(data!))}>Discard</button><button className="glass-button prominent" disabled={busy} onClick={() => void run(async () => { await save(draft); reload(); }, "Saved")}>Save</button></div>}
+    <Group title="Settings">
+      {Object.keys(draft).length ? <ObjectEditor value={draft} onChange={setDraft} /> : <p className="muted">This plugin has no settings.</p>}
+      <div className={`form-actions ${dirty ? "sticky-save" : ""}`}>
+        {dirty && <span>Unsaved changes</span>}
+        {dirty && <button className="glass-button" onClick={() => setDraft(structuredClone(data!))}>Discard</button>}
+        <button className="glass-button prominent" disabled={busy || !dirty} onClick={() => void save()}>Save</button>
+      </div>
     </Group>
   );
-}
-
-function ServerConfigPage({ curated, only }: { curated: string[]; only?: boolean }) {
-  const model = useModel();
-  const api = model.api!;
-  const { data: cultures } = useLoad(() => api.get<Culture[]>("/Localization/Cultures"), []);
-  const { data: countries } = useLoad(() => api.get<Country[]>("/Localization/Countries"), []);
-  return (
-    <>
-      {cultures && countries && <p className="muted small">Languages use codes like "en" or "en-US"; countries like "US" or "SI". {cultures.length} languages and {countries.length} countries are available.</p>}
-      <ConfigEditor load={() => api.get<Record<string, unknown>>("/System/Configuration")} save={(v) => api.post("/System/Configuration", v)} curated={curated} only={only} />
-    </>
-  );
-}
-
-function NamedConfigPage({ name, curated, warn, title }: { name: string; curated?: string[]; warn?: string; title?: string }) {
-  const model = useModel();
-  const api = model.api!;
-  return <ConfigEditor title={title} load={() => api.get<Record<string, unknown>>(`/System/Configuration/${name}`)} save={(v) => (name === "branding" ? api.post("/System/Configuration/Branding", v) : api.post(`/System/Configuration/${name}`, v))} curated={curated} warn={warn} />;
 }
 
 function Kv({ k, v, wide }: { k: string; v?: string | null; wide?: boolean }) {
@@ -410,6 +417,17 @@ function UsersPage() {
   );
 }
 
+const UNRATED = [
+  { value: "Book", label: "Books" }, { value: "ChannelContent", label: "Channels" }, { value: "LiveTvChannel", label: "Live TV" }, { value: "Movie", label: "Movies" },
+  { value: "Music", label: "Music" }, { value: "Trailer", label: "Trailers" }, { value: "Series", label: "Shows" },
+];
+const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Everyday", "Weekday", "Weekend"];
+const dayLabel = (d: string) => (d === "Everyday" ? "Every day" : d === "Weekday" ? "Weekdays" : d === "Weekend" ? "Weekends" : d);
+const hourLabel = (h: number) => `${String(Math.floor(h) % 24).padStart(2, "0")}:${h % 1 ? "30" : "00"}`;
+interface Schedule { DayOfWeek: string; StartHour: number; EndHour: number }
+interface Rating { Name: string; Value?: number | null; RatingScore?: { score: number; subScore?: number | null } | null }
+
+/** One user, in jellyfin-web's tabs: Profile, Access, Parental control, Password. */
 function UserPage({ id }: { id: string }) {
   const model = useModel();
   const api = model.api!;
@@ -417,104 +435,185 @@ function UserPage({ id }: { id: string }) {
   const { data: views } = useLoad(() => api.get<{ Items: { Id: string; Name: string }[] }>("/Library/MediaFolders", { isHidden: false }), []);
   const { data: channels } = useLoad(() => api.get<{ Items: { Id: string; Name: string }[] }>("/Channels").catch(() => ({ Items: [] })), []);
   const { data: devices } = useLoad(() => api.get<{ Items: DeviceInfo[] }>("/Devices"), []);
-  const { data: ratings } = useLoad(() => api.get<{ Name: string; Value?: number | null }[]>("/Localization/ParentalRatings"), []);
+  const { data: ratings } = useLoad(() => api.get<Rating[]>("/Localization/ParentalRatings"), []);
+  const { data: authProviders } = useLoad(() => api.get<{ Name: string; Id: string }[]>("/Auth/Providers").catch(() => []), []);
+  const { data: resetProviders } = useLoad(() => api.get<{ Name: string; Id: string }[]>("/Auth/PasswordResetProviders").catch(() => []), []);
   const [tab, setTab] = useState<"profile" | "access" | "parental" | "password">("profile");
   const [policy, setPolicy] = useState<UserPolicy | null>(null);
   const [name, setName] = useState("");
   const [pw, setPw] = useState("");
+  const [pw2, setPw2] = useState("");
   useEffect(() => { if (user) { setPolicy(structuredClone(user.Policy!)); setName(user.Name ?? ""); } }, [user]);
   const { busy, run } = useAction();
   if (!user || !policy) return <Spinner />;
   const P = (k: keyof UserPolicy, v: unknown) => setPolicy({ ...policy, [k]: v });
-  const savePolicy = () => run(async () => { await api.post(`/Users/${id}/Policy`, policy); reload(); }, "Saved");
+  const dirty = JSON.stringify(policy) !== JSON.stringify(user.Policy) || name !== (user.Name ?? "");
+  const save = () => run(async () => {
+    if (name !== user.Name) await api.post(`/Users/${id}`, { ...user, Name: name });
+    await api.post(`/Users/${id}/Policy`, policy);
+    reload();
+  }, "Saved");
+  const inList = (k: keyof UserPolicy, itemId: string) => ((policy[k] as string[] | null | undefined) ?? []).includes(itemId);
   const listToggle = (k: keyof UserPolicy, itemId: string, on: boolean) => {
     const list = new Set((policy[k] as string[] | null | undefined) ?? []);
     if (on) list.add(itemId); else list.delete(itemId);
     P(k, [...list]);
   };
+  // jellyfin-web groups ratings with the same score ("PG-13/TV-14") and picks the highest the user may see.
+  const grouped: { label: string; score: number; sub: number | null }[] = [];
+  for (const r of ratings ?? []) {
+    const score = r.RatingScore?.score ?? r.Value;
+    if (score === null || score === undefined) continue;
+    const sub = r.RatingScore?.subScore ?? null;
+    const last = grouped[grouped.length - 1];
+    if (last && last.score === score && last.sub === sub) last.label += `/${r.Name}`;
+    else grouped.push({ label: r.Name, score, sub });
+  }
+  const maxSub = policy.MaxParentalSubRating ?? null;
+  let ratingIdx = grouped.findIndex((g) => g.score === policy.MaxParentalRating && g.sub === maxSub);
+  if (ratingIdx < 0 && policy.MaxParentalRating != null) grouped.forEach((g, i) => { if (g.score <= policy.MaxParentalRating!) ratingIdx = i; });
+  const schedules = (policy.AccessSchedules ?? []) as Schedule[];
+  const setSchedules = (v: Schedule[]) => P("AccessSchedules", v);
+  const SaveBar = () => (
+    <div className={`form-actions ${dirty ? "sticky-save" : ""}`}>
+      {dirty && <span>Unsaved changes</span>}
+      {dirty && <button className="glass-button" onClick={() => { setPolicy(structuredClone(user.Policy!)); setName(user.Name ?? ""); }}>Discard</button>}
+      <button className="glass-button prominent" disabled={busy || !dirty} onClick={() => void save()}>Save</button>
+    </div>
+  );
   return (
     <>
       <div className="toolbar-row">
-        <Segmented value={tab} options={[{ value: "profile", label: "Profile" }, { value: "access", label: "Library access" }, { value: "parental", label: "Parental control" }, { value: "password", label: "Password" }]} onChange={setTab} />
+        <Segmented value={tab} options={[{ value: "profile", label: "Profile" }, { value: "access", label: "Access" }, { value: "parental", label: "Parental control" }, { value: "password", label: "Password" }]} onChange={setTab} />
         <div className="toolbar-spacer" />
         {id !== model.user?.Id && <button className="glass-button danger" onClick={() => ui.openSheet({ kind: "confirm", danger: true, title: `Delete ${user.Name}?`, text: "Their watch history and settings are deleted too.", confirmLabel: "Delete", run: async () => { await api.del(`/Users/${id}`); ui.pop("dashboard"); } })}><Icon name="trash" size={15} /> Delete user</button>}
       </div>
+      {policy.IsDisabled && <div className="banner warn"><Icon name="info" size={15} /> This user is currently disabled. Turn off "Disable this user" to let them sign in again.</div>}
       {tab === "profile" && (
         <>
-          <Group title="Profile" actions={<button className="glass-button prominent" disabled={busy} onClick={() => void run(async () => { await api.post(`/Users/${id}`, { ...user, Name: name }); await api.post(`/Users/${id}/Policy`, policy); reload(); }, "Saved")}>Save</button>}>
+          <Group title="Profile">
             <Field label="Name"><input value={name} onChange={(e) => setName(e.target.value)} /></Field>
-            <Toggle label="Administrator" detail="Can manage the server" checked={policy.IsAdministrator} onChange={(v) => P("IsAdministrator", v)} />
-            <Toggle label="Disabled" detail="Can't sign in" checked={policy.IsDisabled} onChange={(v) => P("IsDisabled", v)} />
-            <Toggle label="Hidden from login screens" checked={policy.IsHidden} onChange={(v) => P("IsHidden", v)} />
-            <Toggle label="Can manage collections" checked={policy.EnableCollectionManagement} onChange={(v) => P("EnableCollectionManagement", v)} />
-            <Toggle label="Can manage subtitles" checked={policy.EnableSubtitleManagement} onChange={(v) => P("EnableSubtitleManagement", v)} />
-            <Toggle label="Can manage lyrics" checked={!!policy.EnableLyricManagement} onChange={(v) => P("EnableLyricManagement", v)} />
-            <Toggle label="Allow remote connections" checked={policy.EnableRemoteAccess} onChange={(v) => P("EnableRemoteAccess", v)} />
-            <Toggle label="Live TV access" checked={policy.EnableLiveTvAccess} onChange={(v) => P("EnableLiveTvAccess", v)} />
-            <Toggle label="Live TV recording management" checked={policy.EnableLiveTvManagement} onChange={(v) => P("EnableLiveTvManagement", v)} />
+            {(authProviders?.length ?? 0) > 1 && <Field label="Authentication provider" hint="Checks this user's password."><select value={policy.AuthenticationProviderId ?? ""} onChange={(e) => P("AuthenticationProviderId", e.target.value)}>{authProviders!.map((a) => <option key={a.Id} value={a.Id}>{a.Name}</option>)}</select></Field>}
+            {(resetProviders?.length ?? 0) > 1 && <Field label="Password reset provider" hint="Used when this user asks to reset their password."><select value={policy.PasswordResetProviderId ?? ""} onChange={(e) => P("PasswordResetProviderId", e.target.value)}>{resetProviders!.map((a) => <option key={a.Id} value={a.Id}>{a.Name}</option>)}</select></Field>}
+            <Toggle label="Allow remote connections to this server" detail="Off blocks this user's connections from outside your network." checked={policy.EnableRemoteAccess} onChange={(v) => P("EnableRemoteAccess", v)} />
+            <Toggle label="Allow this user to manage the server" checked={policy.IsAdministrator} onChange={(v) => P("IsAdministrator", v)} />
+            <Toggle label="Allow this user to manage collections" checked={policy.EnableCollectionManagement} onChange={(v) => P("EnableCollectionManagement", v)} />
+            <Toggle label="Allow this user to edit subtitles" checked={policy.EnableSubtitleManagement} onChange={(v) => P("EnableSubtitleManagement", v)} />
+            {"EnableLyricManagement" in policy && <Toggle label="Allow this user to edit lyrics" checked={!!policy.EnableLyricManagement} onChange={(v) => P("EnableLyricManagement", v)} />}
           </Group>
-          <Group title="Playback" actions={<button className="glass-button prominent" disabled={busy} onClick={() => void savePolicy()}>Save</button>}>
+          <Group title="Feature access">
+            <Toggle label="Allow Live TV access" checked={policy.EnableLiveTvAccess} onChange={(v) => P("EnableLiveTvAccess", v)} />
+            <Toggle label="Allow Live TV recording management" checked={policy.EnableLiveTvManagement} onChange={(v) => P("EnableLiveTvManagement", v)} />
+          </Group>
+          <Group title="Playback">
             <Toggle label="Allow media playback" checked={policy.EnableMediaPlayback} onChange={(v) => P("EnableMediaPlayback", v)} />
-            <Toggle label="Allow audio transcoding" checked={policy.EnableAudioPlaybackTranscoding} onChange={(v) => P("EnableAudioPlaybackTranscoding", v)} />
-            <Toggle label="Allow video transcoding" checked={policy.EnableVideoPlaybackTranscoding} onChange={(v) => P("EnableVideoPlaybackTranscoding", v)} />
-            <Toggle label="Allow remuxing" checked={policy.EnablePlaybackRemuxing} onChange={(v) => P("EnablePlaybackRemuxing", v)} />
-            <Toggle label="Force transcoding of remote sources (e.g. Live TV)" checked={policy.ForceRemoteSourceTranscoding} onChange={(v) => P("ForceRemoteSourceTranscoding", v)} />
-            <Field label="Internet streaming bitrate limit (Mbps, 0 = none)"><input type="number" value={policy.RemoteClientBitrateLimit / 1_000_000} onChange={(e) => P("RemoteClientBitrateLimit", Math.round(Number(e.target.value) * 1_000_000))} /></Field>
-            <Field label="Maximum simultaneous streams (0 = no limit)"><input type="number" value={policy.MaxActiveSessions} onChange={(e) => P("MaxActiveSessions", Number(e.target.value))} /></Field>
-            <Field label="Sign-in attempts before lockout (0 = default, -1 = never)"><input type="number" value={policy.LoginAttemptsBeforeLockout} onChange={(e) => P("LoginAttemptsBeforeLockout", Number(e.target.value))} /></Field>
-            <Field label="SyncPlay">
-              <Segmented value={policy.SyncPlayAccess} options={[{ value: "CreateAndJoinGroups", label: "Create & join" }, { value: "JoinGroups", label: "Join only" }, { value: "None", label: "Off" }]} onChange={(v) => P("SyncPlayAccess", v)} />
+            <Toggle label="Allow audio playback that requires transcoding" checked={policy.EnableAudioPlaybackTranscoding} onChange={(v) => P("EnableAudioPlaybackTranscoding", v)} />
+            <Toggle label="Allow video playback that requires transcoding" checked={policy.EnableVideoPlaybackTranscoding} onChange={(v) => P("EnableVideoPlaybackTranscoding", v)} />
+            <Toggle label="Allow video playback that requires conversion without re-encoding" detail="Turning transcoding off may make some files fail to play on some apps." checked={policy.EnablePlaybackRemuxing} onChange={(v) => P("EnablePlaybackRemuxing", v)} />
+            <Toggle label="Force transcoding of remote media sources such as Live TV" checked={policy.ForceRemoteSourceTranscoding} onChange={(v) => P("ForceRemoteSourceTranscoding", v)} />
+            <Field label="Internet streaming bitrate limit (Mbps)" hint="Overrides the server's limit (Dashboard → Playback → Streaming). 0 = no limit."><input type="number" min={0} step={0.25} value={policy.RemoteClientBitrateLimit ? policy.RemoteClientBitrateLimit / 1e6 : 0} onChange={(e) => P("RemoteClientBitrateLimit", Math.trunc(Math.max(0, Number(e.target.value) || 0) * 1e6))} /></Field>
+            <Field label="SyncPlay access" hint="Watching together in sync with other devices.">
+              <select value={policy.SyncPlayAccess} onChange={(e) => P("SyncPlayAccess", e.target.value)}>
+                <option value="CreateAndJoinGroups">Allow creating and joining groups</option>
+                <option value="JoinGroups">Allow joining groups</option>
+                <option value="None">No access</option>
+              </select>
             </Field>
-            <Toggle label="Allow downloads" checked={policy.EnableContentDownloading} onChange={(v) => P("EnableContentDownloading", v)} />
-            <Toggle label="Allow deleting media" checked={policy.EnableContentDeletion} onChange={(v) => P("EnableContentDeletion", v)} />
-            <Toggle label="Can control other users' sessions" checked={policy.EnableRemoteControlOfOtherUsers} onChange={(v) => P("EnableRemoteControlOfOtherUsers", v)} />
-            <Toggle label="Can control shared devices" checked={policy.EnableSharedDeviceControl} onChange={(v) => P("EnableSharedDeviceControl", v)} />
           </Group>
+          <Group title="Allow media deletion from">
+            <Toggle label="All libraries" checked={policy.EnableContentDeletion} onChange={(v) => P("EnableContentDeletion", v)} />
+            {!policy.EnableContentDeletion && <div className="switch-grid">{views?.Items.map((v) => <Toggle key={v.Id} label={v.Name} checked={inList("EnableContentDeletionFromFolders", v.Id)} onChange={(on) => listToggle("EnableContentDeletionFromFolders", v.Id, on)} />)}</div>}
+          </Group>
+          <Group title="Remote control">
+            <Toggle label="Allow remote control of other users" checked={policy.EnableRemoteControlOfOtherUsers} onChange={(v) => P("EnableRemoteControlOfOtherUsers", v)} />
+            <Toggle label="Allow remote control of shared devices" detail="DLNA devices count as shared until a user starts controlling them." checked={policy.EnableSharedDeviceControl} onChange={(v) => P("EnableSharedDeviceControl", v)} />
+          </Group>
+          <Group title="Other">
+            <Toggle label="Allow media downloading" detail="Save media on their devices (not the same as sync). Book libraries need this." checked={policy.EnableContentDownloading} onChange={(v) => P("EnableContentDownloading", v)} />
+            <Toggle label="Disable this user" detail="The server refuses their connections and ends the open ones." checked={policy.IsDisabled} onChange={(v) => P("IsDisabled", v)} />
+            <Toggle label="Hide this user from login screens" detail="For private or admin accounts: they sign in by typing their name and password." checked={policy.IsHidden} onChange={(v) => P("IsHidden", v)} />
+            <Field label="Failed login tries before the user is locked out" hint="0 = the default (3 tries, 5 for administrators); -1 = never lock out."><input type="number" min={-1} value={policy.LoginAttemptsBeforeLockout} onChange={(e) => P("LoginAttemptsBeforeLockout", Math.max(-1, Math.trunc(Number(e.target.value) || 0)))} /></Field>
+            <Field label="Maximum simultaneous sessions" hint="0 = no limit."><input type="number" min={0} value={policy.MaxActiveSessions} onChange={(e) => P("MaxActiveSessions", Math.max(0, Math.trunc(Number(e.target.value) || 0)))} /></Field>
+          </Group>
+          <SaveBar />
         </>
       )}
       {tab === "access" && (
-        <Group title="Library access" actions={<button className="glass-button prominent" disabled={busy} onClick={() => void savePolicy()}>Save</button>}>
-          <Toggle label="All libraries" checked={policy.EnableAllFolders} onChange={(v) => P("EnableAllFolders", v)} />
-          {!policy.EnableAllFolders && views?.Items.map((v) => <Toggle key={v.Id} label={v.Name} checked={(policy.EnabledFolders ?? []).includes(v.Id)} onChange={(on) => listToggle("EnabledFolders", v.Id, on)} />)}
-          {!!channels?.Items.length && <>
-            <Toggle label="All channels" checked={policy.EnableAllChannels} onChange={(v) => P("EnableAllChannels", v)} />
-            {!policy.EnableAllChannels && channels.Items.map((c) => <Toggle key={c.Id} label={c.Name} checked={(policy.EnabledChannels ?? []).includes(c.Id)} onChange={(on) => listToggle("EnabledChannels", c.Id, on)} />)}
-          </>}
-          <Toggle label="All devices" checked={policy.EnableAllDevices} onChange={(v) => P("EnableAllDevices", v)} />
-          {!policy.EnableAllDevices && devices?.Items.map((d) => <Toggle key={d.Id} label={`${d.CustomName || d.Name} (${d.AppName})`} checked={(policy.EnabledDevices ?? []).includes(d.Id ?? "")} onChange={(on) => listToggle("EnabledDevices", d.Id ?? "", on)} />)}
-          <Field label="Can delete media in these libraries">
-            <div className="form">{views?.Items.map((v) => <Toggle key={v.Id} label={v.Name} checked={(policy.EnableContentDeletionFromFolders ?? []).includes(v.Id)} onChange={(on) => listToggle("EnableContentDeletionFromFolders", v.Id, on)} />)}</div>
-          </Field>
-        </Group>
+        <>
+          <Group title="Library access">
+            <p className="group-help">The libraries this user can see. Administrators can edit every folder with the metadata manager.</p>
+            <Toggle label="Enable access to all libraries" checked={policy.EnableAllFolders} onChange={(v) => P("EnableAllFolders", v)} />
+            {!policy.EnableAllFolders && <div className="switch-grid">{views?.Items.map((v) => <Toggle key={v.Id} label={v.Name} checked={inList("EnabledFolders", v.Id)} onChange={(on) => listToggle("EnabledFolders", v.Id, on)} />)}</div>}
+          </Group>
+          {!!channels?.Items.length && (
+            <Group title="Channel access">
+              <Toggle label="Enable access to all channels" checked={policy.EnableAllChannels} onChange={(v) => P("EnableAllChannels", v)} />
+              {!policy.EnableAllChannels && <div className="switch-grid">{channels.Items.map((c) => <Toggle key={c.Id} label={c.Name} checked={inList("EnabledChannels", c.Id)} onChange={(on) => listToggle("EnabledChannels", c.Id, on)} />)}</div>}
+            </Group>
+          )}
+          {!policy.IsAdministrator && (
+            <Group title="Device access">
+              <p className="group-help">Only for devices that can be told apart; doesn't block browsers. With a list, new devices need approval here first.</p>
+              <Toggle label="Enable access from all devices" checked={policy.EnableAllDevices} onChange={(v) => P("EnableAllDevices", v)} />
+              {!policy.EnableAllDevices && <div className="switch-grid">{devices?.Items.map((d) => <Toggle key={d.Id} label={`${d.CustomName || d.Name} (${d.AppName})`} checked={inList("EnabledDevices", d.Id ?? "")} onChange={(on) => listToggle("EnabledDevices", d.Id ?? "", on)} />)}</div>}
+            </Group>
+          )}
+          <SaveBar />
+        </>
       )}
       {tab === "parental" && (
-        <Group title="Parental control" actions={<button className="glass-button prominent" disabled={busy} onClick={() => void savePolicy()}>Save</button>}>
-          <Field label="Highest allowed rating">
-            <select value={policy.MaxParentalRating ?? ""} onChange={(e) => P("MaxParentalRating", e.target.value === "" ? null : Number(e.target.value))}>
-              <option value="">No limit</option>{(ratings ?? []).filter((r) => r.Value !== null && r.Value !== undefined).map((r) => <option key={`${r.Name}-${r.Value}`} value={r.Value!}>{r.Name}</option>)}
-            </select>
-          </Field>
-          <Field label="Block unrated items of these types">
-            <div className="chips-wrap">{["Movie", "Series", "Music", "Book", "LiveTvChannel", "LiveTvProgram", "ChannelContent", "Trailer", "Other"].map((t) => {
-              const on = (policy.BlockUnratedItems ?? []).includes(t);
-              return <button key={t} className={`chip chip-button ${on ? "" : "chip-muted"}`} onClick={() => P("BlockUnratedItems", on ? (policy.BlockUnratedItems ?? []).filter((x) => x !== t) : [...(policy.BlockUnratedItems ?? []), t])}>{t}</button>;
-            })}</div>
-          </Field>
-          <Field label="Only allow items with these tags" hint="One per line"><textarea rows={3} value={(policy.AllowedTags ?? []).join("\n")} onChange={(e) => P("AllowedTags", e.target.value.split("\n").map((x) => x.trim()).filter(Boolean))} /></Field>
-          <Field label="Block items with these tags" hint="One per line"><textarea rows={3} value={(policy.BlockedTags ?? []).join("\n")} onChange={(e) => P("BlockedTags", e.target.value.split("\n").map((x) => x.trim()).filter(Boolean))} /></Field>
-          <Field label="Access schedule" hint={'When this user may sign in, as JSON (e.g. [{"DayOfWeek":"Everyday","StartHour":8,"EndHour":21}])'}><JsonArea value={policy.AccessSchedules ?? []} onChange={(v) => P("AccessSchedules", v)} /></Field>
-        </Group>
+        <>
+          <Group title="Maximum allowed parental rating">
+            <Field label="Highest allowed rating" hint="Titles rated higher are hidden from this user.">
+              <select value={ratingIdx < 0 ? "" : String(ratingIdx)} onChange={(e) => {
+                const g = e.target.value === "" ? null : grouped[Number(e.target.value)];
+                setPolicy({ ...policy, MaxParentalRating: g ? g.score : null, MaxParentalSubRating: g ? g.sub : null });
+              }}>
+                <option value="">No limit</option>
+                {grouped.map((g, i) => <option key={i} value={i}>{g.label}</option>)}
+              </select>
+            </Field>
+          </Group>
+          <Group title="Block items with no or unrecognized rating">
+            <div className="switch-grid">{UNRATED.map((t) => <Toggle key={t.value} label={t.label} checked={inList("BlockUnratedItems", t.value)} onChange={(on) => listToggle("BlockUnratedItems", t.value, on)} />)}</div>
+          </Group>
+          <Group title="Allow items with tags">
+            <Field label="Tags" hint="Only show media with at least one of these tags. Empty = no limit."><TagInput value={policy.AllowedTags ?? []} onChange={(v) => P("AllowedTags", v.map(String))} placeholder="Add a tag" /></Field>
+          </Group>
+          <Group title="Block items with tags">
+            <Field label="Tags" hint="Hide media with at least one of these tags."><TagInput value={policy.BlockedTags ?? []} onChange={(v) => P("BlockedTags", v.map(String))} placeholder="Add a tag" /></Field>
+          </Group>
+          {!policy.IsAdministrator && (
+            <Group title="Access schedule" actions={<button className="glass-button" onClick={() => setSchedules([...schedules, { DayOfWeek: "Sunday", StartHour: 0, EndHour: 24 }])}><Icon name="plus" size={15} /> Add</button>}>
+              <p className="group-help">Limit sign-ins to certain hours. With no schedule, the user can sign in any time.</p>
+              {schedules.map((sc, i) => {
+                const put = (patch: Partial<Schedule>) => setSchedules(schedules.map((x, j) => (j === i ? { ...x, ...patch } : x)));
+                return (
+                  <div key={i} className="schedule-row">
+                    <select value={sc.DayOfWeek} onChange={(e) => put({ DayOfWeek: e.target.value })}>{DAYS.map((d) => <option key={d} value={d}>{dayLabel(d)}</option>)}</select>
+                    <select value={sc.StartHour} onChange={(e) => put({ StartHour: Number(e.target.value) })}>{Array.from({ length: 48 }, (_, h) => h / 2).filter((h) => h < sc.EndHour).map((h) => <option key={h} value={h}>{hourLabel(h)}</option>)}</select>
+                    <span className="muted">to</span>
+                    <select value={sc.EndHour} onChange={(e) => put({ EndHour: Number(e.target.value) })}>{Array.from({ length: 48 }, (_, h) => (h + 1) / 2).filter((h) => h > sc.StartHour).map((h) => <option key={h} value={h}>{h === 24 ? "24:00" : hourLabel(h)}</option>)}</select>
+                    <button className="round-button" title="Remove" onClick={() => setSchedules(schedules.filter((_, j) => j !== i))}><Icon name="trash" size={14} /></button>
+                  </div>
+                );
+              })}
+            </Group>
+          )}
+          <SaveBar />
+        </>
       )}
       {tab === "password" && (
         <Group title="Password">
-          <Field label="New password"><input type="password" value={pw} onChange={(e) => setPw(e.target.value)} /></Field>
+          <Field label="New password"><input type="password" value={pw} onChange={(e) => setPw(e.target.value)} autoComplete="new-password" /></Field>
+          <Field label="Confirm new password"><input type="password" value={pw2} onChange={(e) => setPw2(e.target.value)} autoComplete="new-password" /></Field>
+          {pw2 && pw !== pw2 && <small className="score-low">The passwords don't match.</small>}
           <div className="row-line">
-            <button className="glass-button prominent" disabled={busy || !pw} onClick={() => void run(async () => { await api.post("/Users/Password", { NewPw: pw }, { userId: id }); setPw(""); }, "Password changed")}>Set password</button>
-            <button className="glass-button danger" disabled={busy} onClick={() => void run(() => api.post("/Users/Password", { ResetPassword: true }, { userId: id }), "Password removed")}>Remove password</button>
+            <button className="glass-button prominent" disabled={busy || !pw || pw !== pw2} onClick={() => void run(async () => { await api.post("/Users/Password", { NewPw: pw }, { userId: id }); setPw(""); setPw2(""); }, "Password changed")}>Save password</button>
+            <button className="glass-button danger" disabled={busy} onClick={() => ui.openSheet({ kind: "confirm", danger: true, title: "Reset this user's password?", text: "They can then sign in without a password until they set one.", confirmLabel: "Reset", run: () => api.post("/Users/Password", { ResetPassword: true }, { userId: id }) })}>Reset password</button>
           </div>
         </Group>
       )}
-      <details className="raw"><summary>Every policy option</summary><ObjectEditor value={policy as unknown as Record<string, unknown>} onChange={(v) => setPolicy(v as unknown as UserPolicy)} /><button className="glass-button prominent" disabled={busy} onClick={() => void savePolicy()}>Save</button></details>
     </>
   );
 }
@@ -586,36 +685,6 @@ function AddLibrary({ close }: { close: () => void }) {
         <LibraryOptionsEditor key={type} contentType={type} isNew value={options} onChange={setOptions} />
       </div>
       {browse && <FolderPicker onPick={(p) => { setPaths([...new Set([...paths, p])]); setBrowse(false); }} close={() => setBrowse(false)} />}
-    </Modal>
-  );
-}
-
-/** Browses folders on the server's disks. */
-function FolderPicker({ onPick, close }: { onPick: (p: string) => void; close: () => void }) {
-  const model = useModel();
-  const api = model.api!;
-  const [path, setPath] = useState<string | null>(null);
-  const [typed, setTyped] = useState("");
-  const { data, error } = useLoad(async (): Promise<FileSystemEntry[]> => {
-    if (path === null) {
-      const drives = await api.get<FileSystemEntry[]>("/Environment/Drives").catch(() => []);
-      const def = await api.get<{ Path?: string }>("/Environment/DefaultDirectoryBrowser").catch(() => null);
-      return [...(def?.Path ? [{ Name: def.Path, Path: def.Path, Type: "Directory" as const }] : []), ...drives];
-    }
-    return api.get<FileSystemEntry[]>("/Environment/DirectoryContents", { path, includeDirectories: true, includeFiles: false });
-  }, [path]);
-  const up = async () => {
-    if (!path) return;
-    const parent = await api.get<string>("/Environment/ParentPath", { path }).catch(() => null);
-    setPath(parent || null);
-  };
-  return (
-    <Modal title="Choose a folder on the server" onClose={close} width={560} actions={path ? <button className="glass-button prominent" onClick={() => onPick(path)}>Use this folder</button> : undefined}>
-      <div className="row-line"><button className="round-button" disabled={path === null} onClick={() => void up()}><Icon name="arrowUp" size={14} /></button><code className="path">{path ?? "Drives"}</code></div>
-      <form className="row-line" onSubmit={(e) => { e.preventDefault(); if (typed) setPath(typed); }}><input placeholder="Or type a path" value={typed} onChange={(e) => setTyped(e.target.value)} /><button className="glass-button">Go</button></form>
-      {error ? <ErrorNote text={error} /> : !data ? <Spinner /> : (
-        <div className="rows">{data.map((e) => <button key={e.Path} className="row" onClick={() => setPath(e.Path)}><Icon name="folder" size={16} /><div className="row-text">{e.Name}</div></button>)}</div>
-      )}
     </Modal>
   );
 }
@@ -749,7 +818,7 @@ function LiveTvPage() {
         ))}</div>
         <button className="glass-button" disabled={busy} onClick={() => void run(async () => { const tasks = await api.get<TaskInfo[]>("/ScheduledTasks"); const t = tasks.find((x) => x.Key === "RefreshGuide"); if (t?.Id) await api.post(`/ScheduledTasks/Running/${t.Id}`); }, "Refreshing the guide")}><Icon name="refresh" size={15} /> Refresh guide data</button>
       </Group>
-      <NamedConfigPage name="livetv" title="All Live TV options" curated={["GuideDays", "RecordingPath", "MovieRecordingPath", "SeriesRecordingPath", "EnableRecordingSubfolders", "EnableOriginalAudioWithEncodedRecordings", "PrePaddingSeconds", "PostPaddingSeconds", "RecordingPostProcessor", "RecordingPostProcessorArguments", "SaveRecordingNFO", "SaveRecordingImages"]} />
+      <p className="muted small">Recording options are under <button className="link-button" onClick={() => choose("dvr")}>DVR</button>.</p>
     </>
   );
 }
@@ -764,8 +833,7 @@ function PluginsPage() {
   if (!data) return <Spinner />;
   return (
     <>
-      <div className="toolbar-row"><button className="glass-button" onClick={() => open("catalog")}><Icon name="download" size={15} /> Plugin catalog</button></div>
-      <div className="plugin-grid">{data.map((p) => (
+            <div className="plugin-grid">{data.map((p) => (
         <div key={`${p.Id}-${p.Version}`} className="plugin panel">
           <Cover url={p.HasImage ? api.url(`/Plugins/${p.Id}/${p.Version}/Image`) : undefined} width="100%" height={110} radius={10} icon="puzzle" />
           <strong>{p.Name}</strong>
@@ -790,7 +858,7 @@ function PluginPage({ id }: { id: string }) {
   const mine = pages?.filter((p) => p.PluginId?.replace(/-/g, "") === id.replace(/-/g, "")) ?? [];
   return (
     <>
-      <ConfigEditor title="Settings" load={() => api.get<Record<string, unknown>>(`/Plugins/${id}/Configuration`)} save={(v) => api.post(`/Plugins/${id}/Configuration`, v)} />
+      <PluginConfig id={id} />
       {mine.length > 0 && (
         <Group title="Plugin pages">
           <p className="muted small">This plugin also has its own settings page made for the web dashboard.</p>

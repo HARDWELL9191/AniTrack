@@ -13,6 +13,7 @@ import { type ReactNode, useEffect, useState } from "react";
 import type { AppModel } from "../core/model";
 import type { Item } from "../core/types";
 import { type DropItem, Field, Spinner, useLoad } from "./components";
+import { TagInput } from "./configform";
 import { Icon } from "./icons";
 import { ui, useModel } from "./state";
 
@@ -227,7 +228,7 @@ export function LibraryOptionsEditor({ contentType, isNew, value, onChange }: { 
           {bool("UseCustomTagDelimiters") && (
             <div className="form grid-2">
               <Field label="Custom tag delimiters" hint="Each character splits a tag"><input value={arr("CustomTagDelimiters").join("")} onChange={(e) => set({ CustomTagDelimiters: e.target.value.split("") })} /></Field>
-              <Field label="Delimiter whitelist" hint="One per line: names that contain a delimiter but shouldn't be split"><textarea rows={3} value={arr("DelimiterWhitelist").join("\n")} onChange={(e) => set({ DelimiterWhitelist: e.target.value.split("\n").filter((x) => x.trim()) })} /></Field>
+              <Field label="Delimiter whitelist" hint="Names that contain a delimiter but shouldn't be split (e.g. AC/DC)"><TagInput value={arr("DelimiterWhitelist")} onChange={(v) => set({ DelimiterWhitelist: v.map(String) })} placeholder="Add a name" /></Field>
             </div>
           )}
         </OptionGroup>
@@ -274,7 +275,7 @@ function PluginChecks({ title, help, plugins, enabled, onChange }: { title: stri
       <div className="plugin-head"><strong>{title}</strong><small className="muted">{help}</small></div>
       {plugins.map((p) => (
         <label key={p.Name} className="plugin-row">
-          <input type="checkbox" checked={enabled.includes(p.Name)} onChange={(e) => onChange(e.target.checked ? [...enabled, p.Name] : enabled.filter((n) => n !== p.Name))} />
+          <input type="checkbox" className="switch sm" checked={enabled.includes(p.Name)} onChange={(e) => onChange(e.target.checked ? [...enabled, p.Name] : enabled.filter((n) => n !== p.Name))} />
           <span>{p.Name}</span>
         </label>
       ))}
@@ -291,7 +292,7 @@ function PluginList({ title, help, plugins, enabled, onChange, extra }: { title:
       <div className="plugin-head"><strong>{title}</strong><small className="muted">{help}</small>{extra}</div>
       {plugins.map((p, i) => (
         <div key={p.Name} className="plugin-row">
-          <input type="checkbox" aria-label={`Use ${p.Name}`} checked={enabled.includes(p.Name)} onChange={(e) => onChange(e.target.checked ? [...enabled, p.Name] : enabled.filter((n) => n !== p.Name), order)} />
+          <input type="checkbox" className="switch sm" aria-label={`Use ${p.Name}`} checked={enabled.includes(p.Name)} onChange={(e) => onChange(e.target.checked ? [...enabled, p.Name] : enabled.filter((n) => n !== p.Name), order)} />
           <span>{p.Name}</span>
           <span className="plugin-order">
             <button className="round-button" disabled={i === 0} onClick={() => move(i, -1)} aria-label="Higher priority"><Icon name="arrowUp" size={14} /></button>
@@ -339,7 +340,7 @@ function ImageOptions({ avail, options, onChange }: { avail: TypeAvailable; opti
       <div className="plugin-head"><strong>Images to download</strong></div>
       <div className="image-type-grid">
         {types.map((t) => (
-          <label key={t} className="plugin-row"><input type="checkbox" checked={config(t).Limit > 0} onChange={(e) => all({ Type: t, Limit: e.target.checked ? 1 : 0, MinWidth: 0 })} /><span>{IMAGE_LABELS[t] ?? t}</span></label>
+          <label key={t} className="plugin-row"><input type="checkbox" className="switch sm" checked={config(t).Limit > 0} onChange={(e) => all({ Type: t, Limit: e.target.checked ? 1 : 0, MinWidth: 0 })} /><span>{IMAGE_LABELS[t] ?? t}</span></label>
         ))}
       </div>
       {(avail.SupportedImageTypes ?? []).includes("Backdrop") && (
@@ -362,7 +363,7 @@ function LanguageChecks({ cultures, value, onChange }: { cultures: Culture[]; va
         <div className="language-grid">
           {langs.map((c) => (
             <label key={c.ThreeLetterISOLanguageName! + c.DisplayName} className="plugin-row">
-              <input type="checkbox" checked={value.includes(c.ThreeLetterISOLanguageName!)} onChange={(e) => onChange(e.target.checked ? [...value, c.ThreeLetterISOLanguageName!] : value.filter((x) => x !== c.ThreeLetterISOLanguageName))} />
+              <input type="checkbox" className="switch sm" checked={value.includes(c.ThreeLetterISOLanguageName!)} onChange={(e) => onChange(e.target.checked ? [...value, c.ThreeLetterISOLanguageName!] : value.filter((x) => x !== c.ThreeLetterISOLanguageName))} />
               <span>{c.DisplayName}</span>
             </label>
           ))}

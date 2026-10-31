@@ -197,8 +197,8 @@ function HomeSettings() {
               <span className="row-line">
                 <button className="round-button" onClick={() => moveView(i, -1)}><Icon name="arrowUp" size={14} /></button>
                 <button className="round-button" onClick={() => moveView(i, 1)}><Icon name="arrowDown" size={14} /></button>
-                <label className="mini-check"><input type="checkbox" checked={!(config.LatestItemsExcludes ?? []).includes(v.Id)} onChange={(e) => saveConfig({ LatestItemsExcludes: e.target.checked ? (config.LatestItemsExcludes ?? []).filter((x) => x !== v.Id) : [...(config.LatestItemsExcludes ?? []), v.Id] })} /> Latest</label>
-                <label className="mini-check"><input type="checkbox" checked={!(config.MyMediaExcludes ?? []).includes(v.Id)} onChange={(e) => saveConfig({ MyMediaExcludes: e.target.checked ? (config.MyMediaExcludes ?? []).filter((x) => x !== v.Id) : [...(config.MyMediaExcludes ?? []), v.Id] })} /> My media</label>
+                <label className="mini-check"><input type="checkbox" className="switch sm" checked={!(config.LatestItemsExcludes ?? []).includes(v.Id)} onChange={(e) => saveConfig({ LatestItemsExcludes: e.target.checked ? (config.LatestItemsExcludes ?? []).filter((x) => x !== v.Id) : [...(config.LatestItemsExcludes ?? []), v.Id] })} /> Latest</label>
+                <label className="mini-check"><input type="checkbox" className="switch sm" checked={!(config.MyMediaExcludes ?? []).includes(v.Id)} onChange={(e) => saveConfig({ MyMediaExcludes: e.target.checked ? (config.MyMediaExcludes ?? []).filter((x) => x !== v.Id) : [...(config.MyMediaExcludes ?? []), v.Id] })} /> My media</label>
               </span>
             </div>
           ))}

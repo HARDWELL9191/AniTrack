@@ -264,6 +264,7 @@ export interface UserPolicy {
   EnableLyricManagement: boolean;
   IsDisabled: boolean;
   MaxParentalRating?: number | null;
+  MaxParentalSubRating?: number | null;
   BlockedTags?: string[] | null;
   AllowedTags?: string[] | null;
   EnableUserPreferenceAccess: boolean;
