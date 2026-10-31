@@ -165,7 +165,11 @@ final class DiscoveryEngine {
         await tmdb.resetStats()
 
         step("Reading your library…")
-        await model.reco.ensureBuilt()
+        await model.reco.ensureProfile()
+        if model.reco.libraryItems.isEmpty {
+            fail(model.reco.lastError.map { "Couldn't read your library: \($0)" } ?? "Couldn't read your library from the server. Pull down to try again.")
+            return
+        }
         await loadIdMap()
         step("Connecting to TMDB…")
         do { try await tmdb.loadGenres() } catch {

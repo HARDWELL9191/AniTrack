@@ -176,6 +176,21 @@ final class RecoEngine {
 
     // MARK: Building
 
+    /// True once the library list and your watch signals are known (For You needs only this,
+    /// not the slower "More like this" ranking and on-device AI pass that follow).
+    @ObservationIgnored private(set) var profileReady = false
+
+    /// Waits only for the library list and your history (never for the AI ranking).
+    func ensureProfile() async {
+        if profileReady && !byId.isEmpty { return }
+        Task { await self.ensureBuilt() }
+        for _ in 0..<240 {   // up to 60 s
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            if profileReady && !byId.isEmpty { return }
+            if lastError != nil && !isBuilding { return }
+        }
+    }
+
     func ensureBuilt() async {
         if picks.isEmpty || dirty { await build(force: false) }
     }
@@ -205,6 +220,8 @@ final class RecoEngine {
         let cacheName = "reco-\(model.store.currentServerId ?? "s")-\(reader.userId ?? "u")"
         if snapshot.isEmpty, let saved = await DiskCache.loadInBackground([String: [BaseItem]].self, name: cacheName) {
             ingest(saved)
+            rebuildProfile()
+            profileReady = true
             rankAll(aiAllowed: false)
         }
 
@@ -227,6 +244,7 @@ final class RecoEngine {
 
         // 2) Taste profile + Similar ("fans also liked") from your strongest likes.
         rebuildProfile()
+        profileReady = true
         await collectSimilar(reader: reader)
         if Task.isCancelled { return }
 

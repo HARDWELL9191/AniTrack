@@ -93,6 +93,7 @@ final class PlaybackController {
         player.logHandler = { [weak self] msg in
             guard let self else { return }
             let line = "[\(msg.prefix)] \(msg.message.trimmingCharacters(in: .whitespacesAndNewlines))"
+            self.noteSkippedTrack(msg.message)
             self.diagnostics.append(line)
             if self.diagnostics.count > 40 { self.diagnostics.removeFirst(self.diagnostics.count - 40) }
         }
@@ -170,6 +171,8 @@ final class PlaybackController {
         didApplyTracks = false
         playingSince = nil
         externalSubs = []
+        skippedEmbedded = []
+        pendingSubtitleSelection = nil
         skippedSegments = []
         activeSegment = nil
         upNextCountdown = nil
@@ -244,12 +247,53 @@ final class PlaybackController {
         }
     }
 
+    // MARK: Tracks the player library can't read (zlib-compressed in the MKV)
+
+    /// mkvmerge stores PGS (and some other) subtitle tracks zlib-compressed; the player
+    /// library's libmpv is built without zlib, so it drops those tracks entirely
+    /// ("Track N was compressed with zlib… Skipping track."). Jellyfin's own ffmpeg can read
+    /// them: fetch each such subtitle from the server (PGS as the original .sup stream, text
+    /// as-is) and add it as a separate subtitle. Nothing is converted or burned in.
+    @ObservationIgnored private var skippedEmbedded: Set<Int> = []
+    @ObservationIgnored private var pendingSubtitleSelection: Int?
+
+    private func noteSkippedTrack(_ message: String) {
+        guard message.contains("compressed with zlib"),
+              let range = message.range(of: #"Track (\d+)"#, options: .regularExpression),
+              let number = Int(message[range].dropFirst(6)) else { return }
+        // MKV track numbers follow the file's track order, as do Jellyfin's embedded streams.
+        let tracks = streams.filter { !($0.isExternal ?? false) && ($0.isVideo || $0.isAudio || $0.isSubtitle || $0.type == "Data") }
+            .sorted { $0.index < $1.index }
+        guard tracks.indices.contains(number - 1) else { return }
+        let stream = tracks[number - 1]
+        guard stream.isSubtitle, !skippedEmbedded.contains(stream.index), let src = source else { return }
+        let codec = (stream.codec ?? "").lowercased()
+        let format: String
+        switch codec {
+        case "pgssub", "hdmv_pgs_subtitle", "pgs", "sup": format = "pgssub"
+        case "ass", "ssa": format = "ass"
+        case "subrip", "srt", "text": format = "srt"
+        case "webvtt", "vtt": format = "vtt"
+        default: return   // VobSub/DVB come back from Jellyfin in containers mpv can't add as a subtitle file
+        }
+        var plain = stream
+        plain.deliveryUrl = nil
+        guard let url = client.subtitleURL(itemId: item.id, sourceId: src.id, stream: plain, format: format) else { return }
+        skippedEmbedded.insert(stream.index)
+        externalSubs.append(stream)
+        player.loadExternalSubtitle(url, selecting: nil)
+        diagnostics.append("[JellyReco] Loading subtitle \(stream.index) (\(codec)) from the server instead")
+        // It's the subtitle that should be on: select it as soon as it arrives.
+        let wanted = request.subtitleIndex ?? source?.defaultSubtitleStreamIndex ?? -1
+        if wanted == stream.index { pendingSubtitleSelection = stream.index }
+    }
+
     private func loadExternalSubtitles(itemId: String, source: MediaSourceInfo) {
         let external = streams.filter { $0.isSubtitle && ($0.isExternal ?? false) }
         for sub in external {
             let format = (sub.codec ?? "srt").lowercased()
                 .replacingOccurrences(of: "subrip", with: "srt")
-                .replacingOccurrences(of: "pgssub", with: "sup")
+                .replacingOccurrences(of: "sup", with: "pgssub")   // Jellyfin returns PGS as-is only for "pgssub"
                 .replacingOccurrences(of: "webvtt", with: "vtt")
             guard let url = client.subtitleURL(itemId: itemId, sourceId: source.id, stream: sub, format: format) else { continue }
             externalSubs.append(sub)
@@ -300,6 +344,11 @@ final class PlaybackController {
         if !didApplyTracks, !player.audioTracks.isEmpty, (subsReady && restoreReady) || waitedEnough {
             didApplyTracks = true
             applyInitialTracks()
+        }
+        if let wanted = pendingSubtitleSelection, didApplyTracks,
+           let t = track(forJellyfinIndex: wanted, type: .subtitle) {
+            pendingSubtitleSelection = nil
+            player.selectSubtitle(t.id)
         }
         checkSubtitleRendering()
         updateSegments()
@@ -395,7 +444,9 @@ final class PlaybackController {
     // MARK: Tracks
 
     private var embeddedAudio: [MediaStream] { streams.filter { $0.isAudio && !($0.isExternal ?? false) }.sorted { $0.index < $1.index } }
-    private var embeddedSubs: [MediaStream] { streams.filter { $0.isSubtitle && !($0.isExternal ?? false) }.sorted { $0.index < $1.index } }
+    private var embeddedSubs: [MediaStream] {
+        streams.filter { $0.isSubtitle && !($0.isExternal ?? false) && !skippedEmbedded.contains($0.index) }.sorted { $0.index < $1.index }
+    }
 
     /// The Jellyfin stream behind an mpv track (mpv numbers each type from 1 in file order;
     /// external subtitles come after the embedded ones, in the order they were added).

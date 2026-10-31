@@ -275,7 +275,8 @@ private struct PlayerContent: View {
                 GlassEffectContainer(spacing: 10) {
                     HStack(spacing: 10) {
                         speedMenu
-                        audioSubtitleMenu
+                        audioMenu
+                        subtitleMenu
                         moreMenu
                     }
                 }
@@ -298,14 +299,24 @@ private struct PlayerContent: View {
         .frame(width: 44, height: 44)
     }
 
-    private var audioSubtitleMenu: some View {
-        PlayerMenuButton(symbol: "captions.bubble", onOpenChange: { menuOpen = $0 }) {
-            let audio = UIMenu(title: "Audio", options: [.displayInline, .singleSelection], children:
+    private var audioMenu: some View {
+        PlayerMenuButton(symbol: "waveform", onOpenChange: { menuOpen = $0 }) {
+            let tracks = UIMenu(title: "Audio", options: [.displayInline, .singleSelection], children:
                 controller.audioOptions.map { t in
                     UIAction(title: t.title, subtitle: t.detail.isEmpty ? nil : t.detail, state: t.isSelected ? .on : .off) { _ in
                         controller.selectAudio(t.id)
                     }
                 })
+            let extras = UIMenu(title: "", options: .displayInline, children: [
+                delayMenu("Audio Timing", symbol: "waveform.badge.plus", value: controller.audioDelay) { controller.setAudioDelay($0) },
+            ])
+            return UIMenu(children: [tracks, extras])
+        }
+        .frame(width: 44, height: 44)
+    }
+
+    private var subtitleMenu: some View {
+        PlayerMenuButton(symbol: "captions.bubble", onOpenChange: { menuOpen = $0 }) {
             let subtitleOptions = controller.subtitleOptions
             let anySelected = subtitleOptions.contains(where: \.isSelected)
             let subs = UIMenu(title: "Subtitles", options: [.displayInline, .singleSelection], children:
@@ -329,12 +340,11 @@ private struct PlayerContent: View {
                         controller.applySubtitleScale()
                     }
                 })
-            let timing = UIMenu(title: "", options: .displayInline, children: [
+            let extras = UIMenu(title: "", options: .displayInline, children: [
                 delayMenu("Subtitle Timing", symbol: "text.badge.checkmark", value: controller.subtitleDelay) { controller.setSubtitleDelay($0) },
-                delayMenu("Audio Timing", symbol: "waveform", value: controller.audioDelay) { controller.setAudioDelay($0) },
                 second, size,
             ])
-            return UIMenu(children: [audio, subs, timing])
+            return UIMenu(children: [subs, extras])
         }
         .frame(width: 44, height: 44)
     }
