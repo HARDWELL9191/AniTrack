@@ -763,12 +763,14 @@ struct UserAdminDetail: View {
         } header: { Text("Block items with tags") } footer: { Text("Hide media with at least one of these tags.") }
         if !flag("IsAdministrator").wrappedValue {
             Section {
-                ForEach(schedules.indices, id: \.self) { i in scheduleRow(i) }
                 Button {
                     setSchedules(schedules + [["DayOfWeek": "Sunday", "StartHour": 0.0, "EndHour": 24.0]])
                 } label: { Label("Add", systemImage: "plus") }
             } header: { Text("Access schedule") } footer: {
                 Text("Limit sign-ins to certain hours. With no schedule, the user can sign in any time.")
+            }
+            ForEach(schedules.indices, id: \.self) { i in
+                Section("Schedule \(i + 1)") { scheduleRows(i) }
             }
         }
     }
@@ -825,43 +827,37 @@ struct UserAdminDetail: View {
         }
     }
 
-    private func scheduleRow(_ i: Int) -> some View {
-        let sc = schedules[i]
+    /// One schedule as separate rows (day, from, to, remove), so each control is its own row.
+    @ViewBuilder
+    private func scheduleRows(_ i: Int) -> some View {
+        let sc = schedules.indices.contains(i) ? schedules[i] : [:]
         let start = (sc["StartHour"] as? NSNumber)?.doubleValue ?? 0
         let end = (sc["EndHour"] as? NSNumber)?.doubleValue ?? 24
-        func update(_ k: String, _ v: Any) {
+        Picker("Day", selection: Binding(get: { sc["DayOfWeek"] as? String ?? "Sunday" }, set: { updateSchedule(i, "DayOfWeek", $0) })) {
+            ForEach(Self.days, id: \.self) { Text(Self.dayLabel($0)).tag($0) }
+        }
+        .pickerStyle(.menu)
+        Picker("From", selection: Binding(get: { start }, set: { updateSchedule(i, "StartHour", $0) })) {
+            ForEach((0..<48).map { Double($0) / 2 }.filter { $0 < end }, id: \.self) { Text(Self.hourLabel($0)).tag($0) }
+        }
+        .pickerStyle(.menu)
+        Picker("To", selection: Binding(get: { end }, set: { updateSchedule(i, "EndHour", $0) })) {
+            ForEach((1...48).map { Double($0) / 2 }.filter { $0 > start }, id: \.self) { Text($0 == 24 ? "24:00" : Self.hourLabel($0)).tag($0) }
+        }
+        .pickerStyle(.menu)
+        Button(role: .destructive) {
             var list = schedules
             guard list.indices.contains(i) else { return }
-            list[i][k] = v
+            list.remove(at: i)
             setSchedules(list)
-        }
-        return VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Picker("Day", selection: Binding(get: { sc["DayOfWeek"] as? String ?? "Sunday" }, set: { update("DayOfWeek", $0) })) {
-                    ForEach(Self.days, id: \.self) { Text(Self.dayLabel($0)).tag($0) }
-                }
-                .pickerStyle(.menu).labelsHidden()
-                Spacer()
-                Button(role: .destructive) {
-                    var list = schedules
-                    list.remove(at: i)
-                    setSchedules(list)
-                } label: { Image(systemName: "trash").foregroundStyle(.red) }
-                .buttonStyle(.borderless)
-                .accessibilityLabel("Remove")
-            }
-            HStack {
-                Picker("From", selection: Binding(get: { start }, set: { update("StartHour", $0) })) {
-                    ForEach((0..<48).map { Double($0) / 2 }.filter { $0 < end }, id: \.self) { Text(Self.hourLabel($0)).tag($0) }
-                }
-                .pickerStyle(.menu).labelsHidden()
-                Text("to").foregroundStyle(.secondary)
-                Picker("To", selection: Binding(get: { end }, set: { update("EndHour", $0) })) {
-                    ForEach((1...48).map { Double($0) / 2 }.filter { $0 > start }, id: \.self) { Text($0 == 24 ? "24:00" : Self.hourLabel($0)).tag($0) }
-                }
-                .pickerStyle(.menu).labelsHidden()
-            }
-        }
+        } label: { Label("Remove schedule", systemImage: "trash").foregroundStyle(.red) }
+    }
+
+    private func updateSchedule(_ i: Int, _ k: String, _ v: Any) {
+        var list = schedules
+        guard list.indices.contains(i) else { return }
+        list[i][k] = v
+        setSchedules(list)
     }
 
     private static func dayLabel(_ d: String) -> String {

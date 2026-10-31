@@ -553,7 +553,8 @@ struct PlaybackSettingsView: View {
     }
 
     private func configString(_ path: KeyPath<UserConfiguration, String?>, key: String) -> Binding<String> {
-        Binding(get: { config?[keyPath: path] ?? "" }, set: { saveConfig(key, $0) }   // "" = any, as jellyfin-web saves it)
+        // "" = any, as jellyfin-web saves it.
+        Binding(get: { config?[keyPath: path] ?? "" }, set: { saveConfig(key, $0) })
     }
 
     private func configBool(_ path: KeyPath<UserConfiguration, Bool?>, key: String, fallback: Bool) -> Binding<Bool> {
