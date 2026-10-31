@@ -4,6 +4,7 @@
 // Every config page shows the common options first, then every other option the server reports,
 // so nothing is missing even when the server adds settings.
 
+import { LibraryOptionsEditor, type LibraryOptions } from "./libraryadmin";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { getSocket } from "../core/socket";
 import type {
@@ -566,10 +567,11 @@ function AddLibrary({ close }: { close: () => void }) {
   const [type, setType] = useState("movies");
   const [paths, setPaths] = useState<string[]>([]);
   const [browse, setBrowse] = useState(false);
-  const { data: defaults } = useLoad(() => api.get<Record<string, unknown>>("/Libraries/AvailableOptions", { libraryContentType: type, isNewLibrary: true }).catch(() => null), [type]);
+  // A new library starts with jellyfin-web's defaults; the editor fills in the providers.
+  const [options, setOptions] = useState<LibraryOptions>(() => ({ ...NEW_LIBRARY_DEFAULTS }));
   const { busy, run } = useAction();
   const create = () => run(async () => {
-    await api.post("/Library/VirtualFolders", { LibraryOptions: { PathInfos: paths.map((p) => ({ Path: p })), EnableRealtimeMonitor: true, EnableChapterImageExtraction: false, SaveLocalMetadata: false, EnableTrickplayImageExtraction: true } }, { name, collectionType: type, refreshLibrary: true });
+    await api.post("/Library/VirtualFolders", { LibraryOptions: { ...options, PathInfos: paths.map((p) => ({ Path: p })) } }, { name, collectionType: type === "mixed" ? undefined : type, refreshLibrary: true });
     close();
   }, `Created ${name}`);
   return (
@@ -581,7 +583,7 @@ function AddLibrary({ close }: { close: () => void }) {
           <div className="rows">{paths.map((p) => <div key={p} className="row static"><Icon name="folder" size={16} /><div className="row-text">{p}</div><button className="link-button danger" onClick={() => setPaths(paths.filter((x) => x !== p))}>Remove</button></div>)}</div>
           <button className="glass-button" onClick={() => setBrowse(true)}><Icon name="plus" size={15} /> Add folder</button>
         </Field>
-        {defaults && <p className="muted small">More options (metadata providers, image fetchers, real-time monitoring, trickplay, chapter images) are under Edit once the library exists.</p>}
+        <LibraryOptionsEditor key={type} contentType={type} isNew value={options} onChange={setOptions} />
       </div>
       {browse && <FolderPicker onPick={(p) => { setPaths([...new Set([...paths, p])]); setBrowse(false); }} close={() => setBrowse(false)} />}
     </Modal>
@@ -618,6 +620,35 @@ function FolderPicker({ onPick, close }: { onPick: (p: string) => void; close: (
   );
 }
 
+const NEW_LIBRARY_DEFAULTS: LibraryOptions = {
+  Enabled: true, EnableRealtimeMonitor: true, EnablePhotos: true, EnableInternetProviders: true, EnableArchiveMediaFiles: false, SaveLocalMetadata: false,
+  EnableAutomaticSeriesGrouping: true, AutomaticRefreshIntervalDays: 0, SeasonZeroDisplayName: "Specials", EnableEmbeddedTitles: false, EnableEmbeddedExtrasTitles: false,
+  EnableEmbeddedEpisodeInfos: false, AllowEmbeddedSubtitles: "AllowAll", SkipSubtitlesIfEmbeddedSubtitlesPresent: false, SkipSubtitlesIfAudioTrackMatches: false,
+  SaveSubtitlesWithMedia: true, SaveLyricsWithMedia: false, RequirePerfectSubtitleMatch: true, AutomaticallyAddToCollection: false, EnableTrickplayImageExtraction: true,
+  ExtractTrickplayImagesDuringLibraryScan: false, SaveTrickplayWithMedia: false, EnableChapterImageExtraction: false, ExtractChapterImagesDuringLibraryScan: false,
+  EnableLUFSScan: true, PreferNonstandardArtistsTag: false, UseCustomTagDelimiters: false, CustomTagDelimiters: [], DelimiterWhitelist: [], TypeOptions: [],
+};
+
+/** Library options with Save, like jellyfin-web's library editor. */
+function LibraryOptionsGroup({ folder, reload }: { folder: VirtualFolder; reload: () => void }) {
+  const model = useModel();
+  const api = model.api!;
+  const saved = (folder.LibraryOptions ?? {}) as LibraryOptions;
+  const [draft, setDraft] = useState<LibraryOptions>(() => structuredClone(saved));
+  const [base, setBase] = useState<string | null>(null);
+  const { busy, run } = useAction();
+  // The editor fills in explicit provider lists first: that's the baseline, not a change.
+  useEffect(() => { if (base === null) { const t = setTimeout(() => setBase(JSON.stringify(draft)), 800); return () => clearTimeout(t); } }, [draft, base]);
+  const dirty = base !== null && JSON.stringify(draft) !== base;
+  const save = () => run(async () => { await api.post("/Library/VirtualFolders/LibraryOptions", { Id: folder.ItemId, LibraryOptions: draft }); setBase(JSON.stringify(draft)); reload(); }, "Saved");
+  return (
+    <Group title="Library options" actions={<button className="glass-button prominent" disabled={busy || !dirty} onClick={() => void save()}>Save</button>}>
+      <LibraryOptionsEditor contentType={folder.CollectionType} isNew={false} value={draft} onChange={setDraft} />
+      {dirty && <div className="sticky-save"><span>Unsaved changes</span><button className="glass-button" onClick={() => { setDraft(JSON.parse(base!) as LibraryOptions); }}>Discard</button><button className="glass-button prominent" disabled={busy} onClick={() => void save()}>Save</button></div>}
+    </Group>
+  );
+}
+
 function LibraryEditPage({ name }: { name: string }) {
   const model = useModel();
   const api = model.api!;
@@ -626,7 +657,6 @@ function LibraryEditPage({ name }: { name: string }) {
   const { busy, run } = useAction();
   if (data === undefined) return <Spinner />;
   if (!data) return <Empty icon="folder" title="Library not found" />;
-  const opts = data.LibraryOptions ?? {};
   return (
     <>
       <Group title="Folders" actions={<button className="glass-button" onClick={() => setBrowse(true)}><Icon name="plus" size={15} /> Add folder</button>}>
@@ -635,8 +665,7 @@ function LibraryEditPage({ name }: { name: string }) {
             <button className="link-button danger" disabled={busy} onClick={() => void run(async () => { await api.del("/Library/VirtualFolders/Paths", { name, path: p, refreshLibrary: true }); reload(); }, "Folder removed")}>Remove</button></div>
         ))}</div>
       </Group>
-      <ConfigEditor title="Library options" load={async () => opts as Record<string, unknown>} save={(v) => api.post("/Library/VirtualFolders/LibraryOptions", { Id: data.ItemId, LibraryOptions: v })}
-        curated={["Enabled", "EnableRealtimeMonitor", "EnableTrickplayImageExtraction", "ExtractTrickplayImagesDuringLibraryScan", "EnableChapterImageExtraction", "ExtractChapterImagesDuringLibraryScan", "SaveLocalMetadata", "SaveSubtitlesWithMedia", "SaveLyricsWithMedia", "SaveTrickplayWithMedia", "EnableEmbeddedTitles", "EnableEmbeddedExtrasTitles", "EnableEmbeddedEpisodeInfos", "PreferredMetadataLanguage", "MetadataCountryCode", "SeasonZeroDisplayName", "AutomaticRefreshIntervalDays", "EnableAutomaticSeriesGrouping", "AutomaticallyAddToCollection", "AllowEmbeddedSubtitles", "SkipSubtitlesIfEmbeddedSubtitlesPresent", "SkipSubtitlesIfAudioTrackMatches", "SubtitleDownloadLanguages", "RequirePerfectSubtitleMatch", "EnablePhotos", "EnableInternetProviders", "DisabledMediaSegmentProviders", "MediaSegmentProviderOrder", "TypeOptions"]} />
+      <LibraryOptionsGroup folder={data} reload={reload} />
       <Group title="Manage">
         <div className="row-line">
           <button className="glass-button" disabled={busy} onClick={() => ui.openSheet({ kind: "prompt", title: "Rename library", label: "Name", initial: name, confirmLabel: "Rename", run: async (n) => { await api.post("/Library/VirtualFolders/Name", undefined, { name, newName: n, refreshLibrary: true }); ui.pop("dashboard"); } })}><Icon name="edit" size={15} /> Rename</button>

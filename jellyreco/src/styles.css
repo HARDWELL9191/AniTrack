@@ -1031,3 +1031,24 @@ input[type="range"]:not(.lg-slider) { accent-color: var(--accent); }
 /* Glass over artwork (details banner): clear glass with its own dimming, so the art can't recolor it */
 .back-float { background-color: rgba(18, 18, 24, 0.34); color: #fff; backdrop-filter: blur(14px) saturate(140%) brightness(0.9); box-shadow: var(--lg-rim-dark), 0 6px 18px rgba(0, 0, 0, 0.3); }
 .back-float:hover:not(:disabled) { background-color: rgba(18, 18, 24, 0.5); }
+
+/* Sidebar list counts and the highlighted pick in "More picks" */
+.nav-count { margin-left: auto; min-width: 22px; height: 20px; padding: 0 7px; border-radius: 999px; display: inline-grid; place-items: center; font-size: 11.5px; font-weight: 700; color: var(--muted); background: var(--press); }
+.nav-item { position: relative; }
+.card.highlighted .card-cover { box-shadow: 0 0 0 2.5px var(--accent), 0 8px 22px rgba(0, 0, 0, 0.25); }
+.row-open { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; border: 0; background: none; padding: 0; text-align: left; color: inherit; }
+
+/* Library options editor */
+.lib-options { display: flex; flex-direction: column; gap: 18px; }
+.lib-group { display: flex; flex-direction: column; gap: 10px; padding: 16px 18px; border-radius: 20px; background: var(--press); }
+.lib-group h3 { font-size: 15px; font-weight: 700; }
+.plugin-list { display: flex; flex-direction: column; gap: 4px; }
+.plugin-head { display: flex; flex-direction: column; gap: 2px; margin-bottom: 4px; }
+.plugin-head .glass-button { align-self: flex-start; margin-top: 6px; }
+.plugin-row { display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 4px 8px 4px 10px; border-radius: 12px; background: var(--lg-fill); box-shadow: inset 0 0 0 0.5px var(--line); }
+.plugin-row > span:not(.plugin-order) { flex: 1; font-weight: 550; }
+.plugin-order { display: inline-flex; gap: 4px; }
+.plugin-order .round-button { width: 28px; height: 28px; }
+.image-type-grid, .language-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 6px; }
+.language-grid { max-height: 280px; overflow-y: auto; padding: 2px; }
+.toggle-row > .toggle-text { display: flex; flex-direction: column; align-items: flex-start; text-align: left; }

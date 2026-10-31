@@ -8,9 +8,8 @@ import { getSocket } from "../core/socket";
 import type { Item, ItemsResult, MediaStream, RemoteImage, RemoteSearchResult, RemoteSubtitle, SessionInfo, SyncPlayGroup } from "../core/types";
 import { bitrate, bytes, dateOnly, languageName, streamLabel } from "./fmt";
 import { cardImage, Cover, Dropdown, Empty, Field, Modal, Segmented, Spinner, Toggle, useAction, useLoad } from "./components";
-import { tmdbMoreLike } from "../core/recommender";
-import { poster, type TmdbItem, tmdbKey, tmdbUrl } from "../core/tmdb";
-import { addExternal, ensureLibrary, getTmdb, TmdbCard, WhyText } from "./foryou";
+import { type ExternalTitle, isMovie, metaLine, resized, titleId, tmdbWebUrl } from "../core/titles";
+import { TitleCard, titleAction, WhyText } from "./foryou";
 import { Icon } from "./icons";
 import { ResumePrompt } from "./player";
 import { type Sheet, ui, useModel, useUI } from "./state";
@@ -43,7 +42,7 @@ function SheetView({ sheet }: { sheet: Sheet }) {
     case "versions": return <Modal title="Choose a version" onClose={close} width={460}><div className="rows">{(sheet.item.MediaSources ?? []).map((m) => <button key={m.Id} className="row" onClick={() => { close(); sheet.onPick(m.Id!); }}><Icon name="film" size={18} /><div className="row-text"><div className="row-title">{m.Name}</div><div className="row-sub">{m.Container} · {bytes(m.Size)} · {bitrate(m.Bitrate)}</div></div></button>)}</div></Modal>;
     case "confirm": return <Confirm sheet={sheet} close={close} />;
     case "prompt": return <Prompt sheet={sheet} close={close} />;
-    case "tmdb": return <TmdbSheet item={sheet.item} genres={sheet.genres} close={close} />;
+    case "tmdb": return <TmdbSheet key={titleId(sheet.item)} item={sheet.item} close={close} />;
     case "share": return null;
   }
 }
@@ -89,47 +88,42 @@ function ResumeHost() {
 
 // MARK: A title you don't have (TMDB)
 
-function TmdbSheet({ item, genres, close }: { item: TmdbItem; genres: string[]; close: () => void }) {
+function TmdbSheet({ item, close }: { item: ExternalTitle; close: () => void }) {
   const model = useModel();
-  const tmdb = getTmdb(model);
-  const { data: d, error } = useLoad(() => tmdb.details(item.kind, item.id), [item.kind, item.id]);
+  const tmdb = model.tmdb;
+  const { data: d, error } = useLoad(() => tmdb.extras(item), [titleId(item)]);
   const { data: more } = useLoad(async () => {
-    await ensureLibrary(model);
-    const lib = model.forYouLibrary;
-    if (!lib) return [];
-    const lists = model.lists?.lists ?? { watchLater: [], notForMe: [], seen: [] };
-    const blocked = new Set([...lists.notForMe, ...lists.seen].map((e) => e.id));
-    return tmdbMoreLike(tmdb, lib, item, blocked);
-  }, [item.kind, item.id]);
-  const key = tmdbKey(item);
-  const inList = (n: "watchLater" | "notForMe" | "seen") => !!model.lists?.has(key, n);
-  const g = d?.genres.length ? d.genres : genres;
+    const c = model.discoveryContext();
+    return c ? model.discovery.moreLike(c, item) : [];
+  }, [titleId(item)]);
+  const t = d?.title ?? item;
+  const st = model.storage;
+  const onList = !!st?.hasTitle(t);
+  const out = !!st?.notForMe.some((x) => titleId(x) === titleId(t));
+  const seen = !!st?.seenElsewhere.some((x) => titleId(x) === titleId(t));
   const openUrl = async (url: string) => { const { openUrl: o } = await import("@tauri-apps/plugin-opener"); await o(url); };
-  const toggle = async (n: "watchLater" | "notForMe" | "seen") => {
-    if (inList(n)) { await model.lists?.remove([key], n); model.feeds.clear(); model.dataChanged(); }
-    else await addExternal(model, d ?? item, g, n);
-  };
+  const meta = [metaLine(t), t.episodes && !isMovie(t) ? `${t.episodes} episodes` : null, t.status, t.score ? `★ ${t.score.toFixed(1)}` : null].filter(Boolean).join(" · ");
   return (
-    <Modal title={item.title} onClose={close} width={900}>
+    <Modal title={t.title} onClose={close} width={900}>
       <div className="tmdb-sheet">
-        {(d?.backdropPath ?? item.backdropPath) && <div className="tmdb-banner" style={{ backgroundImage: `url("${poster(d?.backdropPath ?? item.backdropPath, "w1280")}")` }} />}
+        {t.backdropURL && <div className="tmdb-banner" style={{ backgroundImage: `url("${resized(t.backdropURL, "w1280")}")` }} />}
         <div className="tmdb-top">
-          <Cover url={poster(item.posterPath, "w500")} width={200} height={300} radius={14} icon="film" />
+          <Cover url={resized(t.posterURL, "w500")} width={200} height={300} radius={16} icon="film" />
           <div className="tmdb-text">
             <span className="chip chip-muted"><Icon name="cloud" size={12} /> Not on your server</span>
-            <h2>{item.title}{item.date ? <span className="muted"> ({item.date.slice(0, 4)})</span> : null}</h2>
+            <h2>{t.title}{t.year ? <span className="muted"> ({t.year})</span> : null}</h2>
             {d?.tagline && <p className="tagline">{d.tagline}</p>}
-            <div className="muted small">{[item.kind === "tv" ? "Show" : "Movie", d?.seasons ? `${d.seasons} seasons · ${d.episodes} episodes` : null, d?.runtime ? `${d.runtime} min` : null, d?.status, (d?.voteAverage ?? item.voteAverage) ? `★ ${(d?.voteAverage ?? item.voteAverage).toFixed(1)}` : null].filter(Boolean).join(" · ")}</div>
-            {g.length > 0 && <div className="chips-wrap">{g.map((x) => <span key={x} className="chip chip-accent">{x}</span>)}</div>}
-            <p>{d?.overview || item.overview}</p>
+            <div className="muted small">{meta}</div>
+            {t.genres.length > 0 && <div className="chips-wrap">{t.genres.map((x) => <span key={x} className="chip chip-accent">{x}</span>)}</div>}
+            <p>{t.overview}</p>
             {d?.networks.length ? <p className="muted small">{d.networks.join(", ")}</p> : null}
             <div className="row-line wrap">
-              <button className={`glass-button ${inList("watchLater") ? "on" : "prominent"}`} onClick={() => void toggle("watchLater")}><Icon name="bookmark" size={15} /> {inList("watchLater") ? "On Watch later" : "Watch later"}</button>
-              <button className={`glass-button ${inList("seen") ? "on" : ""}`} onClick={() => void toggle("seen")}><Icon name="eye" size={15} /> {inList("seen") ? "Watched" : "Already watched"}</button>
-              <button className={`glass-button ${inList("notForMe") ? "on danger" : "danger"}`} onClick={() => void toggle("notForMe")}><Icon name="thumbsDown" size={15} /> Not for me</button>
+              <button className={`glass-button ${onList ? "" : "prominent"}`} onClick={() => void titleAction(model, t, "myList")}><Icon name="bookmark" size={15} /> {onList ? "On My List" : "Add to My List"}</button>
+              <button className="glass-button" onClick={() => void titleAction(model, t, seen ? "undoSeen" : "seen")}><Icon name="eye" size={15} /> {seen ? "Seen ✓" : "Already seen"}</button>
+              <button className="glass-button danger" onClick={() => void titleAction(model, t, out ? "undoNotForMe" : "notForMe")}><Icon name="thumbsDown" size={15} /> {out ? "Undo Not for me" : "Not for me"}</button>
               {d?.trailer && <button className="glass-button" onClick={() => void openUrl(d.trailer!)}><Icon name="film" size={15} /> Trailer</button>}
-              <button className="glass-button" onClick={() => void openUrl(tmdbUrl(item))}><Icon name="external" size={15} /> TMDB</button>
-              {d?.imdbId && <button className="glass-button" onClick={() => void openUrl(`https://www.imdb.com/title/${d.imdbId}/`)}><Icon name="external" size={15} /> IMDb</button>}
+              <button className="glass-button" onClick={() => void openUrl(tmdbWebUrl(t))}><Icon name="external" size={15} /> TMDB</button>
+              {t.imdbId && <button className="glass-button" onClick={() => void openUrl(`https://www.imdb.com/title/${t.imdbId}/`)}><Icon name="external" size={15} /> IMDb</button>}
             </div>
           </div>
         </div>
@@ -137,13 +131,13 @@ function TmdbSheet({ item, genres, close }: { item: TmdbItem; genres: string[]; 
         {!!d?.cast.length && (
           <section><h3>Cast</h3>
             <div className="cast-row">{d.cast.map((c, i) => (
-              <div key={i} className="person-card"><Cover url={poster(c.profilePath, "w185")} width={84} height={84} radius={42} icon="person" /><strong>{c.name}</strong><small className="muted">{c.character}</small></div>
+              <div key={i} className="person-card"><Cover url={c.profile ?? undefined} width={84} height={84} radius={42} icon="person" /><strong>{c.name}</strong><small className="muted">{c.character}</small></div>
             ))}</div>
           </section>
         )}
         {!!more?.length && (
           <section><h3>More like this <span className="muted small">(not on your server)</span></h3>
-            <div className="cast-row">{more.map((m) => <TmdbCard key={tmdbKey(m)} t={m} width={130} />)}</div>
+            <div className="cast-row">{more.map((m) => <TitleCard key={titleId(m)} t={m} width={130} />)}</div>
           </section>
         )}
       </div>

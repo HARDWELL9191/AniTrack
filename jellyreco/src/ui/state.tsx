@@ -2,7 +2,7 @@
 
 import { createContext, type ReactNode, useContext, useSyncExternalStore } from "react";
 import type { AppModel, Tab } from "../core/model";
-import type { TmdbItem } from "../core/tmdb";
+import type { ExternalTitle } from "../core/titles";
 import type { Item } from "../core/types";
 
 export const ModelContext = createContext<AppModel | null>(null);
@@ -22,7 +22,9 @@ export type Route =
   | { kind: "genre"; name: string; id?: string; parentId?: string | null; types?: string[] }
   | { kind: "studio"; name: string; id?: string }
   | { kind: "dashboard"; page: string; arg?: string }
-  | { kind: "liveGuide" };
+  | { kind: "liveGuide" }
+  | { kind: "myList" }
+  | { kind: "notForMe" };
 
 export type Sheet =
   | { kind: "mediaInfo"; item: Item }
@@ -39,7 +41,7 @@ export type Sheet =
   | { kind: "remoteControl" }
   | { kind: "versions"; item: Item; onPick: (mediaSourceId: string) => void }
   | { kind: "why"; item: Item; because: string[]; highlights: string[] }
-  | { kind: "tmdb"; item: TmdbItem; genres: string[] }
+  | { kind: "tmdb"; item: ExternalTitle }
   | { kind: "confirm"; title: string; text: string; danger?: boolean; confirmLabel?: string; run: () => void | Promise<void> }
   | { kind: "prompt"; title: string; label: string; initial?: string; confirmLabel?: string; run: (value: string) => void | Promise<void> };
 
@@ -47,7 +49,7 @@ export interface MenuRequest { x: number; y: number; item: Item; context?: "resu
 
 class UIStore {
   version = 0;
-  stacks: Record<Tab, Route[]> = { home: [], forYou: [], search: [], favorites: [], library: [], settings: [], dashboard: [] };
+  stacks: Record<Tab, Route[]> = { home: [], forYou: [], search: [], favorites: [], library: [], myList: [], notForMe: [], settings: [], dashboard: [] };
   sheets: Sheet[] = [];
   menu: MenuRequest | null = null;
   private listeners = new Set<() => void>();

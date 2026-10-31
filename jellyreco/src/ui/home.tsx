@@ -8,7 +8,8 @@ import { viewIcon } from "./app";
 import { Cover, Empty, ItemCard, Shelf, useLoad } from "./components";
 import { Icon } from "./icons";
 import { ui, useModel, useNavigate } from "./state";
-import { TmdbCard, useForYouFeed } from "./foryou";
+import { TitleCard, useForYou } from "./foryou";
+import { entryId, titleId } from "../core/titles";
 
 export function HomePage({ refreshKey }: { refreshKey: number }) {
   const model = useModel();
@@ -37,7 +38,7 @@ function Section({ section, refreshKey }: { section: HomeSection; refreshKey: nu
     case "resume": return <ResumeShelf refreshKey={refreshKey} />;
     case "nextUp": return <NextUpShelf refreshKey={refreshKey} />;
     case "forYouRow": return <ForYouShelf />;
-    case "watchLater": return <WatchLaterShelf refreshKey={refreshKey} />;
+    case "watchLater": return <MyListShelf refreshKey={refreshKey} />;
     case "libraries": return <MyMedia />;
     case "latest": return <LatestShelves refreshKey={refreshKey} />;
     case "favorites": return <FavoritesShelf refreshKey={refreshKey} />;
@@ -86,29 +87,31 @@ function NextUpShelf({ refreshKey }: { refreshKey: number }) {
 
 function ForYouShelf() {
   const model = useModel();
-  const { feed, loading } = useForYouFeed();
-  if (!feed?.picks.length) return loading ? <Shelf title="Picked for you" icon="wand"><div className="shelf-spinner"><span className="spinner" /></div></Shelf> : null;
+  const { picks, building } = useForYou();
+  if (!model.tmdb.configured) return null;
+  if (!picks.length) return building ? <Shelf title="Picked for you" icon="wand"><div className="shelf-spinner"><span className="spinner" /></div></Shelf> : null;
   return (
     <Shelf title="Picked for you" icon="wand" action={{ label: "For You", run: () => { model.tab = "forYou"; model.notify(); } }}>
-      {feed.picks.slice(0, 20).map((p) => <TmdbCard key={p.key} t={p.tmdb} match={p.match} genres={p.genres} width={model.settings.libraryCardSize} />)}
+      {picks.slice(0, 20).map((p) => <TitleCard key={titleId(p.title)} t={p.title} match={p.match} width={model.settings.libraryCardSize} />)}
     </Shelf>
   );
 }
 
-function WatchLaterShelf({ refreshKey }: { refreshKey: number }) {
+/** My List: what you plan to watch (titles you've finished drop off). */
+function MyListShelf({ refreshKey }: { refreshKey: number }) {
   const model = useModel();
-  const navigate = useNavigate();
-  const entries = model.lists?.watchLater ?? [];
-  const localIds = entries.filter((e) => !e.id.startsWith("tmdb:")).map((e) => e.id);
-  const key = entries.map((e) => e.id).join(",");
+  const entries = model.storage?.myList ?? [];
+  const serverIds = entries.flatMap((e) => (e.serverId ? [e.serverId] : []));
+  const key = entries.map(entryId).join(",");
   const { data } = useLoad(async () => {
-    const r = localIds.length ? await model.api!.items({ ids: localIds, fields: LIST_FIELDS, enableUserData: true }) : { Items: [] as Item[] };
-    return entries.map((e) => (e.id.startsWith("tmdb:") ? { entry: e } : { item: r.Items.find((i) => i.Id === e.id) })).filter((x) => ("entry" in x) || (x.item && !x.item.UserData?.Played));
+    const r = serverIds.length ? await model.api!.items({ ids: serverIds.slice(0, 150), fields: LIST_FIELDS, enableUserData: true }) : { Items: [] as Item[] };
+    return entries.slice(0, 40).map((e) => (e.serverId ? { e, item: r.Items.find((i) => i.Id === e.serverId) } : { e, item: undefined }))
+      .filter((x) => (x.e.external ? true : x.item && !x.item.UserData?.Played));
   }, [key, refreshKey]);
   if (!data?.length) return null;
   return (
-    <Shelf title="Watch later" icon="bookmark" action={{ label: "See all", run: () => navigate({ kind: "browse", title: "Watch later", query: { watchLater: true } }) }}>
-      {data.map((x) => ("entry" in x ? <TmdbCard key={x.entry!.id} t={x.entry!} width={model.settings.libraryCardSize} /> : <ItemCard key={x.item!.Id} item={x.item!} />))}
+    <Shelf title="My List" icon="bookmark" action={{ label: "See all", run: () => { model.tab = "myList"; model.notify(); } }}>
+      {data.map((x) => (x.item ? <ItemCard key={entryId(x.e)} item={x.item} /> : x.e.external ? <TitleCard key={entryId(x.e)} t={x.e.external} width={model.settings.libraryCardSize} /> : null))}
     </Shelf>
   );
 }
@@ -119,7 +122,8 @@ function MyMedia() {
   return (
     <Shelf title="My media" icon="folder">
       {model.views.map((v) => (
-        <button key={v.Id} className="library-tile" onClick={() => { ui.popToRoot("library"); model.tab = "library"; model.libraryId = v.Id; model.notify(); }}>
+        <button key={v.Id} className="library-tile" onClick={() => { ui.popToRoot("library"); model.tab = "library"; model.libraryId = v.Id; model.notify(); }}
+          onContextMenu={(e) => { e.preventDefault(); ui.showMenu({ x: e.clientX, y: e.clientY, item: v }); }}>
           <Cover url={v.ImageTags?.Primary ? model.api!.image(v.Id, "Primary", { tag: v.ImageTags.Primary, maxWidth: 520 }) : undefined} width={260} height={146} radius={14} icon={viewIcon(v.CollectionType)} />
           <span className="library-tile-name"><Icon name={viewIcon(v.CollectionType)} size={16} /> {v.Name}</span>
         </button>

@@ -10,8 +10,8 @@ import {
 } from "./components";
 import { clock, dateOnly } from "./fmt";
 import { Icon } from "./icons";
-import { TmdbCard } from "./foryou";
 import { routeFor, ui, useModel, useNavigate } from "./state";
+import { libraryAdminItems } from "./libraryadmin";
 
 type TabDef = { id: string; label: string; query?: Query; kind?: "items" | "genres" | "studios" | "artists" | "albumArtists" | "persons" | "guide" | "recordings" | "timers" | "channels" | "suggestions" | "upcoming" | "folders"; types?: string[] };
 
@@ -108,6 +108,7 @@ function useViewState(key: string): [ViewState, (p: Partial<ViewState>) => void]
 }
 
 export function LibraryPage({ view, back, refreshKey }: { view: Item; back?: () => void; refreshKey: number }) {
+  const model = useModel();
   const tabs = useMemo(() => tabsFor(view.CollectionType), [view.CollectionType]);
   const [tab, setTab] = useState(() => localStorage.getItem(`tab-${view.Id}`) ?? tabs[0].id);
   const active = tabs.find((t) => t.id === tab) ?? tabs[0];
@@ -115,6 +116,7 @@ export function LibraryPage({ view, back, refreshKey }: { view: Item; back?: () 
   return (
     <div className="page">
       <PageHeader title={view.Name} back={back}>
+        {model.isAdmin && <Dropdown label="" compact icon="ellipsis" title="Manage library" items={libraryAdminItems(model, view)} onPick={(f) => f()} />}
         {tabs.length > 1 && (
           <div className="tabbar">
             {tabs.map((t) => <button key={t.id} className={t.id === active.id ? "on" : ""} onClick={() => choose(t.id)}>{t.label}</button>)}
@@ -482,43 +484,13 @@ export function BrowsePage({ title, query, back }: { title: string; query: Recor
       const r = await model.api!.similar(String(query.similarTo), 60);
       return r.Items.filter((i) => !i.UserData?.Played);
     }
-    if (query.dismissed) {
-      return (await model.api!.items({ filters: ["Dislikes"], recursive: true, includeItemTypes: ["Series", "Movie"], sortBy: ["SortName"], fields: LIST_FIELDS, limit: 1000 })).Items;
-    }
-    if (query.watchLater) {
-      const ids = (model.lists?.watchLater ?? []).filter((e) => !e.id.startsWith("tmdb:")).map((e) => e.id);
-      if (!ids.length) return [];
-      const r = await model.api!.items({ ids, fields: LIST_FIELDS, enableUserData: true });
-      return ids.map((id) => r.Items.find((i) => i.Id === id)).filter((x): x is Item => !!x);
-    }
-    if (query.seen) return [];
     return (await model.api!.items({ ...(query as Query), fields: LIST_FIELDS, limit: 300 })).Items;
   }, [JSON.stringify(query), model.dataVersion]);
-  const outside = query.watchLater ? (model.lists?.watchLater ?? []).filter((e) => e.id.startsWith("tmdb:")) : query.seen ? model.lists?.lists.seen ?? [] : query.dismissed ? model.lists?.lists.notForMe ?? [] : [];
-  const listName = query.watchLater ? "watchLater" : query.seen ? "seen" : "notForMe";
   return (
     <div className="page">
       <PageHeader title={title} back={back} />
-      {outside.length > 0 && (
-        <section>
-          <h2 className="section-title">Not on your server <span className="muted small">{outside.length}</span></h2>
-          <div className="grid" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${model.settings.libraryCardSize}px, 1fr))` }}>
-            {outside.map((e) => (
-              <div key={e.id} className="ext-tile">
-                <TmdbCard t={e} width={model.settings.libraryCardSize} />
-                <button className="link-button small danger" onClick={() => void model.lists?.remove([e.id], listName).then(() => { model.feeds.clear(); model.dataChanged(); })}>Remove</button>
-              </div>
-            ))}
-          </div>
-          {data?.length ? <h2 className="section-title">On your server</h2> : null}
-        </section>
-      )}
-      {error ? <ErrorNote text={error} /> : !data ? <Spinner /> : !data.length ? (outside.length ? null : <Empty icon="search" title="Nothing here" />) : (
-        <>
-          {query.dismissed && <p className="muted small">Saved on your server as a thumbs-down. Right-click a title and choose "Undo Not for me" to bring it back to For You.</p>}
-          {query.watchLater && <p className="muted small">Saved on your server. Titles leave this list once you've watched them.</p>}
-          <Grid min={query.nextUp ? 280 : model.settings.libraryCardSize}>{data.map((i) => <ItemCard key={i.Id} item={i} width={undefined} shape={query.nextUp ? "landscape" : undefined} />)}</Grid>
-        </>
+      {error ? <ErrorNote text={error} /> : !data ? <Spinner /> : !data.length ? <Empty icon="search" title="Nothing here" /> : (
+        <Grid min={query.nextUp ? 280 : model.settings.libraryCardSize}>{data.map((i) => <ItemCard key={i.Id} item={i} width={undefined} shape={query.nextUp ? "landscape" : undefined} />)}</Grid>
       )}
     </div>
   );

@@ -18,6 +18,7 @@ import { SettingsPage } from "./settings";
 import { Sheets } from "./sheets";
 import { type Route, ui, useModel, useUI } from "./state";
 import { WelcomePage } from "./welcome";
+import { listCounts, MyListPage, NotForMePage } from "./lists";
 import { Cover, Modal, Spinner } from "./components";
 
 const MAIN_TABS: { id: Tab; label: string; icon: string }[] = [
@@ -84,9 +85,10 @@ export function App() {
   }
 
   const videoOn = player.active && !player.isAudio;
+  const counts = listCounts(model);
   const user = model.user!;
   const library = model.views.find((v) => v.Id === model.libraryId);
-  const tabs: Tab[] = ["home", "forYou", "search", "favorites", "library", "settings", ...(model.isAdmin ? ["dashboard" as Tab] : [])];
+  const tabs: Tab[] = ["home", "forYou", "search", "favorites", "library", "myList", "notForMe", "settings", ...(model.isAdmin ? ["dashboard" as Tab] : [])];
 
   return (
     <>
@@ -98,13 +100,21 @@ export function App() {
               <Icon name={t.icon} size={20} /> {t.label}
             </button>
           ))}
-          {model.views.length > 0 && <div className="nav-section">Libraries</div>}
+          <div className="nav-section">Libraries</div>
           <div className="nav-libraries">
             {model.views.map((v) => (
-              <button key={v.Id} className={`nav-item ${model.tab === "library" && model.libraryId === v.Id ? "on" : ""}`} onClick={() => select("library", v.Id)}>
+              <button key={v.Id} className={`nav-item ${model.tab === "library" && model.libraryId === v.Id ? "on" : ""}`} onClick={() => select("library", v.Id)}
+                onContextMenu={(e) => { e.preventDefault(); ui.showMenu({ x: e.clientX, y: e.clientY, item: v }); }}>
                 <Icon name={viewIcon(v.CollectionType)} size={20} /> <span className="nav-label">{v.Name}</span>
               </button>
             ))}
+            {/* Your For You lists, as on the iPhone's Library tab (saved on the server). */}
+            <button className={`nav-item ${model.tab === "myList" ? "on" : ""}`} onClick={() => select("myList")}>
+              <Icon name="bookmark" size={20} /> <span className="nav-label">My List</span>{counts.myList > 0 && <span className="nav-count">{counts.myList}</span>}
+            </button>
+            <button className={`nav-item ${model.tab === "notForMe" ? "on" : ""}`} onClick={() => select("notForMe")}>
+              <Icon name="thumbsDown" size={20} /> <span className="nav-label">Not for me</span>{counts.notForMe > 0 && <span className="nav-count">{counts.notForMe}</span>}
+            </button>
           </div>
           <div className="nav-bottom">
             <button className={`nav-item ${model.tab === "settings" ? "on" : ""}`} onClick={() => select("settings")}><Icon name="settings" size={20} /> Settings</button>
@@ -129,6 +139,8 @@ export function App() {
                   {t === "search" && <SearchPage />}
                   {t === "favorites" && <FavoritesPage refreshKey={refresh} />}
                   {t === "library" && library && <LibraryPage key={library.Id} view={library} refreshKey={refresh} />}
+                  {t === "myList" && <MyListPage />}
+                  {t === "notForMe" && <NotForMePage />}
                   {t === "settings" && <SettingsPage />}
                   {t === "dashboard" && model.isAdmin && <DashboardRoot />}
                   </Guard>
@@ -176,6 +188,8 @@ function RoutePage({ route, back, refreshKey }: { route: Route; back: () => void
     case "studio": return <StudioPage name={route.name} id={route.id} back={back} />;
     case "dashboard": return <DashboardPage page={route.page} arg={route.arg} back={back} />;
     case "liveGuide": return <LiveGuidePage back={back} />;
+    case "myList": return <MyListPage back={back} />;
+    case "notForMe": return <NotForMePage back={back} />;
   }
 }
 

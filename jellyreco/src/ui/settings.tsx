@@ -383,14 +383,16 @@ function ForYouSettings() {
   useEffect(() => { void getEmbedder().status().then(setStatus).catch(() => {}); }, []);
   return (
     <Group title="For You">
-      <Field label="TMDB API key or read access token" hint="For You picks come from TMDB (free key at themoviedb.org → Settings → API). Saved to your Jellyfin account.">
-        <input type="password" value={s.tmdbKey} onChange={(e) => { set("tmdbKey", e.target.value.trim()); model.feeds.clear(); }} spellCheck={false} />
+      <Field label="TMDB API Read Access Token or API key" hint="For You picks come from TMDB (free key at themoviedb.org → Settings → API). Saved to your Jellyfin account, so the iPhone app has it too.">
+        <input type="password" defaultValue={s.tmdbKey} onBlur={(e) => { if (e.target.value.trim() !== s.tmdbKey) void model.setTmdbKey(e.target.value); }} spellCheck={false} />
       </Field>
-      <Toggle label="On-device AI ranking" detail={status ? `Engine: ${status.detail}` : "Reads overviews with a small model on your Snapdragon NPU"} checked={s.useOnDeviceAI} onChange={(v) => { set("useOnDeviceAI", v); model.feeds.clear(); }} />
-      <div className="slider-row"><div className="slider-head"><span>Minimum TMDB rating</span><span className="muted tabular">{s.forYouMinRating ? s.forYouMinRating.toFixed(1) : "Any"}</span></div>
-        <Range min={0} max={9} step={0.5} value={s.forYouMinRating} onChange={(e) => { set("forYouMinRating", Number(e.target.value)); model.feeds.clear(); }} /></div>
-      <p className="muted small">For You suggests shows and movies you don't have yet, from TMDB, based on what you've completed, are watching, favorited, rated or saved to Watch later. Nothing already on your server is suggested. Libraries named "placeholder" or "playlist(s)" never appear. The AI only reads: it never changes your server or your files, and only writes its own cache in JellyReco's app data folder.</p>
-      <button className="glass-button" onClick={() => { model.forYouLibrary = null; model.feeds.clear(); model.toast("Picks will be rebuilt", "success"); }}><Icon name="refresh" size={15} /> Rebuild picks now</button>
+      <Toggle label="On-device AI ranking" detail={status ? `Engine: ${status.detail}` : "Compares overviews with a small model on this PC"} checked={s.useOnDeviceAI} onChange={(v) => set("useOnDeviceAI", v)} />
+      <Toggle label="Count what you're watching as liked" detail="Shows and movies you're partway through count towards your taste" checked={s.includeWatchingAsLiked} onChange={(v) => { set("includeWatchingAsLiked", v); model.tasteChanged(); }} />
+      <p className="muted small">For You never suggests anything already on your server: titles are matched by the TMDB, IMDb and TVDB ids Jellyfin stored, then by title and year. Your taste comes from what you finished, favourited or are watching on your server (the chosen library counts most), what you gave up on, and what you marked Not for me. The AI reads your library with read-only requests: it can't change, move or delete anything. My List, Not for me, Already seen and your settings are saved in your account's private JellyReco storage on your server, so they follow you to every device, including the iPhone app. Libraries named "placeholder" or "playlist(s)" never appear.</p>
+      <div className="row-line">
+        <button className="glass-button" onClick={() => { model.discovery.reset(); model.reco.loadedAt = 0; model.toast("Picks will be rebuilt", "success"); }}><Icon name="refresh" size={15} /> Rebuild picks now</button>
+        <button className="glass-button" onClick={() => ui.openSheet({ kind: "confirm", title: "Reset Not for me on For You picks?", text: "Titles you passed on can be suggested again.", confirmLabel: "Reset", danger: true, run: async () => { await model.storage?.clear("notforme"); model.tasteChanged(); } })}>Reset "Not for me" on For You picks</button>
+      </div>
     </Group>
   );
 }

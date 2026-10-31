@@ -80,7 +80,9 @@ export interface Settings {
   /** First dropdown: a library id, "all", or "" = the library named "Anime" (else all). */
   forYouLibrary: string;
   forYouCategory: string; // second dropdown: "" = all categories
-  forYouMinRating: number; // TMDB rating floor (0 = any)
+  forYouMinRating: number;
+  /** Shows and movies you're partway through count as liked (the iPhone's "includeWatchingAsLiked"). */
+  includeWatchingAsLiked: boolean; // TMDB rating floor (0 = any)
   /** Your TMDB API key (v3) or read access token (v4): For You's outside source. */
   tmdbKey: string;
 }
@@ -91,7 +93,7 @@ export const ALL_HOME_SECTIONS: { id: HomeSection; label: string }[] = [
   { id: "resume", label: "Continue watching" },
   { id: "nextUp", label: "Next up" },
   { id: "forYouRow", label: "Picked for you" },
-  { id: "watchLater", label: "Watch later" },
+  { id: "watchLater", label: "My List" },
   { id: "latest", label: "Latest in each library" },
   { id: "favorites", label: "Favorites" },
   { id: "libraries", label: "My media" },
@@ -162,6 +164,7 @@ export const DEFAULT_SETTINGS: Settings = {
   forYouLibrary: "",
   forYouCategory: "",
   forYouMinRating: 0,
+  includeWatchingAsLiked: true,
   tmdbKey: "",
 };
 
@@ -170,10 +173,47 @@ const KEY = "settings-v1";
 /** Settings that belong to this PC, not your account: they never sync through the server. */
 export const DEVICE_KEYS: (keyof Settings)[] = ["audioDevice", "screenshotFolder", "hwdec", "startFullscreen"];
 
-/** Your synced settings (everything but the per-device ones). */
+/** Your synced settings (everything but the per-device ones and the TMDB key, which has its own slot). */
 export function syncedPart(s: Settings): Record<string, unknown> {
   const out: Record<string, unknown> = { ...s };
   for (const k of DEVICE_KEYS) delete out[k];
+  delete out.tmdbKey;
+  return out;
+}
+
+// MARK: Settings shared with the iPhone app (its names and values, in its settings JSON)
+
+/** What this PC writes into the iPhone's settings: only settings both apps have. */
+export function sharedPart(s: Settings): Record<string, unknown> {
+  return {
+    appearance: s.theme,
+    useOnDeviceAI: s.useOnDeviceAI,
+    recoSource: s.forYouLibrary,
+    includeWatchingAsLiked: s.includeWatchingAsLiked,
+    jumpBackward: s.seekShort,
+    jumpForward: s.seekShort,
+    defaultSpeed: s.defaultSpeed,
+    autoSkipIntro: s.segmentActions.Intro === "skip",
+    autoSkipRecap: s.segmentActions.Recap === "skip",
+    autoSkipOutro: s.segmentActions.Outro === "skip",
+  };
+}
+
+/** The iPhone's values for the shared settings, on top of this PC's. */
+export function applyShared(s: Settings, phone: Record<string, unknown> | null): Settings {
+  if (!phone) return s;
+  const out: Settings = { ...s, segmentActions: { ...s.segmentActions } };
+  if (phone.appearance === "system" || phone.appearance === "light" || phone.appearance === "dark") out.theme = phone.appearance;
+  if (typeof phone.useOnDeviceAI === "boolean") out.useOnDeviceAI = phone.useOnDeviceAI;
+  if (typeof phone.recoSource === "string") out.forYouLibrary = phone.recoSource;
+  if (typeof phone.includeWatchingAsLiked === "boolean") out.includeWatchingAsLiked = phone.includeWatchingAsLiked;
+  if (typeof phone.jumpForward === "number" && phone.jumpForward > 0) out.seekShort = phone.jumpForward;
+  if (typeof phone.defaultSpeed === "number" && phone.defaultSpeed > 0) out.defaultSpeed = phone.defaultSpeed;
+  const seg = (k: "Intro" | "Recap" | "Outro", v: unknown) => {
+    if (v === true) out.segmentActions[k] = "skip";
+    else if (v === false && out.segmentActions[k] === "skip") out.segmentActions[k] = "ask";
+  };
+  seg("Intro", phone.autoSkipIntro); seg("Recap", phone.autoSkipRecap); seg("Outro", phone.autoSkipOutro);
   return out;
 }
 

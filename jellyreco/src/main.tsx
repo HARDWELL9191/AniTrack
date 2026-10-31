@@ -13,7 +13,6 @@ import { PlayerController } from "./core/player";
 import { startSocket, stopSocket } from "./core/socket";
 import { setTmdbFetch } from "./core/tmdb";
 import { App } from "./ui/app";
-import { powerSaver } from "./ui/foryou";
 import { Provider, ui } from "./ui/state";
 import "./styles.css";
 
@@ -84,7 +83,7 @@ model.subscribe(() => {
 
 // Battery saver on: the AI part pauses (checked every half minute).
 if (native) {
-  const check = () => void invoke<boolean>("power_saver").then((on) => { powerSaver.on = on; }).catch(() => {});
+  const check = () => void invoke<boolean>("power_saver").then((on) => { model.powerSaver = on; }).catch(() => {});
   check();
   setInterval(check, 30_000);
   // A video file opened with the app (or dropped on the exe): play it with mpv directly.

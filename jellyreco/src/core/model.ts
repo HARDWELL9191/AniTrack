@@ -1,14 +1,16 @@
 // The app's state: servers and the signed-in user, settings, libraries, and small helpers every
 // screen shares. Screens subscribe through useModel() and re-render on notify().
 
-import { ApiError, deviceIdFor, Jellyfin } from "./api";
-import { ServerLists } from "./lists";
+import { ApiError, deviceIdFor, Jellyfin, ReadOnlyJellyfin } from "./api";
+import { Discovery, type DiscoveryContext } from "./discovery";
 import type { PlayerController } from "./player";
-import type { Feed, Library } from "./recommender";
-import { loadSettings, mergeServerSettings, saveSettings, type Settings, syncedPart } from "./settings";
+import { Reco, sourcesOf } from "./reco";
+import { applyShared, loadSettings, mergeServerSettings, saveSettings, type Settings, sharedPart, syncedPart } from "./settings";
+import { AccountStorage } from "./storage";
+import { Tmdb } from "./tmdb";
 import type { Item, User } from "./types";
 
-export type Tab = "home" | "forYou" | "search" | "favorites" | "library" | "settings" | "dashboard";
+export type Tab = "home" | "forYou" | "search" | "favorites" | "library" | "myList" | "notForMe" | "settings" | "dashboard";
 
 export interface SavedServer {
   id: string; // Jellyfin server id (or the URL until we know it)
@@ -45,13 +47,20 @@ export class AppModel {
   /** Bumped when user data (played, favorite, progress) changes anywhere, so lists refetch. */
   dataVersion = 0;
   player: PlayerController | null = null;
-  /** For You: the library snapshot and feeds per (library, category). */
-  forYouLibrary: Library | null = null;
-  feeds = new Map<string, Feed>();
   /** "Not for me" set this session (the server keeps them as thumbs-down). */
   dismissed: Set<string> = new Set();
-  /** Watch later, saved on the server. */
-  lists: ServerLists | null = null;
+  /** My List, Not for me, Already seen, TMDB key and settings: your account's JellyReco storage
+   * on the server, shared with the iPhone app. */
+  storage: AccountStorage | null = null;
+  /** Your library and taste (read-only), and the For You picks from TMDB: the iPhone's engines. */
+  reco = new Reco(() => (this.api ? {
+    api: new ReadOnlyJellyfin(this.api), views: this.views, storage: this.storage, dismissed: this.dismissed,
+    includeWatchingAsLiked: this.settings.includeWatchingAsLiked,
+  } : null));
+  discovery = new Discovery(() => this.notify());
+  private tmdbClient: { key: string; client: Tmdb } | null = null;
+  /** Battery saver on: the AI part pauses (set by main.tsx). */
+  powerSaver = false;
   readonly deviceId = deviceIdFor(localStorage);
   readonly deviceName: string;
   private store: TokenStore;
@@ -78,7 +87,7 @@ export class AppModel {
   updateSettings(patch: Partial<Settings>) {
     this.settings = { ...this.settings, ...patch };
     saveSettings(this.settings);
-    this.lists?.saveSettings(syncedPart(this.settings));
+    this.scheduleSettingsSync();
     applyTheme(this.settings.theme);
     void this.player?.applySettings(this.settings);
     this.notify();
@@ -162,23 +171,28 @@ export class AppModel {
     server.lastUserId = user.Id;
     this.tab = "home";
     this.libraryId = null;
-    this.forYouLibrary = null;
-    this.feeds.clear();
     this.dismissed = new Set();
-    this.lists = new ServerLists(api);
+    this.reco.reset();
+    this.discovery.reset();
+    const storage = new AccountStorage(api);
+    this.storage = storage;
     await this.persist();
-    void this.lists.load().then(() => {
-      // Your settings follow you: what's saved on the server wins over this PC's copy.
-      const lists = this.lists;
-      if (!lists) return;
-      if (lists.settings) {
-        this.settings = mergeServerSettings(this.settings, lists.settings);
-        saveSettings(this.settings);
-        applyTheme(this.settings.theme);
-        this.feeds.clear();
-      } else lists.saveSettings(syncedPart(this.settings)); // first time: upload this PC's settings
+    void storage.load().then(() => {
+      if (this.storage !== storage) return;
+      // What's saved for your account wins: this app's settings, then the ones shared with the iPhone.
+      const before = JSON.stringify(sharedPart(this.settings));
+      let next = storage.windowsSettings ? mergeServerSettings(this.settings, storage.windowsSettings) : this.settings;
+      next = applyShared(next, storage.phoneSettings);
+      // The TMDB key: either device's copy fills in the other.
+      if (storage.tmdbKey) next = { ...next, tmdbKey: storage.tmdbKey };
+      else if (next.tmdbKey) void storage.saveTmdbKey(next.tmdbKey).catch(() => {});
+      this.settings = next;
+      saveSettings(next);
+      applyTheme(next.theme);
+      if (!storage.windowsSettings || JSON.stringify(sharedPart(next)) !== before) this.scheduleSettingsSync();
+      this.reco.rebuild();
       this.notify();
-    });
+    }).catch((e) => this.fail(e, "Couldn't load My List"));
     void api.reportCapabilities().catch(() => {});
     await this.loadViews();
     this.notify();
@@ -243,9 +257,9 @@ export class AppModel {
     this.user = null;
     this.server = null;
     this.views = [];
-    this.forYouLibrary = null;
-    this.feeds.clear();
-    this.lists = null;
+    this.storage = null;
+    this.reco.reset();
+    this.discovery.reset();
     await this.player?.shutdown();
     await this.persist();
     this.notify();
@@ -265,6 +279,46 @@ export class AppModel {
     } catch (e) {
       this.fail(e);
     }
+  }
+
+  // MARK: Account storage and For You
+
+  private settingsTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Saves settings to the server a moment after the last change (one request per burst). */
+  scheduleSettingsSync() {
+    if (this.settingsTimer) clearTimeout(this.settingsTimer);
+    this.settingsTimer = setTimeout(() => {
+      const st = this.storage;
+      if (!st?.loaded) return;
+      void st.saveSettings(syncedPart(this.settings), sharedPart(this.settings)).catch(() => {});
+    }, 1500);
+  }
+
+  /** The TMDB client for the current key. */
+  get tmdb(): Tmdb {
+    const key = this.settings.tmdbKey;
+    if (!this.tmdbClient || this.tmdbClient.key !== key) { this.tmdbClient = { key, client: new Tmdb(key) }; this.discovery.reset(true); }
+    return this.tmdbClient.client;
+  }
+
+  /** Sets the TMDB key on this PC and in your account (so the iPhone has it too). */
+  async setTmdbKey(key: string) {
+    this.updateSettings({ tmdbKey: key.trim() });
+    await this.storage?.saveTmdbKey(key.trim());
+  }
+
+  discoveryContext(): DiscoveryContext | null {
+    if (!this.api || !this.user || !this.server) return null;
+    return {
+      reco: this.reco, tmdb: this.tmdb, storage: this.storage, sources: sourcesOf(this.views),
+      serverId: this.server.id, userId: this.user.Id, useAI: this.settings.useOnDeviceAI && !this.powerSaver,
+    };
+  }
+
+  /** After My List / Not for me / watched changes: taste again (cheap) and screens refresh. */
+  tasteChanged() {
+    this.reco.rebuild();
+    this.dataChanged();
   }
 
   // MARK: Shortcuts used everywhere

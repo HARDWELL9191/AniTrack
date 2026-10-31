@@ -4,7 +4,9 @@
 import { useEffect, useRef } from "react";
 import type { AppModel } from "../core/model";
 import type { Item } from "../core/types";
-import { dismiss, toggleWatchLater, undismiss } from "./foryou";
+import { dismiss, toggleMyList, undismiss } from "./foryou";
+import { AccountStorage } from "../core/storage";
+import { libraryAdminItems } from "./libraryadmin";
 import type { DropItem } from "./components";
 import { Icon } from "./icons";
 import { routeFor, ui, useModel, useUI } from "./state";
@@ -19,6 +21,12 @@ export function itemMenuItems(model: AppModel, item: Item, context?: "resume" | 
   const isProgram = ["Program", "TvProgram", "LiveTvProgram"].includes(item.Type);
   const playable = !["Person", "Genre", "Studio", "MusicGenre", "Book", "CollectionFolder", "UserView"].includes(item.Type) && !isProgram;
   const items: DropItem<Action>[] = [];
+  // A library itself (sidebar, My media): what jellyfin-web's library menu offers.
+  if (item.Type === "CollectionFolder" || item.Type === "UserView") {
+    items.push({ value: go({ kind: "library", id: item.Id, name: item.Name ?? "", collectionType: item.CollectionType }), label: "Open", icon: "folder" });
+    items.push(...libraryAdminItems(model, item));
+    return items;
+  }
 
   if (playable) {
     items.push({ value: () => void p?.playItem(item, { resume: true }), label: (item.UserData?.PlaybackPositionTicks ?? 0) > 0 ? "Resume" : "Play", icon: "playFill" });
@@ -55,11 +63,13 @@ export function itemMenuItems(model: AppModel, item: Item, context?: "resume" | 
   if (context === "resume") items.push({
     value: async () => { try { await model.api!.updateUserData(item.Id, { PlaybackPositionTicks: 0 }); model.dataChanged(); } catch (e) { model.fail(e); } }, label: "Remove from Continue watching", icon: "x",
   });
+  if (["Series", "Movie", "Season", "Episode"].includes(item.Type)) {
+    const onList = !!model.storage?.hasServer(AccountStorage.listId(item));
+    items.push({ value: () => void toggleMyList(model, item), label: onList ? "Remove from My List" : "Add to My List", icon: "bookmark" });
+  }
   if (["Series", "Movie"].includes(item.Type)) {
-    const later = !!model.lists?.has(item.Id);
-    items.push({ value: () => void toggleWatchLater(model, item.Id), label: later ? "Remove from Watch later" : "Add to Watch later", icon: "bookmark" });
     const out = model.dismissed.has(item.Id) || item.UserData?.Likes === false;
-    items.push({ value: () => { if (out) { void undismiss(model, item.Id); model.toast("Back in For You", "success"); } else { void dismiss(model, item.Id); model.toast("Won't show in For You", "success"); } }, label: out ? "Undo Not for me" : "Not for me", icon: "thumbsDown" });
+    items.push({ value: () => { if (out) { void undismiss(model, item); model.toast("Back in For You", "success"); } else { void dismiss(model, item); model.toast("Won't count towards For You", "success"); } }, label: out ? "Undo Not for me" : "Not for me", icon: "thumbsDown" });
   }
   if (playable) items.push({ value: () => ui.openSheet({ kind: "addToPlaylist", items: [item] }), label: "Add to playlist…", icon: "playlist" });
   if (playable && (admin || policy?.EnableCollectionManagement) && item.Type !== "BoxSet") items.push({ value: () => ui.openSheet({ kind: "addToCollection", items: [item] }), label: "Add to collection…", icon: "collection" });

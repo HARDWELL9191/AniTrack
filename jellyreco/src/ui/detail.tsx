@@ -3,9 +3,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { LIST_FIELDS } from "../core/api";
-import { moreLikeThis, quickMatch } from "../core/recommender";
-import { ReadOnlyJellyfin } from "../core/api";
-import { ensureLibrary, toggleWatchLater } from "./foryou";
+import { toggleMyList } from "./foryou";
+import { AccountStorage } from "../core/storage";
 import type { Item, MediaStream } from "../core/types";
 import { ticksToSeconds } from "../core/types";
 import {
@@ -55,10 +54,12 @@ function Detail({ item, full, onChange }: { item: Item; full: boolean; onChange:
     resume: !fromStart, startSeconds: fromStart ? 0 : undefined, mediaSourceId: source?.Id ?? undefined, audioIndex, subtitleIndex: subIndex,
   });
 
+  // Your match % (the same taste profile as the iPhone; the library is read in the background).
+  useEffect(() => { void model.reco.ensure().then(() => model.notify()).catch(() => {}); }, [model]);
   const match = useMemo(() => {
-    if (!model.forYouLibrary || item.UserData?.Played || !["Series", "Movie"].includes(item.Type)) return null;
-    return quickMatch(item, model.forYouLibrary, model.dismissed);
-  }, [item, model.forYouLibrary, model.dismissed]);
+    if (!model.reco.ready || item.UserData?.Played || !["Series", "Movie"].includes(item.Type)) return null;
+    return model.reco.match(item);
+  }, [item, model.reco.ready, model.version]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const director = item.People?.filter((p) => p.Type === "Director") ?? [];
   const writers = item.People?.filter((p) => p.Type === "Writer") ?? [];
@@ -114,8 +115,8 @@ function Detail({ item, full, onChange }: { item: Item; full: boolean; onChange:
               <Icon name={item.UserData?.IsFavorite ? "heartFill" : "heart"} size={19} />
             </button>
             <LikeButtons item={item} onChange={onChange} />
-            {["Series", "Movie"].includes(item.Type) && !item.UserData?.Played && (
-              <button className={`glass-button big icon-only ${model.lists?.has(item.Id) ? "on" : ""}`} title={model.lists?.has(item.Id) ? "Remove from Watch later" : "Watch later"} onClick={() => void toggleWatchLater(model, item.Id)}>
+            {["Series", "Movie", "Season", "Episode"].includes(item.Type) && (
+              <button className={`glass-button big icon-only ${model.storage?.hasServer(AccountStorage.listId(item)) ? "on" : ""}`} title={model.storage?.hasServer(AccountStorage.listId(item)) ? "Remove from My List" : "Add to My List"} onClick={() => void toggleMyList(model, item)}>
                 <Icon name="bookmark" size={18} />
               </button>
             )}
@@ -396,19 +397,10 @@ function Extras({ item }: { item: Item }) {
 }
 
 /** More like this: titles in your library, ranked by the on-device AI (overview meaning) with
- * genres/tags/studios and the server's own similarity list. Read only. */
+ * genres/tags/studios and the server's own similarity list (the iPhone's logic). Read only. */
 function Similar({ item }: { item: Item }) {
   const model = useModel();
-  const base: Item | null = item.Type === "Episode" || item.Type === "Season" ? null : item;
-  const seriesId = item.Type === "Episode" || item.Type === "Season" ? item.SeriesId : null;
-  const { data } = useLoad(async () => {
-    await ensureLibrary(model);
-    const lib = model.forYouLibrary;
-    const ro = new ReadOnlyJellyfin(model.api!);
-    const target = base ?? (seriesId ? lib?.items.find((i) => i.Id === seriesId) ?? (await ro.itemFull(seriesId)) : null);
-    if (!lib || !target) return [];
-    return moreLikeThis(ro, lib, target, model.settings.useOnDeviceAI);
-  }, [item.Id]);
+  const { data } = useLoad(() => model.reco.moreLike(item, model.settings.useOnDeviceAI && !model.powerSaver, 25_000), [item.Id]);
   if (!data?.length) return null;
   return (
     <Shelf title="More like this" icon="layers" subtitle="from your library">

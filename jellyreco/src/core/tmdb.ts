@@ -1,65 +1,13 @@
-// TMDB (The Movie Database), the For You tab's outside source: recommendations, similar titles
-// and discover lists for shows (including anime) and movies. Read only: every call is a GET.
-// Needs your free TMDB API key (v3 key) or API read access token (v4), set in Settings → For You.
+// TMDB (themoviedb.org API v3), read only, the same client as the iPhone app's TMDBClient:
+// "people who liked this also liked" lists, discover by genre (anime = Animation + Japanese),
+// details (keywords, IMDb/TVDB ids), and finding your library's titles by IMDb/TVDB id or title.
+// Accepts the long "API Read Access Token" (Bearer header) or the short "API key" (api_key).
+
+import { type ExternalTitle, IMAGE_BASE, titleId, titleKey } from "./titles";
 
 type FetchFn = (url: string, init?: RequestInit) => Promise<Response>;
 let fetchImpl: FetchFn = (url, init) => fetch(url, init);
 export const setTmdbFetch = (f: FetchFn) => (fetchImpl = f);
-
-export type TmdbKind = "tv" | "movie";
-
-export interface TmdbItem {
-  id: number;
-  kind: TmdbKind;
-  title: string;
-  originalTitle?: string;
-  overview: string;
-  posterPath?: string | null;
-  backdropPath?: string | null;
-  genreIds: number[];
-  originalLanguage?: string;
-  originCountry?: string[];
-  date?: string; // first air / release date
-  voteAverage: number;
-  voteCount: number;
-  popularity: number;
-}
-
-interface RawItem {
-  id: number;
-  name?: string;
-  title?: string;
-  original_name?: string;
-  original_title?: string;
-  overview?: string;
-  poster_path?: string | null;
-  backdrop_path?: string | null;
-  genre_ids?: number[];
-  genres?: { id: number; name: string }[];
-  original_language?: string;
-  origin_country?: string[];
-  first_air_date?: string;
-  release_date?: string;
-  vote_average?: number;
-  vote_count?: number;
-  popularity?: number;
-  media_type?: string;
-}
-
-export interface TmdbDetails extends TmdbItem {
-  genres: string[];
-  runtime?: number | null;
-  seasons?: number | null;
-  episodes?: number | null;
-  status?: string;
-  tagline?: string;
-  homepage?: string;
-  trailer?: string | null; // YouTube URL
-  cast: { name: string; character?: string; profilePath?: string | null }[];
-  networks: string[];
-  imdbId?: string | null;
-  tvdbId?: number | null;
-}
 
 export class TmdbError extends Error {
   status: number;
@@ -69,150 +17,217 @@ export class TmdbError extends Error {
   }
 }
 
+interface Raw {
+  id: number; title?: string; name?: string; original_title?: string; original_name?: string; original_language?: string;
+  overview?: string; poster_path?: string | null; backdrop_path?: string | null; genre_ids?: number[]; release_date?: string;
+  first_air_date?: string; vote_average?: number; vote_count?: number; popularity?: number; adult?: boolean;
+}
+
+/** Extra details for the title sheet (cast, trailer, networks). */
+export interface TitleExtras {
+  title: ExternalTitle;
+  tagline?: string;
+  homepage?: string;
+  trailer?: string | null;
+  cast: { name: string; character?: string; profile?: string | null }[];
+  networks: string[];
+}
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-export function poster(path?: string | null, size = "w342") {
-  return path ? `https://image.tmdb.org/t/p/${size}${path}` : undefined;
-}
-
-export function tmdbUrl(i: { id: number; kind: TmdbKind }) {
-  return `https://www.themoviedb.org/${i.kind}/${i.id}`;
-}
-
 export class Tmdb {
-  private cache = new Map<string, Promise<unknown>>();
   private key: string;
-  private language: string;
-  constructor(key: string, language = "en-US") {
-    this.key = key;
-    this.language = language;
+  private genreNames = new Map<number, string>();
+  private genresLoaded: Promise<void> | null = null;
+  private detailCache = new Map<string, ExternalTitle>();
+  succeeded = 0;
+  failed = 0;
+  lastFailure: string | null = null;
+
+  constructor(key: string) {
+    // Pasted keys often carry spaces, line breaks or quotes: keep only the key itself.
+    this.key = key.replace(/\s+/g, "").replace(/^["']+|["']+$/g, "");
   }
 
-  get configured() { return !!this.key.trim(); }
+  get configured() { return !!this.key; }
+  private get bearer() { return this.key.length > 40; }
+  resetStats() { this.succeeded = 0; this.failed = 0; this.lastFailure = null; }
 
   private async get<T>(path: string, query: Record<string, string | number | boolean | undefined> = {}): Promise<T> {
-    const key = this.key.trim();
-    if (!key) throw new TmdbError(401, "Add your TMDB API key in Settings → For You.");
+    try {
+      const v = await this.raw<T>(path, query);
+      this.succeeded++;
+      return v;
+    } catch (e) {
+      this.failed++;
+      this.lastFailure = (e as Error).message;
+      throw e;
+    }
+  }
+
+  private async raw<T>(path: string, query: Record<string, string | number | boolean | undefined>): Promise<T> {
+    if (!this.key) throw new TmdbError(401, "Add your free TMDB API key in Settings → For You.");
     const q = new URLSearchParams();
-    // A v4 read access token is a JWT ("eyJ..."); a v3 key is 32 hex characters.
-    const bearer = key.startsWith("eyJ");
-    if (!bearer) q.set("api_key", key);
-    q.set("language", this.language);
     for (const [k, v] of Object.entries(query)) if (v !== undefined && v !== "") q.set(k, String(v));
+    q.set("language", "en-US");
+    if (!this.bearer) q.set("api_key", this.key);
     const url = `https://api.themoviedb.org/3${path}?${q}`;
-    const hit = this.cache.get(url);
-    if (hit) return hit as Promise<T>;
-    const job = (async () => {
-      for (let attempt = 1; ; attempt++) {
-        let res: Response;
-        try {
-          // Never wait forever on one request (a stalled connection would hold up For You).
-          res = await fetchImpl(url, { method: "GET", signal: AbortSignal.timeout(20_000), headers: { Accept: "application/json", ...(bearer ? { Authorization: `Bearer ${key}` } : {}) } });
-        } catch {
-          if (attempt < 3) { await sleep(800 * attempt); continue; }
-          throw new TmdbError(0, "Couldn't reach TMDB. Check your connection.");
-        }
-        if (res.status === 429 && attempt < 4) { await sleep((Number(res.headers.get("Retry-After")) || 2) * 1000); continue; }
-        if (res.status === 401) throw new TmdbError(401, "TMDB didn't accept the API key. Check it in Settings → For You.");
-        if (!res.ok) throw new TmdbError(res.status, `TMDB answered ${res.status}.`);
-        return (await res.json()) as T;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      let res: Response;
+      try {
+        // Never wait forever on one request.
+        res = await fetchImpl(url, { method: "GET", signal: AbortSignal.timeout(20_000), headers: { Accept: "application/json", ...(this.bearer ? { Authorization: `Bearer ${this.key}` } : {}) } });
+      } catch (e) {
+        if (attempt === 0) { await sleep(600); continue; }
+        throw new TmdbError(0, `Couldn't reach TMDB: ${(e as Error).message}`);
       }
-    })();
-    this.cache.set(url, job);
-    job.catch(() => this.cache.delete(url));
-    return job;
+      if (res.status === 429) { await sleep(Math.min(Number(res.headers.get("Retry-After")) || attempt + 1, 10) * 1000); continue; }
+      let message: string | undefined;
+      if (!res.ok) { try { message = ((await res.json()) as { status_message?: string }).status_message; } catch { /* */ } }
+      if (res.status === 401) throw new TmdbError(401, `TMDB didn't accept the key${message ? `: ${message}` : ""}. Paste the API Read Access Token (the long one) or the API key.`);
+      if (!res.ok) throw new TmdbError(res.status, `TMDB error ${res.status}${message ? `: ${message}` : ""}.`);
+      return (await res.json()) as T;
+    }
+    throw new TmdbError(429, "TMDB error 429: Too many requests, try again in a minute.");
   }
 
-  /** Checks the key (Settings shows the result). */
-  async check(): Promise<boolean> {
-    await this.get("/configuration");
-    return true;
+  /** Checks the key (Settings and the For You setup card). */
+  async check() { await this.get("/configuration"); return true; }
+
+  // MARK: Genres
+
+  loadGenres(): Promise<void> {
+    if (!this.genresLoaded) {
+      this.genresLoaded = (async () => {
+        for (const kind of ["movie", "tv"]) {
+          const r = await this.get<{ genres: { id: number; name: string }[] }>(`/genre/${kind}/list`);
+          for (const g of r.genres) this.genreNames.set(g.id, g.name);
+        }
+      })();
+      this.genresLoaded.catch(() => { this.genresLoaded = null; });
+    }
+    return this.genresLoaded;
   }
 
-  async genres(kind: TmdbKind): Promise<Map<number, string>> {
-    const r = await this.get<{ genres: { id: number; name: string }[] }>(`/genre/${kind}/list`);
-    return new Map(r.genres.map((g) => [g.id, g.name]));
-  }
-
-  async recommendations(kind: TmdbKind, id: number, page = 1): Promise<TmdbItem[]> {
-    const r = await this.get<{ results: RawItem[] }>(`/${kind}/${id}/recommendations`, { page });
-    return r.results.map((x) => toItem(x, kind));
-  }
-
-  async similar(kind: TmdbKind, id: number, page = 1): Promise<TmdbItem[]> {
-    const r = await this.get<{ results: RawItem[] }>(`/${kind}/${id}/similar`, { page });
-    return r.results.map((x) => toItem(x, kind));
-  }
-
-  async discover(kind: TmdbKind, query: Record<string, string | number | boolean | undefined>, page = 1): Promise<TmdbItem[]> {
-    const r = await this.get<{ results: RawItem[] }>(`/discover/${kind}`, { include_adult: false, page, ...query });
-    return r.results.map((x) => toItem(x, kind));
-  }
-
-  /** TMDB id for an IMDb or TVDB id (titles Jellyfin matched with another source). */
-  async find(externalId: string, source: "imdb_id" | "tvdb_id"): Promise<{ id: number; kind: TmdbKind } | null> {
-    const r = await this.get<{ movie_results: RawItem[]; tv_results: RawItem[] }>(`/find/${encodeURIComponent(externalId)}`, { external_source: source });
-    if (r.tv_results[0]) return { id: r.tv_results[0].id, kind: "tv" };
-    if (r.movie_results[0]) return { id: r.movie_results[0].id, kind: "movie" };
+  /** TV uses combined names ("Action & Adventure", "Sci-Fi & Fantasy"). */
+  genreId(name: string): number | null {
+    const lower = name.toLowerCase();
+    for (const [id, n] of this.genreNames) if (n.toLowerCase() === lower) return id;
+    for (const [id, n] of this.genreNames) { const l = n.toLowerCase(); if (l.includes(lower) || lower.includes(l)) return id; }
     return null;
   }
 
-  async details(kind: TmdbKind, id: number): Promise<TmdbDetails> {
-    type Raw = RawItem & {
-      genres?: { id: number; name: string }[]; runtime?: number; episode_run_time?: number[]; number_of_seasons?: number; number_of_episodes?: number;
-      status?: string; tagline?: string; homepage?: string; networks?: { name: string }[]; production_companies?: { name: string }[];
-      videos?: { results: { site: string; type: string; key: string; official?: boolean }[] };
-      credits?: { cast: { name: string; character?: string; profile_path?: string | null }[] };
-      aggregate_credits?: { cast: { name: string; roles?: { character: string }[]; profile_path?: string | null }[] };
-      external_ids?: { imdb_id?: string | null; tvdb_id?: number | null };
+  private convert(r: Raw, tv: boolean): ExternalTitle {
+    const date = (tv ? r.first_air_date : r.release_date) ?? "";
+    const t: ExternalTitle = {
+      source: tv ? "tmdbTV" : "tmdbMovie",
+      sourceId: r.id,
+      title: (tv ? r.name : r.title) ?? r.name ?? r.title ?? "Untitled",
+      overview: r.overview ?? "",
+      genres: (r.genre_ids ?? []).map((g) => this.genreNames.get(g)).filter((x): x is string => !!x),
+      tags: [],
+      isAdult: r.adult ?? false,
     };
-    const r = await this.get<Raw>(`/${kind}/${id}`, { append_to_response: kind === "tv" ? "videos,aggregate_credits,external_ids" : "videos,credits,external_ids" });
-    const base = toItem(r, kind);
-    const vids = r.videos?.results ?? [];
+    const original = tv ? r.original_name : r.original_title;
+    if (original) t.originalTitle = original;
+    if (r.original_language) t.originalLanguage = r.original_language;
+    const year = Number(date.slice(0, 4));
+    if (year) t.year = year;
+    if (r.poster_path) t.posterURL = `${IMAGE_BASE}w500${r.poster_path}`;
+    if (r.backdrop_path) t.backdropURL = `${IMAGE_BASE}w1280${r.backdrop_path}`;
+    if (typeof r.vote_average === "number") t.score = r.vote_average;
+    if (typeof r.vote_count === "number") t.voteCount = r.vote_count;
+    if (typeof r.popularity === "number") t.popularity = r.popularity;
+    return t;
+  }
+
+  /** "People who liked this also liked" for one title. */
+  async recommendations(tmdbId: number, tv: boolean, page = 1): Promise<ExternalTitle[]> {
+    await this.loadGenres();
+    const r = await this.get<{ results: Raw[] }>(`/${tv ? "tv" : "movie"}/${tmdbId}/recommendations`, { page });
+    return r.results.map((x) => this.convert(x, tv));
+  }
+
+  /** Well-rated titles in genres, optionally anime only (Animation + Japanese original language). */
+  async discover(o: { tv: boolean; genreIds: number[]; anime: boolean | null; page: number; sort?: string; minVotes?: number }): Promise<ExternalTitle[]> {
+    await this.loadGenres();
+    const q: Record<string, string | number> = { page: o.page, sort_by: o.sort ?? "vote_average.desc", include_adult: "false", "vote_count.gte": o.minVotes ?? 200 };
+    const genres = [...o.genreIds];
+    if (o.anime === true) {
+      if (!genres.includes(16)) genres.push(16);
+      q.with_original_language = "ja";
+    } else if (o.anime === false) {
+      q.without_genres = "16"; // movie/TV libraries: anime is the anime library's
+    }
+    if (genres.length) q.with_genres = genres.join(",");
+    const r = await this.get<{ results: Raw[] }>(`/discover/${o.tv ? "tv" : "movie"}`, q);
+    return r.results.map((x) => this.convert(x, o.tv));
+  }
+
+  /** Full details: keywords (tags), IMDb/TVDB ids, seasons, runtime, status. */
+  async details(t: ExternalTitle): Promise<ExternalTitle> {
+    const key = titleId(t);
+    const hit = this.detailCache.get(key);
+    if (hit) return hit;
+    const tv = t.source === "tmdbTV";
+    let json: Record<string, unknown>;
+    try { json = await this.get<Record<string, unknown>>(`/${tv ? "tv" : "movie"}/${t.sourceId}`, { append_to_response: "keywords,external_ids" }); } catch { return t; }
+    const d = { ...t };
+    const kw = json.keywords as { keywords?: { name: string }[]; results?: { name: string }[] } | undefined;
+    d.tags = (kw?.keywords ?? kw?.results ?? []).map((k) => k.name).filter(Boolean);
+    const ext = json.external_ids as { imdb_id?: string | null; tvdb_id?: number | null } | undefined;
+    const imdb = ext?.imdb_id ?? (json.imdb_id as string | undefined);
+    if (imdb) d.imdbId = imdb;
+    if (typeof ext?.tvdb_id === "number") d.tvdbId = ext.tvdb_id;
+    if (typeof json.number_of_seasons === "number") d.seasons = json.number_of_seasons;
+    if (typeof json.number_of_episodes === "number") d.episodes = json.number_of_episodes;
+    if (typeof json.runtime === "number") d.runtime = json.runtime;
+    if (typeof json.status === "string") d.status = json.status;
+    if (Array.isArray(json.genres)) d.genres = (json.genres as { name: string }[]).map((g) => g.name).filter(Boolean);
+    if (this.detailCache.size > 3000) this.detailCache.clear();
+    this.detailCache.set(key, d);
+    return d;
+  }
+
+  /** Details plus cast, trailer and networks for the title sheet. */
+  async extras(t: ExternalTitle): Promise<TitleExtras> {
+    const tv = t.source === "tmdbTV";
+    const json = await this.get<Record<string, unknown>>(`/${tv ? "tv" : "movie"}/${t.sourceId}`, { append_to_response: tv ? "videos,aggregate_credits,external_ids,keywords" : "videos,credits,external_ids,keywords" });
+    const title = await this.details(t);
+    const vids = ((json.videos as { results?: { site: string; type: string; key: string; official?: boolean }[] })?.results ?? []);
     const trailer = vids.find((v) => v.site === "YouTube" && v.type === "Trailer" && v.official) ?? vids.find((v) => v.site === "YouTube" && v.type === "Trailer") ?? vids.find((v) => v.site === "YouTube");
-    const cast = kind === "tv"
-      ? (r.aggregate_credits?.cast ?? []).slice(0, 16).map((c) => ({ name: c.name, character: c.roles?.[0]?.character, profilePath: c.profile_path }))
-      : (r.credits?.cast ?? []).slice(0, 16).map((c) => ({ name: c.name, character: c.character, profilePath: c.profile_path }));
+    type Cast = { name: string; character?: string; roles?: { character: string }[]; profile_path?: string | null };
+    const cast = (tv ? (json.aggregate_credits as { cast?: Cast[] })?.cast : (json.credits as { cast?: Cast[] })?.cast) ?? [];
+    const nets = ((json.networks ?? json.production_companies) as { name: string }[] | undefined) ?? [];
     return {
-      ...base,
-      genres: (r.genres ?? []).map((g) => g.name),
-      runtime: r.runtime ?? r.episode_run_time?.[0] ?? null,
-      seasons: r.number_of_seasons ?? null,
-      episodes: r.number_of_episodes ?? null,
-      status: r.status,
-      tagline: r.tagline,
-      homepage: r.homepage,
+      title: { ...title, backdropURL: title.backdropURL ?? (json.backdrop_path ? `${IMAGE_BASE}w1280${json.backdrop_path}` : undefined) },
+      tagline: (json.tagline as string) || undefined,
+      homepage: (json.homepage as string) || undefined,
       trailer: trailer ? `https://www.youtube.com/watch?v=${trailer.key}` : null,
-      cast,
-      networks: (r.networks ?? r.production_companies ?? []).map((n) => n.name).slice(0, 4),
-      imdbId: r.external_ids?.imdb_id ?? null,
-      tvdbId: r.external_ids?.tvdb_id ?? null,
+      cast: cast.slice(0, 16).map((c) => ({ name: c.name, character: c.character ?? c.roles?.[0]?.character, profile: c.profile_path ? `${IMAGE_BASE}w185${c.profile_path}` : null })),
+      networks: nets.map((n) => n.name).slice(0, 4),
     };
   }
+
+  // MARK: Finding your library's titles on TMDB
+
+  /** TMDB id for an IMDb or TVDB id. */
+  async find(externalId: string, source: "imdb_id" | "tvdb_id", tv: boolean): Promise<number | null> {
+    try {
+      const r = await this.get<{ tv_results?: { id: number }[]; movie_results?: { id: number }[] }>(`/find/${encodeURIComponent(externalId)}`, { external_source: source });
+      return (tv ? r.tv_results : r.movie_results)?.[0]?.id ?? null;
+    } catch { return null; }
+  }
+
+  /** Best TMDB match for a title and year. */
+  async search(title: string, year: number | null | undefined, tv: boolean): Promise<number | null> {
+    try {
+      const q: Record<string, string | number> = { query: title, include_adult: "false" };
+      if (year) q[tv ? "first_air_date_year" : "year"] = year;
+      const r = await this.get<{ results: Raw[] }>(`/search/${tv ? "tv" : "movie"}`, q);
+      const key = titleKey(title);
+      const best = r.results.find((x) => titleKey((x.title ?? x.name) ?? "") === key) ?? r.results[0];
+      return best?.id ?? null;
+    } catch { return null; }
+  }
 }
-
-function toItem(x: RawItem, kind: TmdbKind): TmdbItem {
-  return {
-    id: x.id,
-    kind,
-    title: x.name ?? x.title ?? "Untitled",
-    originalTitle: x.original_name ?? x.original_title,
-    overview: x.overview ?? "",
-    posterPath: x.poster_path,
-    backdropPath: x.backdrop_path,
-    genreIds: x.genre_ids ?? x.genres?.map((g) => g.id) ?? [],
-    originalLanguage: x.original_language,
-    originCountry: x.origin_country,
-    date: x.first_air_date ?? x.release_date,
-    voteAverage: x.vote_average ?? 0,
-    voteCount: x.vote_count ?? 0,
-    popularity: x.popularity ?? 0,
-  };
-}
-
-/** A stable key for lists ("tmdb:tv:1429"). */
-export const tmdbKey = (i: { id: number; kind: TmdbKind }) => `tmdb:${i.kind}:${i.id}`;
-
-/** Numeric id for the on-device AI's vector store: negative, so it never meets a Jellyfin-derived
- * id (those are 0 … 2^52). */
-export const tmdbVectorId = (i: { id: number; kind: TmdbKind }) => -((i.kind === "tv" ? 1e10 : 2e10) + i.id);

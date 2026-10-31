@@ -13,6 +13,33 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # My List / Not for me / Already seen are shared with the iPhone app: the iPhone's own Swift model
+  # types (from the jellyfin branch) must decode what this app writes, and the reverse.
+  sync-check:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: jellyreco
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: iPhone app's list types
+        run: |
+          git fetch --depth 1 origin jellyfin
+          mkdir -p "$RUNNER_TEMP/ios" "$RUNNER_TEMP/sync"
+          git show FETCH_HEAD:JellyReco/AI/External/ExternalTitle.swift > "$RUNNER_TEMP/ios/ExternalTitle.swift"
+          git show FETCH_HEAD:JellyReco/App/MyList.swift > "$RUNNER_TEMP/ios/MyList.swift"
+          swift --version || { echo "::error::No Swift on this runner"; exit 1; }
+      - name: Windows writes, iPhone reads, iPhone writes, Windows reads
+        run: |
+          node tools/sync_check/gen.ts write "$RUNNER_TEMP/sync"
+          swiftc -O tools/sync_check/stubs.swift "$RUNNER_TEMP/ios/ExternalTitle.swift" "$RUNNER_TEMP/ios/MyList.swift" tools/sync_check/main.swift -o "$RUNNER_TEMP/sync-check"
+          "$RUNNER_TEMP/sync-check" "$RUNNER_TEMP/sync"
+          node tools/sync_check/gen.ts read "$RUNNER_TEMP/sync"
+          echo "::notice::My List, Not for me and Already seen round-trip between the Windows and iPhone apps"
+
   build:
     # Windows 11 on Arm (Snapdragon-class), so the app, libmpv and the checks all run natively on ARM64.
     runs-on: windows-11-arm
