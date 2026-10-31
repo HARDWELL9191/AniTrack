@@ -10,7 +10,7 @@ do {
     print("iPhone decoded \(list.count) My List entries: \(list.map(\.id))")
     print("iPhone decoded \(titles.count) titles: \(titles.map(\.id)), first poster \(titles.first?.posterURL?.absoluteString ?? "-")")
     guard list.count == 4, titles.count == 3, list[1].external?.title == "Frieren: Beyond Journey's End", list[1].external?.tags.count == 8,
-          (list[1].external?.overview.count ?? 0) <= 400, titles[0].imdbId == "tt22248376", list[0].addedAt.timeIntervalSinceNow > -300 else {
+          (list[1].external?.overview.count ?? 0) <= 400, titles[0].imdbId == "tt22248376", titles[0].ageRating == "TV-14", titles[0].ageRatingCountry == "US", list[0].addedAt.timeIntervalSinceNow > -300 else {
         print("::error::The iPhone read different values than the Windows app wrote"); exit(1)
     }
     // As AppModel.encodeList / encodeTitles write them.

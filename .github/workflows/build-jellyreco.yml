@@ -33,11 +33,15 @@ jobs:
           mkdir -p "$RUNNER_TEMP/ios" "$RUNNER_TEMP/sync"
           git show FETCH_HEAD:JellyReco/AI/External/ExternalTitle.swift > "$RUNNER_TEMP/ios/ExternalTitle.swift"
           git show FETCH_HEAD:JellyReco/App/MyList.swift > "$RUNNER_TEMP/ios/MyList.swift"
+          # Files ExternalTitle.swift uses that are Foundation-only, compiled in as they are.
+          for f in JellyReco/AI/External/TMDBCertification.swift; do
+            git cat-file -e "FETCH_HEAD:$f" 2>/dev/null && git show "FETCH_HEAD:$f" > "$RUNNER_TEMP/ios/$(basename "$f")"
+          done
           swift --version || { echo "::error::No Swift on this runner"; exit 1; }
       - name: Windows writes, iPhone reads, iPhone writes, Windows reads
         run: |
           node tools/sync_check/gen.ts write "$RUNNER_TEMP/sync"
-          swiftc -O tools/sync_check/stubs.swift "$RUNNER_TEMP/ios/ExternalTitle.swift" "$RUNNER_TEMP/ios/MyList.swift" tools/sync_check/main.swift -o "$RUNNER_TEMP/sync-check"
+          swiftc -O tools/sync_check/stubs.swift "$RUNNER_TEMP"/ios/*.swift tools/sync_check/main.swift -o "$RUNNER_TEMP/sync-check"
           "$RUNNER_TEMP/sync-check" "$RUNNER_TEMP/sync"
           node tools/sync_check/gen.ts read "$RUNNER_TEMP/sync"
           echo "::notice::My List, Not for me and Already seen round-trip between the Windows and iPhone apps"

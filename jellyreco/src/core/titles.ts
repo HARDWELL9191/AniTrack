@@ -31,6 +31,9 @@ export interface ExternalTitle {
   tvdbId?: number | null;
   status?: string | null;
   isAdult: boolean;
+  /** TMDB certification ("PG-13", "TV-MA", "12"…) and its country ("US"), as the iPhone saves them. */
+  ageRating?: string | null;
+  ageRatingCountry?: string | null;
 }
 
 /** Swift `MyListEntry` (JellyReco/App/MyList.swift): a title on your server or a For You pick. */
@@ -96,6 +99,7 @@ export function externalTitle(raw: unknown): ExternalTitle | null {
     ["posterURL", str(r.posterURL)], ["backdropURL", str(r.backdropURL)], ["score", num(r.score)], ["voteCount", int(r.voteCount)],
     ["popularity", num(r.popularity)], ["episodes", int(r.episodes)], ["seasons", int(r.seasons)], ["runtime", int(r.runtime)],
     ["imdbId", str(r.imdbId)], ["tvdbId", int(r.tvdbId)], ["status", str(r.status)],
+    ["ageRating", str(r.ageRating)], ["ageRatingCountry", str(r.ageRatingCountry)],
   ];
   for (const [k, v] of opt) if (v !== null && v !== undefined) (t as unknown as Record<string, unknown>)[k] = v;
   return t;
