@@ -129,6 +129,8 @@ private struct PlayerContent: View {
     @State private var hideTask: Task<Void, Never>?
     @State private var panel: PlayerPanel?
     @State private var locked = false
+    /// Playback info stays on screen (also when the controls hide) until its X is tapped, as on the PC.
+    @State private var showInfo = false
     /// Rotation lock from the ⋯ menu (OrientationLock keeps the actual mask).
     @State private var rotationLocked = OrientationLock.rotationLocked
     @State private var scrubbing: Double?
@@ -178,6 +180,13 @@ private struct PlayerContent: View {
             }
 
             if !locked { cornerCards }
+            if showInfo && !locked {
+                InfoCard(controller: controller) { withAnimation(.snappy) { showInfo = false } }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                    .padding(.horizontal, 24)
+                    .padding(.top, showControls || panel != nil || menuOpen ? 72 : 16)
+                    .transition(.opacity)
+            }
             if let hud { HUDView(hud: hud).allowsHitTesting(false).transition(.opacity) }
             if controller.askStillWatching { StillWatchingCard(controller: controller, close: close) }
             VolumeViewHost(volume: volume).frame(width: 1, height: 1).opacity(0.01).allowsHitTesting(false)
@@ -186,6 +195,7 @@ private struct PlayerContent: View {
         .animation(.easeInOut(duration: 0.25), value: showControls)
         .animation(.easeOut(duration: 0.2), value: hud)
         .animation(.snappy, value: panel)
+        .animation(.snappy, value: showInfo)
         .onAppear { scheduleHide() }
         .onChange(of: player.isPaused) { _, paused in if paused { hideTask?.cancel() } else { scheduleHide() } }
         .onChange(of: menuOpen) { _, open in if open { hideTask?.cancel() } else { scheduleHide() } }
@@ -297,7 +307,16 @@ private struct PlayerContent: View {
                 Spacer()
                 GlassEffectContainer(spacing: 10) {
                     HStack(spacing: 10) {
-                        speedMenu
+                        // Next episode where the speed button was (speed is in the ⋯ menu now).
+                        if controller.item.kind == .episode {
+                            glassCircle("forward.end.fill", size: 44) {
+                                Task { await controller.playNext(auto: false) }
+                                scheduleHide()
+                            }
+                            .disabled(controller.upNext == nil)
+                            .opacity(controller.upNext == nil ? 0.4 : 1)
+                            .accessibilityLabel("Next episode")
+                        }
                         audioMenu
                         subtitleMenu
                         moreMenu
@@ -310,16 +329,16 @@ private struct PlayerContent: View {
 
     // MARK: Menus (native iOS menus, like Apple's player; the controls stay up while one is open)
 
-    private var speedMenu: some View {
-        PlayerMenuButton(symbol: "gauge.with.dots.needle.67percent", onOpenChange: { menuOpen = $0 }) {
-            let current = player.playbackRate
-            let rates = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
-            return UIMenu(title: "Playback Speed", options: .singleSelection, children: rates.map { rate in
-                UIAction(title: rate == 1 ? "1× (Normal)" : String(format: "%g×", rate),
-                         state: abs(current - rate) < 0.01 ? .on : .off) { _ in controller.setSpeed(rate) }
-            })
-        }
-        .frame(width: 44, height: 44)
+    /// Playback speed, a submenu of the ⋯ menu.
+    private var speedMenu: UIMenu {
+        let current = player.playbackRate
+        let rates = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
+        let label = abs(current - 1) < 0.01 ? "Normal" : String(format: "%g×", current)
+        return UIMenu(title: "Playback Speed", subtitle: label, image: UIImage(systemName: "gauge.with.dots.needle.67percent"),
+                      options: .singleSelection, children: rates.map { rate in
+            UIAction(title: rate == 1 ? "1× (Normal)" : String(format: "%g×", rate),
+                     state: abs(current - rate) < 0.01 ? .on : .off) { _ in controller.setSpeed(rate) }
+        })
     }
 
     private var audioMenu: some View {
@@ -386,11 +405,6 @@ private struct PlayerContent: View {
             }
             if controller.item.kind == .episode {
                 top.append(UIAction(title: "Episodes", image: UIImage(systemName: "rectangle.stack")) { _ in openPanel(.episodes) })
-                if controller.upNext != nil {
-                    top.append(UIAction(title: "Next Episode", image: UIImage(systemName: "forward.end.fill")) { _ in
-                        Task { await controller.playNext(auto: false) }
-                    })
-                }
             }
             let current = controller.aspectMode
             let modes: [(PlaybackController.AspectMode, String, String)] = [
@@ -411,11 +425,13 @@ private struct PlayerContent: View {
                 OrientationLock.setRotationLocked(rotationLocked)
             }
             let view = UIMenu(title: "", options: .displayInline, children: [
+                speedMenu,
                 aspect,
                 rotation,
                 UIAction(title: "Lock Controls", image: UIImage(systemName: "lock")) { _ in withAnimation { locked = true } },
             ])
-            let info = UIAction(title: "Playback Info", image: UIImage(systemName: "info.circle")) { _ in openPanel(.info) }
+            let info = UIAction(title: "Playback Info", image: UIImage(systemName: "info.circle"),
+                                state: showInfo ? .on : .off) { _ in withAnimation(.snappy) { showInfo.toggle() } }
             return UIMenu(children: [UIMenu(title: "", options: .displayInline, children: top), view,
                                      UIMenu(title: "", options: .displayInline, children: [info])])
         }
