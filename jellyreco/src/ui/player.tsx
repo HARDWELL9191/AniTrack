@@ -41,7 +41,7 @@ export function PlayerOverlay() {
   const [pip, setPip] = useState(false);
   const [flash, setFlash] = useState<{ icon: string; text?: string; key: number } | null>(null);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pipRestore = useRef<{ w: number; h: number; x: number; y: number } | null>(null);
+  const pipRestore = useRef<{ w: number; h: number; x: number; y: number; maximized: boolean } | null>(null);
   const isVideo = !st.isAudio;
 
   // Video mode: the page becomes see-through so mpv's picture shows.
@@ -83,9 +83,12 @@ export function PlayerOverlay() {
     try {
       if (!pip) {
         if (fullscreen) await setFull(false);
+        // A maximized window ignores a new size (Windows and Linux): restore it first.
+        const maximized = await w.isMaximized().catch(() => false);
+        if (maximized) { await w.unmaximize(); await new Promise((r) => setTimeout(r, 120)); }
         const size = await w.outerSize();
         const pos = await w.outerPosition();
-        pipRestore.current = { w: size.width, h: size.height, x: pos.x, y: pos.y };
+        pipRestore.current = { w: size.width, h: size.height, x: pos.x, y: pos.y, maximized };
         const mon = await windowApi.currentMonitor();
         const scale = mon?.scaleFactor ?? 1;
         const width = Math.round(480 * scale), height = Math.round(270 * scale);
@@ -104,6 +107,7 @@ export function PlayerOverlay() {
           await w.setPosition(new windowApi.PhysicalPosition(r.x, r.y));
         }
         await w.setMinSize(new windowApi.LogicalSize(960, 600));
+        if (r?.maximized) await w.maximize();
         setPip(false);
       }
     } catch (e) {
@@ -365,7 +369,7 @@ function Timeline({ st, p }: { st: PlayerState; p: PlayerController }) {
   const chapterAt = (t: number) => [...st.chapters].reverse().find((c) => ticksToSeconds(c.StartPositionTicks) <= t);
 
   return (
-    <div className="timeline" ref={bar}
+    <div className={`timeline ${drag !== null ? "dragging" : ""}`} ref={bar}
       onMouseMove={(e) => { const a = at(e.clientX); setHover({ x: a.x, t: a.t }); if (drag !== null) setDrag(a.t); }}
       onMouseLeave={() => { setHover(null); }}
       onMouseDown={(e) => {
@@ -612,11 +616,21 @@ function EpisodesPanel({ st, p, close }: { st: PlayerState; p: PlayerController;
     if (!item.SeriesId) return;
     void model.api!.seasons(item.SeriesId).then((r) => setSeasons(r.Items)).catch(() => {});
   }, [item.SeriesId, model]);
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
-    if (!item.SeriesId) return;
-    setEpisodes(null);
-    void model.api!.episodes(item.SeriesId, seasonId ? { seasonId } : {}).then((r) => setEpisodes(r.Items)).catch(() => setEpisodes([]));
-  }, [item.SeriesId, seasonId, model]);
+    const seriesId = item.SeriesId;
+    if (!seriesId || !model.api) { setEpisodes([]); return; }
+    let alive = true;
+    // The queue already has this season's episodes: show them at once, then the server's list.
+    const fromQueue = st.queue.filter((q) => q.Type === "Episode" && q.SeriesId === seriesId && (!seasonId || q.SeasonId === seasonId));
+    setEpisodes(fromQueue.length ? fromQueue : null);
+    setFailed(false);
+    model.api.episodes(seriesId, seasonId ? { seasonId } : {})
+      .then((r) => { if (alive) setEpisodes(r.Items ?? []); })
+      .catch(() => { if (alive) { setFailed(true); setEpisodes((e) => e ?? []); } });
+    return () => { alive = false; };
+  }, [item.SeriesId, seasonId, model, attempt]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { current.current?.scrollIntoView({ block: "center" }); }, [episodes]);
   const play = async (e: Item) => {
     const idx = st.queue.findIndex((q) => q.Id === e.Id);
@@ -634,7 +648,9 @@ function EpisodesPanel({ st, p, close }: { st: PlayerState; p: PlayerController;
           </Select>
         )}
       </div>
-      {!episodes ? <div className="spinner-wrap"><span className="spinner" /></div> : (
+      {failed && !episodes?.length ? <div className="panel-note">The episodes didn't load. <button className="link-button" onClick={() => setAttempt((a) => a + 1)}>Try again</button></div>
+        : episodes && !episodes.length ? <div className="panel-note">No episodes found.</div>
+        : !episodes ? <div className="spinner-wrap"><span className="spinner" /></div> : (
         <div className="episode-drawer">
           {episodes.map((e) => (
             <button key={e.Id} ref={e.Id === item.Id ? current : undefined} className={`episode ${e.Id === item.Id ? "on" : ""}`} onClick={() => void play(e)} disabled={e.LocationType === "Virtual"}>

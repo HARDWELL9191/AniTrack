@@ -906,7 +906,7 @@ body {
     radial-gradient(900px 620px at 0% 0%, color-mix(in srgb, var(--accent) 30%, transparent), transparent 70%),
     radial-gradient(760px 560px at 100% 8%, color-mix(in srgb, var(--pink) 20%, transparent), transparent 70%),
     radial-gradient(1000px 700px at 60% 110%, color-mix(in srgb, #8e6bff 18%, transparent), transparent 70%);
-  background-attachment: fixed;
+  /* (no background-attachment: fixed: the page itself never scrolls, and fixed backgrounds force repaints) */
 }
 h1, h2, .page-head h1 { font-family: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif; }
 
@@ -1178,3 +1178,30 @@ html.platform-linux .mono { font-family: "JetBrains Mono", "Cascadia Mono", "Dej
 .icon-pick button:hover { background: var(--press); }
 .icon-pick button.on { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--text); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 70%, transparent); }
 .icon-pick img { width: 56px; height: 56px; filter: drop-shadow(0 3px 8px rgba(0, 0, 0, 0.3)); }
+
+/* MARK: Animation smoothness (both platforms, any refresh rate)
+   Every animation moves only transform and opacity, which the compositor runs on the GPU at the
+   display's refresh rate; what would make it redo blur or layout each frame is taken away:
+   - In the player, mpv's picture is underneath the page, so a backdrop blur there has nothing to
+     blur (WebView2 and WebKitGTK can't see the video) but still costs every frame: the player's
+     glass is tint, rim and shadow only (as the player's own comment says).
+   - Glass controls that scroll with the page (shelf arrows, toolbar buttons, filters) sit on the
+     still wallpaper: same look without re-blurring them on every scroll frame. Controls over
+     artwork (item details, For You picks) and floating glass keep the real blur.
+   - Things that animate in get their own GPU layer up front instead of on the first frame. */
+.player .lg, .player .player-panel.lg, .player .glass-button, .player .round-button, .player .segmented, .player .select-button,
+.player .tl-preview-text, .player .player-stats, .player .up-next, .player .skip-button { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+.scroll :is(.round-button, .glass-button, .segmented, .search-field, .dropdown-button, .tabbar):not(.detail-actions *):not(.detail-top *):not(.pick-cover *):not(.pick-body *):not(.back-float) {
+  -webkit-backdrop-filter: none; backdrop-filter: none; }
+.menu, .modal, .toast, .player-panel, .player-flash, .player-top, .player-dock, .up-next, .select-menu, .dropdown-menu, .context-menu { will-change: transform, opacity; }
+.modal { -webkit-backdrop-filter: blur(28px) saturate(170%); backdrop-filter: blur(28px) saturate(170%); }
+/* The position arrives ten times a second: the bar glides between updates instead of stepping. */
+.timeline:not(.dragging) .tl-played { transition: width 0.1s linear; }
+.timeline:not(.dragging) .tl-thumb { transition: left 0.1s linear, transform 0.15s; }
+
+/* The player's top and bottom strips span the whole width, but only their controls take clicks:
+   a click anywhere else (next to the title, just above the bar, between the top buttons) reaches
+   the picture and plays / pauses, as on iOS. */
+.player .player-top, .player .player-dock, .player .pd-title, .player .player-top-right, .player .player-center { pointer-events: none; }
+.player .player-top > *, .player .player-top-right > *, .player .pd-bar { pointer-events: auto; }
+.player.controls-off .player-top > *, .player.controls-off .player-top-right > *, .player.controls-off .pd-bar { pointer-events: none; }

@@ -176,7 +176,9 @@ export class Jellyfin {
   latest(parentId: string, limit = 24) { return this.get<Item[]>("/Items/Latest", { userId: this.userId, parentId, limit, fields: LIST_FIELDS, enableUserData: true }); }
   seasons(seriesId: string) { return this.get<ItemsResult>(`/Shows/${seriesId}/Seasons`, { userId: this.userId, fields: LIST_FIELDS, enableUserData: true }); }
   episodes(seriesId: string, q: Query = {}) {
-    return this.get<ItemsResult>(`/Shows/${seriesId}/Episodes`, { userId: this.userId, fields: [...LIST_FIELDS, "MediaSources", "Trickplay", "Chapters"], enableUserData: true, ...q });
+    // Light fields only: for a long show, asking for every episode's media sources, chapters and
+    // trickplay made the server take seconds (the playing episode gets its full details separately).
+    return this.get<ItemsResult>(`/Shows/${seriesId}/Episodes`, { userId: this.userId, fields: LIST_FIELDS, enableUserData: true, ...q });
   }
   similar(id: string, limit = 16) { return this.get<ItemsResult>(`/Items/${id}/Similar`, { userId: this.userId, limit, fields: LIST_FIELDS }); }
   specialFeatures(id: string) { return this.get<Item[]>(`/Items/${id}/SpecialFeatures`, { userId: this.userId }); }
