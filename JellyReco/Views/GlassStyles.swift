@@ -132,3 +132,14 @@ struct KeyboardDismissOnTapOutside: UIViewRepresentable {
         func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
     }
 }
+
+// MARK: - Green switches (like the PC version)
+
+/// Every switch in the app is green when on. Applied once at the root; all toggles inherit it.
+struct GreenSwitchToggleStyle: ToggleStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        Toggle(configuration)
+            .toggleStyle(.switch)
+            .tint(.green)
+    }
+}

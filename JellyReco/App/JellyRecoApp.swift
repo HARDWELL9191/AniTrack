@@ -18,6 +18,7 @@ struct JellyRecoApp: App {
             RootView()
                 .environment(model)
                 .tint(Theme.accent)
+                .toggleStyle(GreenSwitchToggleStyle())
                 .preferredColorScheme(model.settings.appearance.scheme)
                 .task { await model.bootstrap() }
             }
