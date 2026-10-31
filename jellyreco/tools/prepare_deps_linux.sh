@@ -24,7 +24,7 @@ mkdir -p "$WORK"
 echo "::group::Build tools and libraries for libmpv"
 $SUDO apt-get update -qq
 $SUDO apt-get install -y --no-install-recommends \
-  build-essential meson ninja-build pkg-config nasm git curl xz-utils python3-pip patchelf file \
+  build-essential meson ninja-build pkg-config nasm git curl xz-utils python3-pip python3-venv patchelf file \
   libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev libsoup-3.0-dev \
   libplacebo-dev libass-dev libfreetype-dev libfribidi-dev libharfbuzz-dev libfontconfig-dev \
   libx11-dev libxext-dev libxinerama-dev libxrandr-dev libxss-dev libxpresent-dev libxkbcommon-dev \
@@ -104,8 +104,10 @@ cp "$WORK/webgpu/onnxruntime_ep_webgpu-$WEBGPU_EP_VERSION.dist-info/licenses/Thi
 MODEL="https://huggingface.co/BAAI/bge-small-en-v1.5/resolve/main"
 curl -fsSL "$MODEL/onnx/model.onnx" -o "$AI/model.onnx"
 curl -fsSL "$MODEL/vocab.txt" -o "$AI/vocab.txt"
-python3 -m pip install --quiet --break-system-packages onnx
-python3 -I "$HERE/static_shapes.py" "$AI/model.onnx" 128
+# onnx in its own environment (python3 -I doesn't see packages pip put in the user's folder).
+python3 -m venv "$WORK/venv"
+"$WORK/venv/bin/pip" install --quiet onnx
+"$WORK/venv/bin/python" -I "$HERE/static_shapes.py" "$AI/model.onnx" 128
 ls -la "$AI"
 echo "::endgroup::"
 

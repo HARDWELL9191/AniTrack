@@ -5,6 +5,8 @@ on:
     branches: [jellyreco]
     paths:
       - "jellyreco/**"
+      - "!jellyreco/tools/prepare_deps.ps1"
+      - "!jellyreco/tools/sync_check/**"
       - ".github/workflows/build-jellyreco-linux.yml"
   workflow_dispatch:
 
