@@ -371,7 +371,20 @@ fn gpu_name(d: &ort::device::Device<'_>) -> String {
 
 /// A short reason for the settings page (ONNX Runtime's errors include source paths and C++ signatures).
 fn short_reason(e: &str) -> String {
-    let last = e.rsplit(" : ").next().unwrap_or(e);
-    let t = last.trim().trim_end_matches(')').trim();
-    if t.len() > 140 { format!("{}…", &t[..t.char_indices().take_while(|(i, _)| *i < 140).last().map(|(i, c)| i + c.len_utf8()).unwrap_or(0)]) } else { t.to_string() }
+    let pieces: Vec<&str> = e.split(". ").flat_map(|p| p.split(" : ")).map(|p| p.trim().trim_matches(|c| c == '(' || c == ')' || c == '.').trim()).collect();
+    let readable = pieces.iter().rev().find(|p| !p.is_empty() && !p.contains("::") && !p.starts_with('/') && !p.starts_with('[') && p.chars().any(|c| c == ' ')).copied().unwrap_or(e);
+    let mut t: String = readable.chars().take(160).collect();
+    if readable.chars().count() > 160 { t.push('…'); }
+    t
+}
+
+#[cfg(test)]
+mod reason_tests {
+    #[test]
+    fn short() {
+        let a = "/onnxruntime_src/onnxruntime/core/session/plugin_ep/ep_plugin_provider_interfaces.cc:71 virtual std::unique_ptr<onnxruntime::IExecutionProvider> onnxruntime::PluginExecutionProviderFactory::CreateProvider(const OrtSessionOptions&, const OrtLogger&) Error creating execution provider: [ONNXRuntimeError] : 2 : INVALID_ARGUMENT : WebGPU EP factory currently only supports one device at a time. )";
+        assert_eq!(super::short_reason(a), "WebGPU EP factory currently only supports one device at a time");
+        let b = "x.cc:130 onnxruntime::webgpu::WebGpuContext::Initialize(const onnxruntime::webgpu::WebGpuContextConfig&)::<lambda()> adapter_result.status == wgpu::RequestAdapterStatus::Success was false. Failed to get a WebGPU adapter: No supported adapters";
+        assert_eq!(super::short_reason(b), "Failed to get a WebGPU adapter: No supported adapters");
+    }
 }
