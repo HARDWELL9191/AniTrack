@@ -68,6 +68,28 @@ jobs:
             build 2>&1 | tee build.log | grep -E "error:|warning: unre|BUILD (SUCCEEDED|FAILED)" || true
           grep -q "BUILD SUCCEEDED" build.log
 
+      - name: Check which app icon is in the build
+        if: always()
+        run: |
+          APP=build/Build/Products/Release-iphoneos/JellyReco.app
+          {
+            echo "== project reference for AppIcon.icon"
+            grep -n "AppIcon.icon" JellyReco.xcodeproj/project.pbxproj | head -5 || true
+            echo "== Info.plist CFBundleIcons"
+            /usr/libexec/PlistBuddy -c "Print :CFBundleIcons" "$APP/Info.plist" 2>&1 || true
+            echo "== compiled icon renditions (Assets.car)"
+            xcrun --sdk iphoneos assetutil --info "$APP/Assets.car" 2>/dev/null | python3 -c "
+          import json,sys
+          for e in json.load(sys.stdin)[1:]:
+              n=str(e.get('Name',''))
+              if 'AppIcon' in n or 'Icon' in str(e.get('AssetType','')):
+                  print({k:e.get(k) for k in ('AssetType','Name','RenditionName','Appearance','PixelWidth','Idiom') if k in e})
+          " || true
+            echo "== icon files in the app"
+            ls "$APP" | grep -i icon || true
+          } > icon-info.txt 2>&1
+          cat icon-info.txt
+
       - name: Package IPA
         run: |
           APP=build/Build/Products/Release-iphoneos/JellyReco.app
@@ -108,6 +130,7 @@ jobs:
           mkdir -p /tmp/cilog && cd /tmp/cilog
           git init -q && git checkout -q -b ci-logs
           { echo "run ${{ github.run_id }} ${{ github.sha }}"; grep -E "error:|BUILD (SUCCEEDED|FAILED)|fatal" "$GITHUB_WORKSPACE/build.log" | sort -u | head -400; } > build-errors.txt 2>/dev/null || echo "no log" > build-errors.txt
+          cp "$GITHUB_WORKSPACE/icon-info.txt" . 2>/dev/null || true
           tail -150 "$GITHUB_WORKSPACE/build.log" > build-tail.txt 2>/dev/null || true
           git add -A && git -c user.name=ci -c user.email=ci@local commit -qm "build log ${{ github.run_id }}"
           git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" ci-logs:ci-logs-build
