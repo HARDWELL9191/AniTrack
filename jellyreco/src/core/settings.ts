@@ -7,7 +7,7 @@ import type { SegmentType } from "./types";
 export type SegmentAction = "none" | "ask" | "skipOnce" | "skip";
 export type AutoNext = "off" | "smart" | "always";
 export type VideoFit = "contain" | "cover" | "stretch";
-export type Hwdec = "auto-safe" | "d3d11va" | "d3d11va-copy" | "no";
+export type Hwdec = "auto-safe" | "d3d11va" | "d3d11va-copy" | "vaapi" | "vaapi-copy" | "nvdec" | "nvdec-copy" | "vulkan" | "no";
 export type ToneMapping = "auto" | "bt.2390" | "spline" | "hable" | "mobius" | "reinhard" | "clip";
 export type Upscaler = "default" | "ewa_lanczossharp" | "spline36" | "lanczos" | "bilinear";
 export type Theme = "system" | "dark" | "light";

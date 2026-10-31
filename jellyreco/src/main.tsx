@@ -14,9 +14,19 @@ import { startSocket, stopSocket } from "./core/socket";
 import { setTmdbFetch } from "./core/tmdb";
 import { App } from "./ui/app";
 import { Provider, ui } from "./ui/state";
+import "@fontsource-variable/inter";
 import "./styles.css";
 
 const native = isTauri();
+
+// Windows (WebView2) and Linux (WebKitGTK) differ in a few details: the font (Segoe UI isn't on
+// Linux, so Inter stands in), and WebKit can't bend the backdrop through an SVG lens.
+{
+  const forced = new URLSearchParams(location.search).get("platform");
+  const ua = navigator.userAgent;
+  const platform = forced ?? (/Windows/.test(ua) ? "windows" : /Linux|X11/.test(ua) ? "linux" : "other");
+  document.documentElement.classList.add(`platform-${platform}`);
+}
 
 if (native) {
   setFetch((url, init) => tauriFetch(url, init) as never);

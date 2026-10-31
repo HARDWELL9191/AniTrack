@@ -56,7 +56,9 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
+    "targets": [
+      "nsis"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -69,12 +71,18 @@
       "resources/mpv/": "mpv/"
     },
     "shortDescription": "JellyReco",
-    "longDescription": "A Jellyfin client for Windows on Arm with an mpv player and personal picks.",
+    "longDescription": "A Jellyfin client with an mpv player (every video, audio and subtitle format) and personal picks from an on-device AI. Windows on Arm and Linux x86_64.",
     "copyright": "Unofficial Jellyfin client",
     "windows": {
       "nsis": {
         "installMode": "perMachine",
         "displayLanguageSelector": false
+      }
+    },
+    "category": "Video",
+    "linux": {
+      "appimage": {
+        "bundleMediaFramework": false
       }
     }
   }

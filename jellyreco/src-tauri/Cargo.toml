@@ -42,6 +42,13 @@ windows-sys = { version = "0.61", features = [
   "Win32_UI_Input_KeyboardAndMouse",
 ] }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# Video under the page: a GTK GL area (mpv's render API) beneath the transparent WebView.
+gtk = "0.18"
+# Sign-ins in the desktop keyring; battery saver from power-profiles-daemon.
+secret-service = { version = "5.2", features = ["rt-tokio-crypto-rust"] }
+zbus = { version = "5", default-features = false, features = ["tokio"] }
+
 [profile.release]
 codegen-units = 1
 lto = true

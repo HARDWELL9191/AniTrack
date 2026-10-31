@@ -1093,3 +1093,13 @@ label.glass-button.disabled { opacity: 0.5; pointer-events: none; }
 }
 .toggle-row > span.toggle-text:first-child { display: flex; flex-direction: column; align-items: flex-start; text-align: left; min-width: 0; }
 .toggle-row > .switch { flex: none; }
+
+/* MARK: Linux (WebKitGTK): the same design with Inter in place of Segoe UI, and plain frosted
+   glass where WebView2 bends the backdrop through the SVG lens (WebKit has no url() backdrop filters). */
+html.platform-linux { --lg-lens: var(--lg-blur) !important; }
+html.platform-linux body, html.platform-linux h1, html.platform-linux h2, html.platform-linux .page-head h1 {
+  font-family: "Inter Variable", "Inter", "Segoe UI", system-ui, sans-serif;
+  font-feature-settings: "cv11", "ss01";
+  letter-spacing: -0.006em;
+}
+html.platform-linux .mono { font-family: "JetBrains Mono", "Cascadia Mono", "DejaVu Sans Mono", monospace; }

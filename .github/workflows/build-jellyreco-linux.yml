@@ -1,0 +1,136 @@
+name: Build JellyReco (Linux x86_64)
+
+on:
+  push:
+    branches: [jellyreco]
+    paths:
+      - "jellyreco/**"
+      - ".github/workflows/build-jellyreco-linux.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: build-jellyreco-linux-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    # Ubuntu 24.04 x86_64: the AppImage runs on distributions from 2024 on (glibc 2.39+), e.g.
+    # Ubuntu 24.04+, Fedora 40+, Debian 13, Arch, openSUSE Tumbleweed, Linux Mint 22+.
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
+        working-directory: jellyreco
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+      # Link libmpv so the AppImage bundler copies it and everything it needs.
+      JELLYRECO_LINK_MPV: "1"
+      # The AppImage tools run without FUSE on the runner.
+      APPIMAGE_EXTRACT_AND_RUN: "1"
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: jellyreco/package-lock.json
+
+      - name: Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustc -vV
+          node -v
+
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            jellyreco/src-tauri/target
+          key: cargo-jellyreco-linux-x64-${{ hashFiles('jellyreco/src-tauri/Cargo.lock') }}
+          restore-keys: cargo-jellyreco-linux-x64-
+
+      - name: Install packages
+        run: npm ci
+
+      - name: Playback engine (FFmpeg 8 + libmpv 0.41) and on-device AI files
+        run: ./tools/prepare_deps_linux.sh
+
+      - name: Build the AppImage
+        run: npx tauri build --bundles appimage
+
+      - name: Tests
+        working-directory: jellyreco/src-tauri
+        run: cargo test --release --lib
+
+      - name: Collect the AppImage
+        run: |
+          app=$(ls src-tauri/target/release/bundle/appimage/*.AppImage | head -1)
+          [ -n "$app" ] || { echo "::error::No AppImage was produced"; exit 1; }
+          mkdir -p out
+          cp "$app" out/JellyReco-x86_64.AppImage
+          chmod +x out/JellyReco-x86_64.AppImage
+          ls -la out
+          # What's inside: the libmpv the app plays with must be in the AppImage itself.
+          (cd "$RUNNER_TEMP" && "$GITHUB_WORKSPACE/jellyreco/out/JellyReco-x86_64.AppImage" --appimage-extract > /dev/null)
+          echo "APPDIR=$RUNNER_TEMP/squashfs-root" >> "$GITHUB_ENV"
+          ls "$RUNNER_TEMP/squashfs-root/usr/lib" | grep -E "libmpv|libav|libplacebo|libass|libsw" || { echo "::error::libmpv isn't in the AppImage"; exit 1; }
+          find "$RUNNER_TEMP/squashfs-root" -path "*ai/*" -maxdepth 4 | head -20
+
+      # Every container / video codec / audio codec / subtitle format in the test set must play to the
+      # end through the libmpv inside the AppImage, with every audio and subtitle track found.
+      - name: Playback check (the AppImage's libmpv, all formats with audio and subtitle tracks)
+        working-directory: jellyreco/src-tauri
+        run: |
+          python3 -I ../tools/make_test_media.py "$FFMPEG_BIN" "$RUNNER_TEMP/media"
+          cargo build --release --example mpv_check
+          LD_LIBRARY_PATH="$APPDIR/usr/lib" python3 -I ../tools/mpv_check.py target/release/examples/mpv_check "$APPDIR/usr/lib/libmpv.so.2" "$RUNNER_TEMP/media" "$RUNNER_TEMP/mpv-report.json"
+
+      - name: AI check (real model; this runner has no GPU, so it runs on the CPU)
+        working-directory: jellyreco/src-tauri
+        run: |
+          cargo build --release --example embed_check
+          ai=$(find "$APPDIR" -type d -name ai -path "*JellyReco*" | head -1)
+          [ -n "$ai" ] || ai=$(find "$APPDIR" -type d -name ai | head -1)
+          echo "AI files in the AppImage: $ai"
+          python3 -I ../tools/ai_check.py target/release/examples/embed_check "$ai" "$RUNNER_TEMP/ai-check"
+
+      # The app itself starts on a plain X server (software OpenGL) and shows its window.
+      - name: Start-up check
+        run: |
+          export DISPLAY=:99 LIBGL_ALWAYS_SOFTWARE=1
+          Xvfb :99 -screen 0 1360x880x24 > /dev/null 2>&1 &
+          sleep 2
+          ./out/JellyReco-x86_64.AppImage > "$RUNNER_TEMP/app.log" 2>&1 &
+          pid=$!
+          sleep 25
+          import -window root "$RUNNER_TEMP/startup.png" || true
+          if ! kill -0 $pid 2>/dev/null; then cat "$RUNNER_TEMP/app.log"; echo "::error::The app exited during start-up"; exit 1; fi
+          kill $pid || true
+          tail -40 "$RUNNER_TEMP/app.log"
+          python3 - "$RUNNER_TEMP/startup.png" <<'EOF'
+          import subprocess, sys
+          # A blank (all one color) screenshot means the window never drew.
+          out = subprocess.run(["convert", sys.argv[1], "-format", "%[fx:standard_deviation]", "info:"], capture_output=True, text=True).stdout.strip()
+          print("screenshot variation:", out)
+          if not out or float(out) < 0.01:
+              print("::error::The window looks blank"); sys.exit(1)
+          EOF
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: JellyReco-Linux-x86_64
+          path: jellyreco/out/JellyReco-x86_64.AppImage
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v7
+        if: ${{ always() }}
+        with:
+          name: JellyReco-Linux-checks
+          path: |
+            ${{ runner.temp }}/mpv-report.json
+            ${{ runner.temp }}/startup.png
+            ${{ runner.temp }}/app.log
+          if-no-files-found: ignore

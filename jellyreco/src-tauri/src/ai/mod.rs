@@ -31,7 +31,7 @@ const QNN_EP: &str = "QNNExecutionProvider";
 
 #[derive(Clone, Serialize)]
 pub struct Status {
-    /// "npu", "npu+cpu", "cpu" or "off".
+    /// "npu", "npu+cpu", "gpu", "cpu" or "off".
     pub backend: String,
     pub detail: String,
 }
@@ -181,11 +181,38 @@ impl Engine {
                 Err(e) => notes.push(format!("QNN plugin: {e}")),
             }
         }
+        // Linux: any Vulkan GPU (Nvidia, AMD, Intel) through ONNX Runtime's WebGPU plugin.
+        #[cfg(target_os = "linux")]
+        if let Some(plugin) = ["libonnxruntime_providers_webgpu.so", "onnxruntime_providers_webgpu.so"].iter().map(|n| dir.join(n)).find(|p| p.exists()) {
+            match self.gpu_session(&env, &model, &plugin) {
+                Ok((session, name)) => {
+                    return Ok((finish(session, tokenizer, env)?, Status { backend: "gpu".into(), detail: format!("GPU: {name} (WebGPU over Vulkan)") }));
+                }
+                Err(e) => notes.push(format!("GPU: {e}")),
+            }
+        }
         let session = base_builder(&env)?
             .commit_from_file(&model)
             .map_err(|e| e.to_string())?;
-        let detail = if notes.is_empty() { "CPU".to_string() } else { format!("CPU (NPU unavailable: {})", notes.join("; ")) };
+        let detail = if notes.is_empty() { "CPU".to_string() } else { format!("CPU ({})", notes.join("; ")) };
         Ok((finish(session, tokenizer, env)?, Status { backend: "cpu".into(), detail }))
+    }
+
+    /// A session on the GPU through the WebGPU plugin (the first GPU it finds).
+    #[cfg(target_os = "linux")]
+    fn gpu_session(&self, env: &ort::environment::Environment, model: &Path, plugin: &Path) -> Result<(Session, String), String> {
+        env.register_ep_library("webgpu", plugin).map_err(|e| format!("plugin: {e}"))?;
+        let is_gpu = |d: &ort::device::Device<'_>| d.ep().is_ok_and(|ep| ep.to_ascii_lowercase().contains("webgpu")) && d.hardware_device().ty() == DeviceType::GPU;
+        let name = env.devices().find(|d| is_gpu(d)).map(|d| d.hardware_device().vendor().unwrap_or("GPU").to_string()).ok_or("no Vulkan GPU found")?;
+        let options: Vec<(String, String)> = Vec::new();
+        let session = base_builder(env)?
+            .with_config_entry("session.disable_cpu_ep_fallback", "0")
+            .map_err(|e| e.to_string())?
+            .with_devices(env.devices().filter(|d| is_gpu(d)), Some(&options))
+            .map_err(|e| e.to_string())?
+            .commit_from_file(model)
+            .map_err(|e| e.to_string())?;
+        Ok((session, name))
     }
 
     fn npu_session(&self, env: &ort::environment::Environment, model: &Path, backend: &Path, npu_only: bool) -> Result<Session, String> {
@@ -238,7 +265,8 @@ fn base_builder(env: &ort::environment::Environment) -> Result<ort::session::bui
     Session::builder(env)
         .map_err(|e| e.to_string())?
         .with_optimization_level(GraphOptimizationLevel::Level3)
-        .and_then(|b| b.with_intra_threads(2))
+        // Snapdragon: 2 threads (the NPU does the work). Elsewhere: up to 4 of the CPU's cores.
+        .and_then(|b| b.with_intra_threads(if cfg!(windows) { 2 } else { std::thread::available_parallelism().map(|n| n.get().clamp(1, 4)).unwrap_or(2) }))
         // Static shapes (the NPU needs them): one show at a time, 128 tokens.
         .and_then(|b| b.with_dimension_override("batch_size", 1))
         .and_then(|b| b.with_dimension_override("sequence_length", SEQ_LEN as i64))

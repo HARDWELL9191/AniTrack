@@ -73,6 +73,38 @@ type FnErrorString = unsafe extern "C" fn(c_int) -> *const c_char;
 type FnRequestLog = unsafe extern "C" fn(Handle, *const c_char) -> c_int;
 type FnApiVersion = unsafe extern "C" fn() -> std::ffi::c_ulong;
 
+// Render API (Linux: mpv draws with OpenGL into the app's GL area).
+pub type RenderContext = *mut c_void;
+#[repr(C)]
+pub struct RenderParam {
+    pub kind: c_int,
+    pub data: *mut c_void,
+}
+#[repr(C)]
+pub struct OpenGlInitParams {
+    pub get_proc_address: Option<unsafe extern "C" fn(*mut c_void, *const c_char) -> *mut c_void>,
+    pub get_proc_address_ctx: *mut c_void,
+}
+#[repr(C)]
+pub struct OpenGlFbo {
+    pub fbo: c_int,
+    pub w: c_int,
+    pub h: c_int,
+    pub internal_format: c_int,
+}
+pub const RENDER_PARAM_INVALID: c_int = 0;
+pub const RENDER_PARAM_API_TYPE: c_int = 1;
+pub const RENDER_PARAM_OPENGL_INIT_PARAMS: c_int = 2;
+pub const RENDER_PARAM_OPENGL_FBO: c_int = 3;
+pub const RENDER_PARAM_FLIP_Y: c_int = 4;
+pub const RENDER_PARAM_X11_DISPLAY: c_int = 8;
+pub const RENDER_PARAM_WL_DISPLAY: c_int = 9;
+type FnRenderCreate = unsafe extern "C" fn(*mut RenderContext, Handle, *mut RenderParam) -> c_int;
+type FnRenderSetUpdate = unsafe extern "C" fn(RenderContext, Option<unsafe extern "C" fn(*mut c_void)>, *mut c_void);
+type FnRenderUpdate = unsafe extern "C" fn(RenderContext) -> u64;
+type FnRenderRender = unsafe extern "C" fn(RenderContext, *mut RenderParam) -> c_int;
+type FnRenderFree = unsafe extern "C" fn(RenderContext);
+
 /// The libmpv functions the player uses.
 pub struct Api {
     _lib: Library,
@@ -90,6 +122,11 @@ pub struct Api {
     pub error_string: FnErrorString,
     pub request_log_messages: FnRequestLog,
     pub client_api_version: FnApiVersion,
+    pub render_context_create: Option<FnRenderCreate>,
+    pub render_context_set_update_callback: Option<FnRenderSetUpdate>,
+    pub render_context_update: Option<FnRenderUpdate>,
+    pub render_context_render: Option<FnRenderRender>,
+    pub render_context_free: Option<FnRenderFree>,
 }
 
 // The function pointers are plain C entry points; libmpv itself is thread-safe.
@@ -121,6 +158,11 @@ impl Api {
                 error_string: sym!("mpv_error_string"),
                 request_log_messages: sym!("mpv_request_log_messages"),
                 client_api_version: sym!("mpv_client_api_version"),
+                render_context_create: lib.get(b"mpv_render_context_create\0").ok().map(|f| *f),
+                render_context_set_update_callback: lib.get(b"mpv_render_context_set_update_callback\0").ok().map(|f| *f),
+                render_context_update: lib.get(b"mpv_render_context_update\0").ok().map(|f| *f),
+                render_context_render: lib.get(b"mpv_render_context_render\0").ok().map(|f| *f),
+                render_context_free: lib.get(b"mpv_render_context_free\0").ok().map(|f| *f),
                 _lib: lib,
             })
         }

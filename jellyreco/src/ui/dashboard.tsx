@@ -761,7 +761,7 @@ function DevicesPage() {
       <div className="rows">{data.Items.map((d) => (
         <div key={d.Id} className="row static">
           <Icon name="devices" size={20} />
-          <div className="row-text"><div className="row-title">{d.CustomName || d.Name}{d.Id === api.deviceId ? " (this PC)" : ""}</div><div className="row-sub">{d.AppName} {d.AppVersion} · {d.LastUserName} · {relativeTime(d.DateLastActivity)}</div></div>
+          <div className="row-text"><div className="row-title">{d.CustomName || d.Name}{d.Id === api.deviceId ? " (this computer)" : ""}</div><div className="row-sub">{d.AppName} {d.AppVersion} · {d.LastUserName} · {relativeTime(d.DateLastActivity)}</div></div>
           <button className="glass-button" onClick={() => ui.openSheet({ kind: "prompt", title: "Rename device", label: "Name", initial: d.CustomName || d.Name || "", run: async (n) => { await api.post("/Devices/Options", { CustomName: n }, { id: d.Id! }); reload(); } })}>Rename</button>
           {d.Id !== api.deviceId && <button className="glass-button danger" disabled={busy} onClick={() => void run(async () => { await api.del("/Devices", { id: d.Id! }); reload(); }, "Signed out")}>Sign out</button>}
         </div>

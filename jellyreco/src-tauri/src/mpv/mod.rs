@@ -3,10 +3,15 @@
 //! child window behind the WebView; the WebView is transparent while video plays, so the React
 //! controls float over the picture (the technique tauri-plugin-libmpv uses on Windows).
 //!
+//! On Linux there's no window to give mpv, so it draws with its OpenGL render API into a GTK GL
+//! area under the WebView instead (see gl.rs).
+//!
 //! The UI drives mpv with commands and properties; property changes and file events come back as
 //! "mpv" events. Values travel as strings (node properties like track-list arrive as JSON).
 
 pub mod ffi;
+#[cfg(target_os = "linux")]
+pub mod gl;
 
 use serde::Serialize;
 use std::collections::HashMap;
@@ -48,11 +53,12 @@ pub struct Engine {
     dll: PathBuf,
     api: Mutex<Option<Result<Arc<ffi::Api>, String>>>,
     instance: Mutex<Option<Instance>>,
+    starting: AtomicBool,
 }
 
 impl Engine {
     pub fn new(dll: PathBuf) -> Self {
-        Self { dll, api: Mutex::new(None), instance: Mutex::new(None) }
+        Self { dll, api: Mutex::new(None), instance: Mutex::new(None), starting: AtomicBool::new(false) }
     }
 
     fn api(&self) -> Result<Arc<ffi::Api>, String> {
@@ -84,10 +90,19 @@ impl Engine {
     /// Creates mpv inside `wid` (once) with these options and starts its event thread.
     pub fn start(&self, app: AppHandle, wid: Option<i64>, options: HashMap<String, String>, observe: Vec<String>) -> Result<(), String> {
         let api = self.api()?;
-        let mut guard = self.instance.lock().unwrap();
-        if guard.is_some() {
+        // No lock is held while mpv starts (on Linux that waits for the GTK thread, which also runs
+        // the app's commands): a flag keeps it to one start at a time.
+        if self.instance.lock().unwrap().is_some() || self.starting.swap(true, Ordering::SeqCst) {
             return Ok(());
         }
+        let result = self.create(&api, &app, wid, options, observe);
+        self.starting.store(false, Ordering::SeqCst);
+        let inst = result?;
+        *self.instance.lock().unwrap() = Some(inst);
+        Ok(())
+    }
+
+    fn create(&self, api: &Arc<ffi::Api>, app: &AppHandle, wid: Option<i64>, options: HashMap<String, String>, observe: Vec<String>) -> Result<Instance, String> {
         // SAFETY: documented libmpv sequence: create, set options, initialize.
         let handle = unsafe { (api.create)() };
         if handle.is_null() {
@@ -102,20 +117,42 @@ impl Engine {
                 Ok(())
             }
         };
+        #[cfg(not(target_os = "linux"))]
         if let Some(wid) = wid {
             set_opt("wid", &wid.to_string())?;
         }
+        #[cfg(target_os = "linux")]
+        let _ = wid;
         let mut warnings = Vec::new();
         for (k, v) in &options {
+            // Linux: mpv draws through the render API, so its own output and GPU options don't apply.
+            #[cfg(target_os = "linux")]
+            if matches!(k.as_str(), "vo" | "gpu-api" | "gpu-context" | "wid" | "d3d11-flip" | "d3d11-output-csp" | "d3d11-exclusive-fs") {
+                continue;
+            }
             // An option an older/newer libmpv doesn't know shouldn't stop playback.
             if let Err(e) = set_opt(k, v) {
                 warnings.push(e);
+            }
+        }
+        #[cfg(target_os = "linux")]
+        {
+            set_opt("vo", "libmpv")?;
+            // Zero-copy hardware decoding where the GL context allows it, else hardware decoding with a copy.
+            // (A Windows-only choice like d3d11va synced from another PC counts as automatic.)
+            if options.get("hwdec").is_some_and(|h| h == "auto-safe" || h.starts_with("d3d11")) {
+                let _ = set_opt("hwdec", "auto-safe,auto-copy-safe");
             }
         }
         let rc = unsafe { (api.initialize)(handle) };
         if rc < 0 {
             unsafe { (api.terminate_destroy)(handle) };
             return Err(format!("mpv didn't start: {}", api.error(rc)));
+        }
+        #[cfg(target_os = "linux")]
+        if let Err(e) = gl::attach(api.clone(), handle) {
+            unsafe { (api.terminate_destroy)(handle) };
+            return Err(e);
         }
         let level = ffi::cstring("warn");
         unsafe { (api.request_log_messages)(handle, level.as_ptr()) };
@@ -129,14 +166,13 @@ impl Engine {
 
         let stop = Arc::new(AtomicBool::new(false));
         let thread = {
-            let (api, stop, h) = (api.clone(), stop.clone(), handle as usize);
+            let (api, stop, h, app) = (api.clone(), stop.clone(), handle as usize, app.clone());
             std::thread::Builder::new()
                 .name("mpv-events".into())
                 .spawn(move || event_loop(api, h as ffi::Handle, stop, app))
                 .map_err(|e| e.to_string())?
         };
-        *guard = Some(Instance { handle: handle as usize, stop, thread: Some(thread) });
-        Ok(())
+        Ok(Instance { handle: handle as usize, stop, thread: Some(thread) })
     }
 
     pub fn command(&self, args: &[String]) -> Result<(), String> {
@@ -154,6 +190,13 @@ impl Engine {
     }
 
     pub fn set(&self, name: &str, value: &str) -> Result<(), String> {
+        // Linux: the render API output stays as it is (the page re-sends every live option).
+        #[cfg(target_os = "linux")]
+        if matches!(name, "vo" | "gpu-api" | "gpu-context" | "wid") || name.starts_with("d3d11") {
+            return Ok(());
+        }
+        #[cfg(target_os = "linux")]
+        let value = if name == "hwdec" && (value == "auto-safe" || value.starts_with("d3d11")) { "auto-safe,auto-copy-safe" } else { value };
         let (api, h) = self.handle()?;
         let (n, v) = (ffi::cstring(name), ffi::cstring(value));
         let rc = unsafe { (api.set_property_string)(h, n.as_ptr(), v.as_ptr()) };
@@ -189,6 +232,9 @@ impl Engine {
         if let Some(t) = inst.thread.take() {
             let _ = t.join();
         }
+        // Linux: the renderer goes first (it belongs to the GL area).
+        #[cfg(target_os = "linux")]
+        gl::detach();
         // SAFETY: the event thread has exited, nothing else uses the handle.
         unsafe { (api.terminate_destroy)(h) };
     }

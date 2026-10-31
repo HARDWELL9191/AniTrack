@@ -114,7 +114,38 @@ fn power_saver() -> bool {
 /// The computer's name, shown to the server as this device.
 #[tauri::command]
 fn device_name() -> String {
-    std::env::var("COMPUTERNAME").unwrap_or_else(|_| "Windows".into())
+    #[cfg(windows)]
+    return std::env::var("COMPUTERNAME").unwrap_or_else(|_| "Windows".into());
+    #[cfg(not(windows))]
+    return std::fs::read_to_string("/proc/sys/kernel/hostname").map(|h| h.trim().to_string()).ok().filter(|h| !h.is_empty()).unwrap_or_else(|| "Linux".into());
+}
+
+/// Linux: settings that make video and the page work on every distribution, set before anything
+/// starts (only where the person hasn't set them).
+#[cfg(target_os = "linux")]
+fn linux_environment() {
+    let unset = |k: &str| std::env::var_os(k).is_none();
+    // VA-API drivers (Intel, AMD) are in different folders on Debian/Ubuntu, Fedora/openSUSE and
+    // Arch; the libva inside the AppImage has to be told where this system keeps them.
+    if unset("LIBVA_DRIVERS_PATH") {
+        let dirs: Vec<&str> = ["/usr/lib/x86_64-linux-gnu/dri", "/usr/lib64/dri", "/usr/lib/dri", "/run/opengl-driver/lib/dri", "/usr/local/lib/dri"]
+            .into_iter()
+            .filter(|d| std::path::Path::new(d).is_dir())
+            .collect();
+        if !dirs.is_empty() {
+            std::env::set_var("LIBVA_DRIVERS_PATH", dirs.join(":"));
+        }
+    }
+    // Nvidia's driver and WebKitGTK's DMA-BUF renderer can leave the window blank.
+    if unset("WEBKIT_DISABLE_DMABUF_RENDERER") && std::path::Path::new("/proc/driver/nvidia/version").exists() {
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
+}
+
+/// "windows" or "linux" (the page adapts a few platform details).
+#[tauri::command]
+fn platform() -> &'static str {
+    if cfg!(windows) { "windows" } else if cfg!(target_os = "linux") { "linux" } else { "other" }
 }
 
 /// Writes a file the person picked in a Save dialog (logs, backups).
@@ -137,6 +168,8 @@ fn read_file_base64(path: String) -> Result<String, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(target_os = "linux")]
+    linux_environment();
     let mut builder = tauri::Builder::default();
 
     // A second launch focuses the running window.
@@ -159,10 +192,25 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
+            // Linux: the GL area for the video goes under the WebView.
+            #[cfg(target_os = "linux")]
+            if let Some(w) = app.get_webview_window("main") {
+                if let Err(e) = mpv::gl::install(&w) {
+                    eprintln!("video surface: {e}");
+                }
+            }
             let root = app.path().resource_dir().unwrap_or_default();
             let data = app.path().app_data_dir().unwrap_or_default();
             let ai = Arc::new(ai::Engine::new(ai::Paths { resources: root.join("ai"), data: data.clone() }));
-            let mpv = Arc::new(mpv::Engine::new(root.join("mpv").join("libmpv-2.dll")));
+            #[cfg(windows)]
+            let mpv_lib = root.join("mpv").join("libmpv-2.dll");
+            // Linux: the AppImage's own libmpv (next to the app), else the system's.
+            #[cfg(not(windows))]
+            let mpv_lib = [root.join("mpv").join("libmpv.so.2"), root.join("lib").join("libmpv.so.2")]
+                .into_iter()
+                .find(|p| p.exists())
+                .unwrap_or_else(|| std::path::PathBuf::from("libmpv.so.2"));
+            let mpv = Arc::new(mpv::Engine::new(mpv_lib));
             app.manage(AppState { ai, mpv });
             Ok(())
         })
@@ -176,7 +224,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             mpv_info, mpv_start, mpv_command, mpv_set, mpv_get, mpv_destroy, ai_status, ai_cached, ai_vectors, accounts_load,
-            accounts_save, power_saver, device_name, write_text_file, read_file_base64
+            accounts_save, power_saver, device_name, platform, write_text_file, read_file_base64
         ])
         .run(tauri::generate_context!())
         .expect("error while running JellyReco");

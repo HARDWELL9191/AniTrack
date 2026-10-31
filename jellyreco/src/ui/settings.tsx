@@ -113,7 +113,7 @@ function AccountSettings() {
         </div>
       </Group>
       <Group>
-        <button className="glass-button danger" onClick={() => ui.openSheet({ kind: "confirm", title: "Sign out?", text: `You'll need to sign in to ${model.server?.name} again on this PC.`, confirmLabel: "Sign out", danger: true, run: () => model.signOut() })}>
+        <button className="glass-button danger" onClick={() => ui.openSheet({ kind: "confirm", title: "Sign out?", text: `You'll need to sign in to ${model.server?.name} again on this computer.`, confirmLabel: "Sign out", danger: true, run: () => model.signOut() })}>
           <Icon name="logout" size={15} /> Sign out
         </button>
       </Group>
@@ -129,7 +129,7 @@ function DisplaySettings() {
   const s = model.settings;
   return (
     <Group title="Display">
-      <div className="toggle-row"><span>Theme</span><Segmented value={s.theme} options={[{ value: "system", label: "Windows" }, { value: "dark", label: "Dark" }, { value: "light", label: "Light" }]} onChange={(v) => set("theme", v)} /></div>
+      <div className="toggle-row"><span>Theme</span><Segmented value={s.theme} options={[{ value: "system", label: "System" }, { value: "dark", label: "Dark" }, { value: "light", label: "Light" }]} onChange={(v) => set("theme", v)} /></div>
       <Toggle label="Backdrops on details pages" checked={s.showBackdrops} onChange={(v) => set("showBackdrops", v)} />
       <Toggle label="Blur unwatched episode thumbnails" detail="No spoilers in episode stills" checked={s.blurUnwatched} onChange={(v) => set("blurUnwatched", v)} />
       <Toggle label="Show ratings on cards" checked={s.showRatings} onChange={(v) => set("showRatings", v)} />
@@ -287,9 +287,14 @@ function PlayerSettings() {
   return (
     <>
       <Group title="Picture">
-        <div className="toggle-row"><span>Hardware decoding <small className="muted">(this PC)</small></span>
+        <div className="toggle-row"><span>Hardware decoding <small className="muted">(this computer)</small></span>
           <select value={s.hwdec} onChange={(e) => set("hwdec", e.target.value as Settings["hwdec"])}>
-            <option value="auto-safe">Automatic (recommended)</option><option value="d3d11va">Direct3D 11 (zero-copy)</option><option value="d3d11va-copy">Direct3D 11 (copy)</option><option value="no">Off (software)</option>
+            <option value="auto-safe">Automatic (recommended)</option>
+            {document.documentElement.classList.contains("platform-linux") ? <>
+              <option value="vaapi">VA-API (Intel, AMD)</option><option value="vaapi-copy">VA-API (copy)</option>
+              <option value="nvdec">NVDEC (Nvidia)</option><option value="nvdec-copy">NVDEC (copy)</option><option value="vulkan">Vulkan</option>
+            </> : <><option value="d3d11va">Direct3D 11 (zero-copy)</option><option value="d3d11va-copy">Direct3D 11 (copy)</option></>}
+            <option value="no">Off (software)</option>
           </select></div>
         <Toggle label="High-quality rendering" detail="mpv's gpu-next with sharp scaling and dithering" checked={s.highQuality} onChange={(v) => set("highQuality", v)} />
         {s.highQuality && (
@@ -318,11 +323,11 @@ function PlayerSettings() {
       <Group title="Controls">
         <Toggle label="Double-click for full screen" checked={s.doubleClickFullscreen} onChange={(v) => set("doubleClickFullscreen", v)} />
         <Toggle label="Mouse wheel changes volume" checked={s.wheelVolume} onChange={(v) => set("wheelVolume", v)} />
-        <Toggle label="Start in full screen (this PC)" checked={s.startFullscreen} onChange={(v) => set("startFullscreen", v)} />
+        <Toggle label="Start in full screen (this computer)" checked={s.startFullscreen} onChange={(v) => set("startFullscreen", v)} />
         <Toggle label="Show when it ends" checked={s.showClock} onChange={(v) => set("showClock", v)} />
         <Toggle label="Show remaining time" checked={s.remainingTime} onChange={(v) => set("remainingTime", v)} />
         <div className="slider-row"><div className="slider-head"><span>Buffer ahead</span><span className="muted tabular">{s.cacheSeconds}s</span></div><Range min={30} max={600} step={30} value={s.cacheSeconds} onChange={(e) => set("cacheSeconds", Number(e.target.value))} /></div>
-        <Field label="Screenshot folder (this PC)" hint="Empty: your Pictures folder">
+        <Field label="Screenshot folder (this computer)" hint="Empty: your Pictures folder">
           <div className="row-line">
             <input value={s.screenshotFolder} onChange={(e) => set("screenshotFolder", e.target.value)} placeholder="Pictures" />
             <button className="glass-button" onClick={async () => { try { const { open } = await import("@tauri-apps/plugin-dialog"); const d = await open({ directory: true }); if (typeof d === "string") set("screenshotFolder", d); } catch { /* */ } }}>Choose…</button>
@@ -386,7 +391,7 @@ function ForYouSettings() {
       <Field label="TMDB API Read Access Token or API key" hint="For You picks come from TMDB (free key at themoviedb.org → Settings → API). Saved to your Jellyfin account, so the iPhone app has it too.">
         <input type="password" defaultValue={s.tmdbKey} onBlur={(e) => { if (e.target.value.trim() !== s.tmdbKey) void model.setTmdbKey(e.target.value); }} spellCheck={false} />
       </Field>
-      <Toggle label="On-device AI ranking" detail={status ? `Engine: ${status.detail}` : "Compares overviews with a small model on this PC"} checked={s.useOnDeviceAI} onChange={(v) => set("useOnDeviceAI", v)} />
+      <Toggle label="On-device AI ranking" detail={status ? `Engine: ${status.detail}` : "Compares overviews with a small model on this computer"} checked={s.useOnDeviceAI} onChange={(v) => set("useOnDeviceAI", v)} />
       <Toggle label="Count what you're watching as liked" detail="Shows and movies you're partway through count towards your taste" checked={s.includeWatchingAsLiked} onChange={(v) => { set("includeWatchingAsLiked", v); model.tasteChanged(); }} />
       <p className="muted small">For You never suggests anything already on your server: titles are matched by the TMDB, IMDb and TVDB ids Jellyfin stored, then by title and year. Your taste comes from what you finished, favourited or are watching on your server (the chosen library counts most), what you gave up on, and what you marked Not for me. The AI reads your library with read-only requests: it can't change, move or delete anything. My List, Not for me, Already seen and your settings are saved in your account's private JellyReco storage on your server, so they follow you to every device, including the iPhone app. Libraries named "placeholder" or "playlist(s)" never appear.</p>
       <div className="row-line">
@@ -403,7 +408,7 @@ function DevicesSettings() {
   const model = useModel();
   return (
     <>
-      <Group title="Servers & accounts on this PC">
+      <Group title="Servers & accounts on this computer">
         {model.servers.map((sv) => (
           <div key={sv.id} className="server-block">
             <div className="row static"><Icon name="server" size={20} /><div className="row-text"><div className="row-title">{sv.name}{sv.id === model.server?.id ? " (current)" : ""}</div><div className="row-sub">{sv.url}{sv.version ? ` · Jellyfin ${sv.version}` : ""}</div></div></div>
