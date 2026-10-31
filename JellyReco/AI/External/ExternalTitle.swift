@@ -39,17 +39,14 @@ struct ExternalTitle: Codable, Hashable, Identifiable {
         URL(string: "https://www.themoviedb.org/\(isMovie ? "movie" : "tv")/\(sourceId)")
     }
 
-    /// Short label for the age bubble: certifications as TMDB gives them, numbers as "12+".
-    var ageLabel: String? {
-        guard let r = ageRating?.trimmingCharacters(in: .whitespaces), !r.isEmpty else { return nil }
-        return r.allSatisfy(\.isNumber) ? "\(r)+" : r
-    }
+    /// The age bubble, as in AniReco: PG, 13+, 17+ or 18+.
+    var ageLabel: String? { ageRating.flatMap(TMDBCertification.bucket) }
 
-    /// For the details page: "PG-13 · United States".
+    /// For the details page: "13+ · PG-13 (United States)".
     var ageExplanation: String? {
-        guard let label = ageLabel else { return nil }
-        guard let c = ageRatingCountry, let name = Locale.current.localizedString(forRegionCode: c) else { return label }
-        return "\(label) · \(name)"
+        guard let label = ageLabel, let raw = ageRating else { return nil }
+        let country = ageRatingCountry.flatMap { Locale.current.localizedString(forRegionCode: $0) }
+        return "\(label) · \(raw)\(country.map { " (\($0))" } ?? "")"
     }
 
     var imdbURL: URL? { imdbId.flatMap { URL(string: "https://www.imdb.com/title/\($0)/") } }

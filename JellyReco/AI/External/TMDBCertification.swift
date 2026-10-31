@@ -25,9 +25,32 @@ enum TMDBCertification {
                 }
             }
         }
-        for c in [region, "US", "GB"].compactMap({ $0 }) { if let v = byCountry[c] { return (v, c) } }
-        if let c = byCountry.keys.sorted().first, let v = byCountry[c] { return (v, c) }
+        // Only certifications that map to a bubble count (an unknown local code never shows).
+        for c in [region, "US", "GB"].compactMap({ $0 }) { if let v = byCountry[c], bucket(v) != nil { return (v, c) } }
+        for c in byCountry.keys.sorted() { if let v = byCountry[c], bucket(v) != nil { return (v, c) } }
         return nil
+    }
+
+    /// AniReco's four age bubbles: PG (everything under 13), 13+ (13–16), 17+, 18+.
+    static func bucket(_ certification: String) -> String? {
+        let c = clean(certification).uppercased()
+        // Systems whose letters carry the age (US film and TV, UK, Australia, Canada, Japan…).
+        let named: [String: String] = [
+            "G": "PG", "PG": "PG", "U": "PG", "L": "PG", "E": "PG", "TP": "PG", "AL": "PG", "ALL": "PG", "A": "PG",
+            "TV-Y": "PG", "TV-Y7": "PG", "TV-Y7-FV": "PG", "TV-G": "PG", "TV-PG": "PG", "12A": "PG", "PG12": "PG",
+            "PG-13": "13+", "TV-14": "13+", "M": "13+", "14A": "13+", "MA15+": "13+", "R15+": "13+",
+            "R": "17+", "TV-MA": "17+",
+            "NC-17": "18+", "R18": "18+", "R18+": "18+", "X": "18+", "X18+": "18+", "18A": "18+", "R-18": "18+",
+        ]
+        if let label = named[c] { return label }
+        // Everything else by its age number ("12", "FSK 16", "K-15", "R-13", "19"…).
+        guard let range = c.range(of: #"\d+"#, options: .regularExpression), let age = Int(c[range]) else { return nil }
+        switch age {
+        case ..<13: return "PG"
+        case 13...16: return "13+"
+        case 17: return "17+"
+        default: return "18+"
+        }
     }
 
     private static func clean(_ v: String) -> String { v.trimmingCharacters(in: .whitespaces) }

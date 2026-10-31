@@ -33,4 +33,17 @@ check("show, phone in Slovenia", TMDBCertification.pick(j(tv), tv: true, region:
 check("show, phone in Germany", TMDBCertification.pick(j(tv), tv: true, region: "DE"), ("16", "DE"))
 check("show only rated NR in US", TMDBCertification.pick(j(unrated), tv: true, region: "SI"), ("15", "KR"))
 check("movie without ratings", TMDBCertification.pick(j(none), tv: false, region: "SI"), nil)
+// The bubbles (AniReco's: PG under 13, 13+ for 13–16, 17+, 18+).
+let buckets: [(String, String?)] = [
+    ("G", "PG"), ("PG", "PG"), ("PG-13", "13+"), ("R", "17+"), ("NC-17", "18+"),
+    ("TV-Y", "PG"), ("TV-Y7", "PG"), ("TV-G", "PG"), ("TV-PG", "PG"), ("TV-14", "13+"), ("TV-MA", "17+"),
+    ("U", "PG"), ("12A", "PG"), ("12", "PG"), ("15", "13+"), ("18", "18+"), ("R18", "18+"),
+    ("0", "PG"), ("6", "PG"), ("7", "PG"), ("16", "13+"), ("19", "18+"), ("MA15+", "13+"), ("R18+", "18+"),
+    ("FSK 12", "PG"), ("K-15", "13+"), ("14A", "13+"), ("PG12", "PG"), ("R15+", "13+"), ("??", nil),
+]
+for (cert, want) in buckets {
+    let got = TMDBCertification.bucket(cert)
+    print("RESULT bubble \(cert) -> \(got ?? "none") \(got == want ? "OK" : "WRONG, want \(want ?? "none")")")
+    if got != want { failed += 1 }
+}
 exit(failed == 0 ? 0 : 1)
