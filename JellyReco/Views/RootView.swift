@@ -19,7 +19,6 @@ struct RootView: View {
         .overlay {
             if model.isLocked { LockView() }
         }
-        .background { KeyboardDismissOnTapOutside().allowsHitTesting(false) }
         .fullScreenCover(item: $model.playback) { request in
             PlayerScreen(request: request)
         }

@@ -555,6 +555,8 @@ struct TMDBKeyCard: View {
                 .background(.fill.tertiary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             if let error { Text(error).font(.footnote).foregroundStyle(.red) }
             Button {
+                checking = true          // spinner right away, before anything else
+                Keyboard.dismiss()
                 Task { await save() }
             } label: {
                 HStack { if checking { ProgressView() }; Text("Save and find picks").fontWeight(.semibold) }.frame(maxWidth: .infinity)
@@ -570,7 +572,6 @@ struct TMDBKeyCard: View {
     }
 
     private func save() async {
-        Keyboard.dismiss()
         checking = true
         error = nil
         defer { checking = false }

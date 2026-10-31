@@ -27,7 +27,9 @@ struct TintedGlassButtonStyle: ButtonStyle {
                 .padding(.vertical, vertical)
                 .padding(.horizontal, horizontal)
                 .contentShape(Capsule())
-                .glassEffect(.regular.tint(tint.opacity(isEnabled ? 0.65 : 0.25)).interactive(), in: .capsule)
+                // Not .interactive(): interactive glass inside a button style can take the tap
+                // away from the button.
+                .glassEffect(.regular.tint(tint.opacity(isEnabled ? 0.65 : 0.25)), in: .capsule)
                 .opacity(isEnabled ? 1 : 0.55)
                 .scaleEffect(configuration.isPressed ? 0.97 : 1)
                 .animation(.snappy(duration: 0.15), value: configuration.isPressed)
