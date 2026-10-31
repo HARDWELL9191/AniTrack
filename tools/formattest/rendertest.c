@@ -30,8 +30,8 @@ int main(int argc, char **argv) {
     int first = 1, failures = 0;
     if (argc > 3 && strcmp(argv[1], "--fonts") == 0) { fontsDir = argv[2]; family = argv[3]; first = 4; }
     const char *demuxer = getenv("RENDERTEST_DEMUXER");
-    printf("Subtitle render test (%s%s%s)\n", fontsDir ? "with the app's fonts" : "no fonts given",
-           demuxer ? ", demuxer=" : "", demuxer ? demuxer : "");
+    printf("Subtitle render test (%s%s%s%s)\n", fontsDir ? "with the app's fonts" : "no fonts given",
+           demuxer ? ", demuxer=" : "", demuxer ? demuxer : "", getenv("RENDERTEST_SUBURL") ? ", subtitle fetched from Jellyfin" : "");
     for (int i = first; i < argc; i++) {
         const char *file = argv[i];
         mpv_handle *h = mpv_create();
@@ -63,7 +63,16 @@ int main(int argc, char **argv) {
         const char *cmd[] = {"loadfile", file, NULL};
         mpv_command(h, cmd);
         if (!wait_for(h, MPV_EVENT_FILE_LOADED, 20)) { printf("FAIL %s: not loaded\n", file); failures++; goto done; }
-        mpv_set_property_string(h, "sid", "1");
+        const char *subURL = getenv("RENDERTEST_SUBURL");
+        if (subURL) {
+            // Like the app: add the subtitle fetched from Jellyfin as its own track, then select it.
+            const char *add[] = {"sub-add", subURL, "select", NULL};
+            int r = mpv_command(h, add);
+            printf("    sub-add %s -> %s\n", subURL, mpv_error_string(r));
+            for (int n = 0; n < 40; n++) print_log(mpv_wait_event(h, 0.05));
+        } else {
+            mpv_set_property_string(h, "sid", "1");
+        }
         // Play from the start like a viewer would (a TS seek can skip a subtitle's only packet),
         // then pause inside the subtitle's display time.
         for (int n = 0; n < 200; n++) {
