@@ -230,7 +230,8 @@ jobs:
           find "$RUNNER_TEMP/squashfs-root" -path "*ai/*" -maxdepth 4 | head -20
           # Graphics libraries must come from the system (its GPU driver), not the AppImage: a bundled
           # libGL / libEGL / libgbm / Mesa would make WebKit and mpv fall back to software rendering.
-          bundled=$(ls "$RUNNER_TEMP/squashfs-root/usr/lib" | grep -E "^(libGL|libGLX|libEGL|libgbm|libdrm|libglapi|libGLdispatch|libvulkan)\.so|^dri$|mesa" || true)
+          # (libvulkan.so.1 is only Vulkan's loader, which finds the system's own driver: fine to bundle.)
+          bundled=$(ls "$RUNNER_TEMP/squashfs-root/usr/lib" | grep -E "^(libGL|libGLX|libEGL|libgbm|libdrm|libglapi|libGLdispatch)\.so|^dri$|mesa" || true)
           if [ -n "$bundled" ]; then echo "::error::The AppImage bundles graphics libraries (GPU acceleration would break): $bundled"; exit 1; fi
           echo "::notice::No GPU driver libraries bundled: the system's driver is used (GPU acceleration)"
 
