@@ -30,7 +30,7 @@ struct TintedGlassButtonStyle: ButtonStyle {
                 .contentShape(Capsule())
                 // Not .interactive(): interactive glass inside a button style can take the tap
                 // away from the button. (The UI test can switch it back on to compare.)
-                .glassEffect(Self.interactiveForTesting
+                .glassEffect(TintedGlassButtonStyle.interactiveForTesting
                              ? .regular.tint(tint.opacity(isEnabled ? 0.65 : 0.25)).interactive()
                              : .regular.tint(tint.opacity(isEnabled ? 0.65 : 0.25)), in: .capsule)
                 .opacity(isEnabled ? 1 : 0.55)
