@@ -180,66 +180,81 @@ struct NotForMeView: View {
     @Environment(AppModel.self) private var model
     @State private var tab = 0
     @State private var detail: ExternalTitle?
+    @State private var confirmClear = false
+
+    private var list: [ExternalTitle] { tab == 0 ? model.externalNotForMe : model.externalSeen }
 
     var body: some View {
-        let list = tab == 0 ? model.externalNotForMe : model.externalSeen
-        List {
-            HStack {
-                Spacer()
-                Menu {
-                    Button { tab = 0 } label: {
-                        Label("Not for me (\(model.externalNotForMe.count))", systemImage: tab == 0 ? "checkmark" : "hand.thumbsdown")
+        // The same look as My List: the dropdown on the right, then a grid of covers.
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                filterBar
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 12, alignment: .top)], spacing: 16) {
+                    ForEach(list) { t in
+                        Button { detail = t } label: { ExternalPosterCard(title: t, width: 104) }
+                            .buttonStyle(PressStyle())
+                            .cardContextMenu {
+                                Button(tab == 0 ? "Undo Not for me" : "Undo Already seen", systemImage: "arrow.uturn.backward") {
+                                    Task { tab == 0 ? await model.markExternalNotForMe(t, false) : await model.unmarkSeen(t) }
+                                }
+                                Button(model.isOnMyList(t) ? "Remove from My List" : "Add to My List",
+                                       systemImage: model.isOnMyList(t) ? "bookmark.slash" : "bookmark") {
+                                    Task { await model.toggleMyList(t) }
+                                }
+                            }
                     }
-                    Button { tab = 1 } label: {
-                        Label("Already seen (\(model.externalSeen.count))", systemImage: tab == 1 ? "checkmark" : "eye")
-                    }
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: tab == 0 ? "hand.thumbsdown" : "eye").frame(height: 0)
-                        Text(tab == 0 ? "Not for me (\(model.externalNotForMe.count))" : "Already seen (\(model.externalSeen.count))")
-                        Image(systemName: "chevron.down").font(.caption.weight(.semibold)).frame(height: 0)
-                    }
-                    .menuButtonHeight()
-                    .font(.subheadline.weight(.semibold))
                 }
-                .menuStyle(.button)
-                .buttonStyle(.glass)
+                .padding(.horizontal)
             }
-            .listRowBackground(Color.clear)
-            .listRowSeparator(.hidden)
-            ForEach(list) { t in
-                Button { detail = t } label: {
-                    HStack(spacing: 12) {
-                        RemoteImage(url: t.posterURL).frame(width: 50, height: 75).clipShape(RoundedRectangle(cornerRadius: 6))
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(t.title).font(.subheadline.weight(.semibold))
-                            Text(t.metaLine).font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-                }
-                .foregroundStyle(.primary)
-                .swipeActions {
-                    Button {
-                        Task { tab == 0 ? await model.markExternalNotForMe(t, false) : await model.unmarkSeen(t) }
-                    } label: { Label("Undo", systemImage: "arrow.uturn.backward") }
-                    .tint(Theme.accent)
-                    Button {
-                        Task { await model.toggleMyList(t) }
-                    } label: { Label("My List", systemImage: "bookmark") }
-                    .tint(.green)
-                }
-            }
+            .padding(.vertical)
+        }
+        .overlay {
             if list.isEmpty {
-                Text(tab == 0 ? "Titles you mark \"Not for me\" in For You show up here." : "Titles you mark \"Already seen\" in For You show up here.")
-                    .foregroundStyle(.secondary)
+                ContentUnavailableView("Nothing here",
+                                       systemImage: tab == 0 ? "hand.thumbsdown" : "eye",
+                                       description: Text(tab == 0 ? "Titles you mark \"Not for me\" in For You show up here. Long-press one to undo."
+                                                                  : "Titles you mark \"Already seen\" in For You show up here. Long-press one to undo."))
             }
         }
         .navigationTitle("Not for me")
         .toolbar {
             if !list.isEmpty {
-                Button("Clear all") { Task { await model.clearExternal(tab == 0 ? .notforme : .seenelsewhere) } }
+                Button("Clear all") { confirmClear = true }
             }
         }
+        .confirmationDialog(tab == 0 ? "Clear Not for me?" : "Clear Already seen?", isPresented: $confirmClear, titleVisibility: .visible) {
+            Button("Clear all", role: .destructive) {
+                Task { await model.clearExternal(tab == 0 ? .notforme : .seenelsewhere) }
+            }
+        } message: {
+            Text("These titles can be suggested on For You again.")
+        }
         .sheet(item: $detail) { ExternalDetailSheet(title: $0) }
+    }
+
+    /// The same dropdown as My List.
+    private var filterBar: some View {
+        HStack {
+            Spacer()
+            Menu {
+                Button { tab = 0 } label: {
+                    Label("Not for me (\(model.externalNotForMe.count))", systemImage: tab == 0 ? "checkmark" : "hand.thumbsdown")
+                }
+                Button { tab = 1 } label: {
+                    Label("Already seen (\(model.externalSeen.count))", systemImage: tab == 1 ? "checkmark" : "eye")
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: tab == 0 ? "hand.thumbsdown" : "eye").frame(height: 0)
+                    Text(tab == 0 ? "Not for me (\(model.externalNotForMe.count))" : "Already seen (\(model.externalSeen.count))")
+                    Image(systemName: "chevron.down").font(.caption.weight(.semibold)).frame(height: 0)
+                }
+                .menuButtonHeight()
+                .font(.subheadline.weight(.semibold))
+            }
+            .menuStyle(.button)
+            .buttonStyle(.glass)
+        }
+        .padding(.horizontal)
     }
 }
