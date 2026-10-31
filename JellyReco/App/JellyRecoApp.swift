@@ -12,11 +12,15 @@ struct JellyRecoApp: App {
 
     var body: some Scene {
         WindowGroup {
+            if let mode = ProcessInfo.processInfo.environment["JELLYRECO_UITEST"] {
+                UITestHost(mode: mode).environment(model)
+            } else {
             RootView()
                 .environment(model)
                 .tint(Theme.accent)
                 .preferredColorScheme(model.settings.appearance.scheme)
                 .task { await model.bootstrap() }
+            }
         }
     }
 }

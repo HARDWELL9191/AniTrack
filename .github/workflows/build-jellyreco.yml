@@ -107,6 +107,39 @@ jobs:
           git add -A && git -c user.name=ci -c user.email=ci@local commit -qm "build log ${{ github.run_id }}"
           git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" ci-logs:ci-logs-build
 
+  uitest:
+    # Runs real screens in the iOS Simulator and taps them like a finger (screenshots kept).
+    runs-on: xcode-27
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - name: Generate project
+        run: brew install xcodegen && xcodegen generate
+      - name: Pick a simulator (software keyboard on)
+        run: |
+          defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool false
+          UDID=$(xcrun simctl list devices available -j | python3 -c "import json,sys; d=json.load(sys.stdin)['devices']; print(next(x['udid'] for k,v in d.items() if 'iOS' in k for x in v if x['name'].startswith('iPhone')))")
+          echo "UDID=$UDID" >> "$GITHUB_ENV"
+          xcrun simctl list devices available | grep "$UDID"
+          xcrun simctl boot "$UDID" || true
+      - name: Run UI tests
+        run: |
+          set -o pipefail
+          xcodebuild test -project JellyReco.xcodeproj -scheme JellyReco -destination "id=$UDID" \
+            -derivedDataPath build -resultBundlePath uitest.xcresult -skipPackagePluginValidation -skipMacroValidation \
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee uitest-full.log | grep -E "RESULT|KEYBOARD|STATE|error:|Test Case|TEST (SUCCEEDED|FAILED)|\*\* " || true
+      - name: Publish results and screenshots to the ci-logs-uitest branch
+        if: always()
+        run: |
+          mkdir -p out
+          grep -E "RESULT|KEYBOARD|STATE|error:|Test Case|TEST (SUCCEEDED|FAILED)|\*\* " uitest-full.log > out/uitest.txt 2>/dev/null || true
+          tail -60 uitest-full.log >> out/uitest.txt 2>/dev/null || true
+          xcrun xcresulttool export attachments --path uitest.xcresult --output-path out/shots 2>&1 | tail -3 || true
+          ls -la out/shots || true
+          cd out && git init -q && git checkout -q -b ci && git add -A
+          git -c user.name=ci -c user.email=ci@local commit -qm "uitest ${{ github.run_id }}"
+          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" ci:ci-logs-uitest
+
   samples:
     # Test files are made on Linux (ffmpeg installs in seconds there; Homebrew builds it from source on new macOS).
     runs-on: ubuntu-latest

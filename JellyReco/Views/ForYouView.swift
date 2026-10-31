@@ -553,13 +553,13 @@ struct TMDBKeyCard: View {
                 .keyboardDoneBar()
                 .padding(12)
                 .background(.fill.tertiary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            if let error { Text(error).font(.footnote).foregroundStyle(.red) }
+            if let error { Text(error).font(.footnote).foregroundStyle(.red).accessibilityIdentifier("tmdb-error") }
             Button {
                 checking = true          // spinner right away, before anything else
                 Keyboard.dismiss()
                 Task { await save() }
             } label: {
-                HStack { if checking { ProgressView() }; Text("Save and find picks").fontWeight(.semibold) }.frame(maxWidth: .infinity)
+                HStack { if checking { ProgressView().accessibilityIdentifier("tmdb-checking") }; Text("Save and find picks").fontWeight(.semibold) }.frame(maxWidth: .infinity)
             }
             .buttonStyle(.tintedGlass)
             .controlSize(.large)
