@@ -28,12 +28,28 @@ struct ExternalTitle: Codable, Hashable, Identifiable {
     var tvdbId: Int?
     var status: String?
     var isAdult = false
+    /// TMDB certification ("PG-13", "TV-MA", "12"…) and the country it's from ("US").
+    var ageRating: String?
+    var ageRatingCountry: String?
 
     var isMovie: Bool { source == .tmdbMovie }
     var isAnime: Bool { originalLanguage == "ja" && genres.contains("Animation") }
 
     var webURL: URL? {
         URL(string: "https://www.themoviedb.org/\(isMovie ? "movie" : "tv")/\(sourceId)")
+    }
+
+    /// Short label for the age bubble: certifications as TMDB gives them, numbers as "12+".
+    var ageLabel: String? {
+        guard let r = ageRating?.trimmingCharacters(in: .whitespaces), !r.isEmpty else { return nil }
+        return r.allSatisfy(\.isNumber) ? "\(r)+" : r
+    }
+
+    /// For the details page: "PG-13 · United States".
+    var ageExplanation: String? {
+        guard let label = ageLabel else { return nil }
+        guard let c = ageRatingCountry, let name = Locale.current.localizedString(forRegionCode: c) else { return label }
+        return "\(label) · \(name)"
     }
 
     var imdbURL: URL? { imdbId.flatMap { URL(string: "https://www.imdb.com/title/\($0)/") } }

@@ -217,6 +217,26 @@ struct ForYouView: View {
 
 // MARK: - Cards
 
+/// The age bubble on a TMDB cover (top left, like AniReco). Titles that came without full
+/// details (rows, "More like this", saved picks) look theirs up once when they appear.
+struct ExternalAgeBubble: View {
+    @Environment(AppModel.self) private var model
+    let title: ExternalTitle
+    @State private var looked: ExternalTitle?
+
+    var body: some View {
+        let label = (looked ?? title).ageLabel
+        ZStack {
+            if let label { GlassLabel(text: label).transition(.opacity) }
+        }
+        .animation(.easeOut(duration: 0.2), value: label)
+        .task(id: title.id) {
+            guard title.ageRating == nil, looked?.id != title.id else { return }
+            looked = await model.discovery.details(title)
+        }
+    }
+}
+
 struct ExternalPosterCard: View {
     let title: ExternalTitle
     var match: Int?
@@ -231,6 +251,7 @@ struct ExternalPosterCard: View {
                 .overlay(alignment: .bottomLeading) {
                     if let match { MatchBubble(value: match).padding(5) }
                 }
+                .overlay(alignment: .topLeading) { ExternalAgeBubble(title: title).padding(5) }
                 .overlay {
                     if highlighted {
                         RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Theme.pink, lineWidth: 2)
@@ -266,6 +287,7 @@ struct ExternalPickCard: View {
                     RemoteImage(url: t.posterURL)
                         .frame(width: 120, height: 180)
                         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay(alignment: .topLeading) { ExternalAgeBubble(title: t).padding(6) }
                         .shadow(color: .black.opacity(0.2), radius: 8, y: 4)
                 }
                 .buttonStyle(PressStyle())
@@ -430,6 +452,7 @@ struct ExternalDetailSheet: View {
                             RemoteImage(url: title.posterURL)
                                 .frame(width: 96, height: 144)
                                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                .overlay(alignment: .topLeading) { ExternalAgeBubble(title: title).padding(5) }
                                 .shadow(radius: 8)
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(title.title).font(.title3.bold()).lineLimit(3)
@@ -438,6 +461,12 @@ struct ExternalDetailSheet: View {
                                 if let s = title.score, s > 0 {
                                     Label(String(format: "%.1f · %d votes", s, title.voteCount ?? 0), systemImage: "star.fill")
                                         .font(.caption.weight(.semibold)).foregroundStyle(.yellow)
+                                }
+                                // "PG-13 · United States" (TMDB certification), like AniReco's details.
+                                if let age = title.ageExplanation {
+                                    Label(age, systemImage: "checkmark.shield")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.secondary)
                                 }
                             }
                         }

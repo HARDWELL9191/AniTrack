@@ -24,6 +24,11 @@ jobs:
           swift --version
           xcrun --sdk iphoneos --show-sdk-version
 
+      - name: Test TMDB age ratings (the app's parser on TMDB's response shapes)
+        run: |
+          swiftc JellyReco/AI/External/TMDBCertification.swift tools/certtest/main.swift -o certtest
+          ./certtest
+
       - name: Use custom icon if provided
         run: |
           for f in custom-icon.png custom-icon.jpg custom-icon.jpeg; do

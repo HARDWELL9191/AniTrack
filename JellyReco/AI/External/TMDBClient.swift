@@ -196,7 +196,8 @@ actor TMDBClient {
     func details(_ title: ExternalTitle) async -> ExternalTitle {
         if let hit = detailCache[title.id] { return hit }
         let tv = !title.isMovie
-        guard let data = try? await get("/\(tv ? "tv" : "movie")/\(title.sourceId)", ["append_to_response": "keywords,external_ids"]),
+        guard let data = try? await get("/\(tv ? "tv" : "movie")/\(title.sourceId)",
+                                        ["append_to_response": tv ? "keywords,external_ids,content_ratings" : "keywords,external_ids,release_dates"]),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return title }
         var t = title
         let kw = (json["keywords"] as? [String: Any])
@@ -210,6 +211,10 @@ actor TMDBClient {
         t.runtime = json["runtime"] as? Int
         t.status = json["status"] as? String
         if let g = json["genres"] as? [[String: Any]] { t.genres = g.compactMap { $0["name"] as? String } }
+        if let (rating, country) = TMDBCertification.pick(json, tv: tv, region: Locale.current.region?.identifier) {
+            t.ageRating = rating
+            t.ageRatingCountry = country
+        }
         if detailCache.count > 3000 { detailCache.removeAll() }
         detailCache[title.id] = t
         return t
