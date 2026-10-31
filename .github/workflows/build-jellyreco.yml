@@ -79,6 +79,16 @@ jobs:
           path: JellyReco.ipa
           if-no-files-found: error
 
+      - name: Publish the IPA as the "JellyReco latest" release (one fixed download link)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          NOTES="Build $(date -u '+%Y-%m-%d %H:%M UTC') from ${GITHUB_SHA::7}: $(git log -1 --format=%s | head -c 300)"
+          gh release delete jellyreco-latest --yes --cleanup-tag -R "$GITHUB_REPOSITORY" 2>/dev/null || true
+          gh release create jellyreco-latest JellyReco.ipa -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "JellyReco (latest build)" --notes "$NOTES" --prerelease
+
       - name: Upload build log on failure
         if: failure()
         uses: actions/upload-artifact@v7
