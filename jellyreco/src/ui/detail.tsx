@@ -2,6 +2,7 @@
 // collections, playlists, channels, programs, books and photos.
 
 import { useEffect, useMemo, useState } from "react";
+import { Select } from "./select";
 import { LIST_FIELDS } from "../core/api";
 import { toggleMyList } from "./foryou";
 import { AccountStorage } from "../core/storage";
@@ -126,19 +127,19 @@ function Detail({ item, full, onChange }: { item: Item; full: boolean; onChange:
             <div className="track-pickers">
               {sources.length > 1 && (
                 <label><span>Version</span>
-                  <select value={source?.Id ?? ""} onChange={(e) => setSourceId(e.target.value)}>{sources.map((s) => <option key={s.Id} value={s.Id ?? ""}>{s.Name ?? s.Container}</option>)}</select>
+                  <Select value={source?.Id ?? ""} onChange={(e) => setSourceId(e.target.value)}>{sources.map((s) => <option key={s.Id} value={s.Id ?? ""}>{s.Name ?? s.Container}</option>)}</Select>
                 </label>
               )}
               {audios.length > 1 && (
                 <label><span>Audio</span>
-                  <select value={audioIndex ?? source?.DefaultAudioStreamIndex ?? ""} onChange={(e) => setAudioIndex(Number(e.target.value))}>{audios.map((a) => <option key={a.Index} value={a.Index}>{streamLabel(a)}</option>)}</select>
+                  <Select value={audioIndex ?? source?.DefaultAudioStreamIndex ?? ""} onChange={(e) => setAudioIndex(Number(e.target.value))}>{audios.map((a) => <option key={a.Index} value={a.Index}>{streamLabel(a)}</option>)}</Select>
                 </label>
               )}
               {subs.length > 0 && (
                 <label><span>Subtitles</span>
-                  <select value={subIndex ?? source?.DefaultSubtitleStreamIndex ?? -1} onChange={(e) => setSubIndex(Number(e.target.value))}>
+                  <Select value={subIndex ?? source?.DefaultSubtitleStreamIndex ?? -1} onChange={(e) => setSubIndex(Number(e.target.value))}>
                     <option value={-1}>Off</option>{subs.map((s) => <option key={s.Index} value={s.Index}>{streamLabel(s)}</option>)}
-                  </select>
+                  </Select>
                 </label>
               )}
             </div>

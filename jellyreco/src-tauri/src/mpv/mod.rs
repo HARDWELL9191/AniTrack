@@ -10,6 +10,17 @@
 //! "mpv" events. Values travel as strings (node properties like track-list arrive as JSON).
 
 pub mod ffi;
+
+/// LC_NUMERIC = "C" for this process (glibc's LC_NUMERIC is 1).
+#[cfg(target_os = "linux")]
+fn c_numeric_locale() {
+    extern "C" {
+        fn setlocale(category: std::ffi::c_int, locale: *const std::ffi::c_char) -> *mut std::ffi::c_char;
+    }
+    const LC_NUMERIC: std::ffi::c_int = 1;
+    // SAFETY: called on the thread that starts mpv, before mpv exists; the string is static.
+    unsafe { setlocale(LC_NUMERIC, c"C".as_ptr()) };
+}
 #[cfg(target_os = "linux")]
 pub mod gl;
 
@@ -103,10 +114,15 @@ impl Engine {
     }
 
     fn create(&self, api: &Arc<ffi::Api>, app: &AppHandle, wid: Option<i64>, options: HashMap<String, String>, observe: Vec<String>) -> Result<Instance, String> {
+        // libmpv only starts with C number formatting, and GTK switches the process to the
+        // system's locale at start-up (e.g. Slovenian, with decimal commas). Only numbers are
+        // reset: text, dates and the page keep the person's language.
+        #[cfg(target_os = "linux")]
+        c_numeric_locale();
         // SAFETY: documented libmpv sequence: create, set options, initialize.
         let handle = unsafe { (api.create)() };
         if handle.is_null() {
-            return Err("mpv couldn't be created.".into());
+            return Err("mpv couldn't be created (libmpv needs C number formatting; see the log).".into());
         }
         let set_opt = |name: &str, value: &str| -> Result<(), String> {
             let (n, v) = (ffi::cstring(name), ffi::cstring(value));

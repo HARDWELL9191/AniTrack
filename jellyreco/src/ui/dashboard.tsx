@@ -4,6 +4,7 @@
 // pickers instead of typing values in (see serverpages.tsx).
 
 import { LibraryOptionsEditor, type LibraryOptions } from "./libraryadmin";
+import { Select } from "./select";
 import { type ReactNode, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { getSocket } from "../core/socket";
 import type {
@@ -493,8 +494,8 @@ function UserPage({ id }: { id: string }) {
         <>
           <Group title="Profile">
             <Field label="Name"><input value={name} onChange={(e) => setName(e.target.value)} /></Field>
-            {(authProviders?.length ?? 0) > 1 && <Field label="Authentication provider" hint="Checks this user's password."><select value={policy.AuthenticationProviderId ?? ""} onChange={(e) => P("AuthenticationProviderId", e.target.value)}>{authProviders!.map((a) => <option key={a.Id} value={a.Id}>{a.Name}</option>)}</select></Field>}
-            {(resetProviders?.length ?? 0) > 1 && <Field label="Password reset provider" hint="Used when this user asks to reset their password."><select value={policy.PasswordResetProviderId ?? ""} onChange={(e) => P("PasswordResetProviderId", e.target.value)}>{resetProviders!.map((a) => <option key={a.Id} value={a.Id}>{a.Name}</option>)}</select></Field>}
+            {(authProviders?.length ?? 0) > 1 && <Field label="Authentication provider" hint="Checks this user's password."><Select value={policy.AuthenticationProviderId ?? ""} onChange={(e) => P("AuthenticationProviderId", e.target.value)}>{authProviders!.map((a) => <option key={a.Id} value={a.Id}>{a.Name}</option>)}</Select></Field>}
+            {(resetProviders?.length ?? 0) > 1 && <Field label="Password reset provider" hint="Used when this user asks to reset their password."><Select value={policy.PasswordResetProviderId ?? ""} onChange={(e) => P("PasswordResetProviderId", e.target.value)}>{resetProviders!.map((a) => <option key={a.Id} value={a.Id}>{a.Name}</option>)}</Select></Field>}
             <Toggle label="Allow remote connections to this server" detail="Off blocks this user's connections from outside your network." checked={policy.EnableRemoteAccess} onChange={(v) => P("EnableRemoteAccess", v)} />
             <Toggle label="Allow this user to manage the server" checked={policy.IsAdministrator} onChange={(v) => P("IsAdministrator", v)} />
             <Toggle label="Allow this user to manage collections" checked={policy.EnableCollectionManagement} onChange={(v) => P("EnableCollectionManagement", v)} />
@@ -513,11 +514,11 @@ function UserPage({ id }: { id: string }) {
             <Toggle label="Force transcoding of remote media sources such as Live TV" checked={policy.ForceRemoteSourceTranscoding} onChange={(v) => P("ForceRemoteSourceTranscoding", v)} />
             <Field label="Internet streaming bitrate limit (Mbps)" hint="Overrides the server's limit (Dashboard → Playback → Streaming). 0 = no limit."><input type="number" min={0} step={0.25} value={policy.RemoteClientBitrateLimit ? policy.RemoteClientBitrateLimit / 1e6 : 0} onChange={(e) => P("RemoteClientBitrateLimit", Math.trunc(Math.max(0, Number(e.target.value) || 0) * 1e6))} /></Field>
             <Field label="SyncPlay access" hint="Watching together in sync with other devices.">
-              <select value={policy.SyncPlayAccess} onChange={(e) => P("SyncPlayAccess", e.target.value)}>
+              <Select value={policy.SyncPlayAccess} onChange={(e) => P("SyncPlayAccess", e.target.value)}>
                 <option value="CreateAndJoinGroups">Allow creating and joining groups</option>
                 <option value="JoinGroups">Allow joining groups</option>
                 <option value="None">No access</option>
-              </select>
+              </Select>
             </Field>
           </Group>
           <Group title="Allow media deletion from">
@@ -565,13 +566,13 @@ function UserPage({ id }: { id: string }) {
         <>
           <Group title="Maximum allowed parental rating">
             <Field label="Highest allowed rating" hint="Titles rated higher are hidden from this user.">
-              <select value={ratingIdx < 0 ? "" : String(ratingIdx)} onChange={(e) => {
+              <Select value={ratingIdx < 0 ? "" : String(ratingIdx)} onChange={(e) => {
                 const g = e.target.value === "" ? null : grouped[Number(e.target.value)];
                 setPolicy({ ...policy, MaxParentalRating: g ? g.score : null, MaxParentalSubRating: g ? g.sub : null });
               }}>
                 <option value="">No limit</option>
                 {grouped.map((g, i) => <option key={i} value={i}>{g.label}</option>)}
-              </select>
+              </Select>
             </Field>
           </Group>
           <Group title="Block items with no or unrecognized rating">
@@ -590,10 +591,10 @@ function UserPage({ id }: { id: string }) {
                 const put = (patch: Partial<Schedule>) => setSchedules(schedules.map((x, j) => (j === i ? { ...x, ...patch } : x)));
                 return (
                   <div key={i} className="schedule-row">
-                    <select value={sc.DayOfWeek} onChange={(e) => put({ DayOfWeek: e.target.value })}>{DAYS.map((d) => <option key={d} value={d}>{dayLabel(d)}</option>)}</select>
-                    <select value={sc.StartHour} onChange={(e) => put({ StartHour: Number(e.target.value) })}>{Array.from({ length: 48 }, (_, h) => h / 2).filter((h) => h < sc.EndHour).map((h) => <option key={h} value={h}>{hourLabel(h)}</option>)}</select>
+                    <Select value={sc.DayOfWeek} onChange={(e) => put({ DayOfWeek: e.target.value })}>{DAYS.map((d) => <option key={d} value={d}>{dayLabel(d)}</option>)}</Select>
+                    <Select value={sc.StartHour} onChange={(e) => put({ StartHour: Number(e.target.value) })}>{Array.from({ length: 48 }, (_, h) => h / 2).filter((h) => h < sc.EndHour).map((h) => <option key={h} value={h}>{hourLabel(h)}</option>)}</Select>
                     <span className="muted">to</span>
-                    <select value={sc.EndHour} onChange={(e) => put({ EndHour: Number(e.target.value) })}>{Array.from({ length: 48 }, (_, h) => (h + 1) / 2).filter((h) => h > sc.StartHour).map((h) => <option key={h} value={h}>{h === 24 ? "24:00" : hourLabel(h)}</option>)}</select>
+                    <Select value={sc.EndHour} onChange={(e) => put({ EndHour: Number(e.target.value) })}>{Array.from({ length: 48 }, (_, h) => (h + 1) / 2).filter((h) => h > sc.StartHour).map((h) => <option key={h} value={h}>{h === 24 ? "24:00" : hourLabel(h)}</option>)}</Select>
                     <button className="round-button" title="Remove" onClick={() => setSchedules(schedules.filter((_, j) => j !== i))}><Icon name="trash" size={14} /></button>
                   </div>
                 );
@@ -676,7 +677,7 @@ function AddLibrary({ close }: { close: () => void }) {
   return (
     <Modal title="Add library" onClose={close} width={620} actions={<button className="glass-button prominent" disabled={busy || !name || !paths.length} onClick={() => void create()}>Create</button>}>
       <div className="form">
-        <Field label="Type"><select value={type} onChange={(e) => setType(e.target.value)}>{LIBRARY_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}</select></Field>
+        <Field label="Type"><Select value={type} onChange={(e) => setType(e.target.value)}>{LIBRARY_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}</Select></Field>
         <Field label="Name"><input value={name} onChange={(e) => setName(e.target.value)} autoFocus /></Field>
         <Field label="Folders">
           <div className="rows">{paths.map((p) => <div key={p} className="row static"><Icon name="folder" size={16} /><div className="row-text">{p}</div><button className="link-button danger" onClick={() => setPaths(paths.filter((x) => x !== p))}>Remove</button></div>)}</div>
@@ -1014,7 +1015,7 @@ function AddTrigger({ close, onAdd }: { close: () => void; onAdd: (t: TaskTrigge
       <div className="form">
         <Segmented value={type} options={[{ value: "DailyTrigger", label: "Daily" }, { value: "WeeklyTrigger", label: "Weekly" }, { value: "IntervalTrigger", label: "Interval" }, { value: "StartupTrigger", label: "At startup" }]} onChange={setType} />
         {(type === "DailyTrigger" || type === "WeeklyTrigger") && <Field label="Time"><input type="time" value={time} onChange={(e) => setTime(e.target.value)} /></Field>}
-        {type === "WeeklyTrigger" && <Field label="Day"><select value={day} onChange={(e) => setDay(e.target.value)}>{["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"].map((d) => <option key={d}>{d}</option>)}</select></Field>}
+        {type === "WeeklyTrigger" && <Field label="Day"><Select value={day} onChange={(e) => setDay(e.target.value)}>{["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"].map((d) => <option key={d}>{d}</option>)}</Select></Field>}
         {type === "IntervalTrigger" && <Field label="Every (hours)"><input type="number" min={0.25} step={0.25} value={hours} onChange={(e) => setHours(Number(e.target.value))} /></Field>}
         <Field label="Stop after (hours, 0 = no limit)"><input type="number" min={0} value={maxHours} onChange={(e) => setMaxHours(Number(e.target.value))} /></Field>
         <button className="glass-button prominent" onClick={() => onAdd({

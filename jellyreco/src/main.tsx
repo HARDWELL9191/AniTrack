@@ -98,6 +98,8 @@ if (native) {
   setInterval(check, 30_000);
   // A video file opened with the app (or dropped on the exe): play it with mpv directly.
   void listen<string>("open-file", (e) => void playLocalFile(e.payload));
+  // The file the app was started with ("Open with JellyReco" when it wasn't running yet).
+  void invoke<string | null>("launch_file").then((p) => { if (p) setTimeout(() => void playLocalFile(p), 300); }).catch(() => {});
 }
 
 async function playLocalFile(path: string) {

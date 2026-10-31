@@ -3,6 +3,7 @@
 // an episodes drawer, skip buttons, up next, stats, and keyboard control.
 
 import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { Select } from "./select";
 import type { PlayerController, PlayerState, TrackOption } from "../core/player";
 import { BITRATES, SPEEDS } from "../core/settings";
 import type { Item, MediaSegment } from "../core/types";
@@ -542,9 +543,9 @@ function SettingsPanel({ st, p, onStats }: { st: PlayerState; p: PlayerControlle
       )}
       <div className="form-row column">
         <span className="label">Quality</span>
-        <select value={st.maxBitrate} onChange={(e) => void p.setQuality(Number(e.target.value))}>
+        <Select value={st.maxBitrate} onChange={(e) => void p.setQuality(Number(e.target.value))}>
           {BITRATES.map((b) => <option key={b.value} value={b.value}>{b.label}</option>)}
-        </select>
+        </Select>
         <small className="muted">Anything below Original asks the server to transcode.</small>
       </div>
       <div className="form-row column">
@@ -565,9 +566,9 @@ function SettingsPanel({ st, p, onStats }: { st: PlayerState; p: PlayerControlle
         {(["Intro", "Recap", "Outro", "Preview", "Commercial"] as const).map((t) => (
           <div key={t} className="toggle-row">
             <span>{t === "Outro" ? "Credits" : t}</span>
-            <select value={s.segmentActions[t]} onChange={(e) => model.updateSettings({ segmentActions: { ...s.segmentActions, [t]: e.target.value as never } })}>
+            <Select value={s.segmentActions[t]} onChange={(e) => model.updateSettings({ segmentActions: { ...s.segmentActions, [t]: e.target.value as never } })}>
               <option value="ask">Show button</option><option value="skip">Skip automatically</option><option value="skipOnce">Skip once</option><option value="none">Never</option>
-            </select>
+            </Select>
           </div>
         ))}
       </div>
@@ -628,9 +629,9 @@ function EpisodesPanel({ st, p, close }: { st: PlayerState; p: PlayerController;
       <div className="panel-head-row">
         <h3>{item.SeriesName}</h3>
         {seasons.length > 1 && (
-          <select value={seasonId ?? ""} onChange={(e) => setSeasonId(e.target.value)}>
+          <Select value={seasonId ?? ""} onChange={(e) => setSeasonId(e.target.value)}>
             {seasons.map((s) => <option key={s.Id} value={s.Id}>{s.Name}</option>)}
-          </select>
+          </Select>
         )}
       </div>
       {!episodes ? <div className="spinner-wrap"><span className="spinner" /></div> : (

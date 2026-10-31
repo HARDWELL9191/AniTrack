@@ -10,6 +10,7 @@
 // The names and the way options are saved follow jellyfin-web's libraryoptionseditor.
 
 import { type ReactNode, useEffect, useState } from "react";
+import { Select } from "./select";
 import type { AppModel } from "../core/model";
 import type { Item } from "../core/types";
 import { type DropItem, Field, Spinner, useLoad } from "./components";
@@ -139,21 +140,21 @@ export function LibraryOptionsEditor({ contentType, isNew, value, onChange }: { 
       <OptionGroup title="Metadata">
         <div className="form grid-2">
           <Field label="Preferred download language">
-            <select value={str("PreferredMetadataLanguage")} onChange={(e) => set({ PreferredMetadataLanguage: e.target.value })}>
+            <Select value={str("PreferredMetadataLanguage")} onChange={(e) => set({ PreferredMetadataLanguage: e.target.value })}>
               <option value="">Server default</option>
               {(cultures ?? []).map((c) => <option key={c.TwoLetterISOLanguageName + c.DisplayName} value={c.TwoLetterISOLanguageName}>{c.DisplayName}</option>)}
-            </select>
+            </Select>
           </Field>
           <Field label="Country/region">
-            <select value={str("MetadataCountryCode")} onChange={(e) => set({ MetadataCountryCode: e.target.value })}>
+            <Select value={str("MetadataCountryCode")} onChange={(e) => set({ MetadataCountryCode: e.target.value })}>
               <option value="">Server default</option>
               {(countries ?? []).map((c) => <option key={c.TwoLetterISORegionName} value={c.TwoLetterISORegionName}>{c.DisplayName}</option>)}
-            </select>
+            </Select>
           </Field>
           <Field label="Automatically refresh metadata from the internet">
-            <select value={String(value.AutomaticRefreshIntervalDays ?? 0)} onChange={(e) => set({ AutomaticRefreshIntervalDays: Number(e.target.value) })}>
+            <Select value={String(value.AutomaticRefreshIntervalDays ?? 0)} onChange={(e) => set({ AutomaticRefreshIntervalDays: Number(e.target.value) })}>
               {REFRESH_DAYS.map((d) => <option key={d} value={d}>{d ? `Every ${d} days` : "Never"}</option>)}
-            </select>
+            </Select>
           </Field>
         </div>
         {embedded && <Check label="Prefer embedded titles over filenames" detail="Uses the title stored inside the file, if there is one" value={bool("EnableEmbeddedTitles")} onChange={(v) => set({ EnableEmbeddedTitles: v })} />}
@@ -195,12 +196,12 @@ export function LibraryOptionsEditor({ contentType, isNew, value, onChange }: { 
       {subtitles && (
         <OptionGroup title="Subtitles">
           <Field label="Allow embedded subtitles">
-            <select value={str("AllowEmbeddedSubtitles") || "AllowAll"} onChange={(e) => set({ AllowEmbeddedSubtitles: e.target.value })}>
+            <Select value={str("AllowEmbeddedSubtitles") || "AllowAll"} onChange={(e) => set({ AllowEmbeddedSubtitles: e.target.value })}>
               <option value="AllowAll">Allow all</option>
               <option value="AllowText">Allow text</option>
               <option value="AllowImage">Allow image</option>
               <option value="AllowNone">Allow none</option>
-            </select>
+            </Select>
           </Field>
           {!!avail.SubtitleFetchers?.length && (
             <PluginList title="Subtitle downloaders" help="Enable and rank your preferred subtitle downloaders in order of priority."

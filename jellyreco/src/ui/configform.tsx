@@ -5,6 +5,7 @@
 // A page can edit several server configs at once (e.g. Display = the server config + "metadata").
 
 import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { Select } from "./select";
 import type { FileSystemEntry } from "../core/types";
 import { ErrorNote, Field, Group, Modal, Spinner, Toggle, useAction, useLoad } from "./components";
 import { Icon } from "./icons";
@@ -144,10 +145,10 @@ function FieldView({ f, d, put, ctx }: { f: FieldDef; d: Draft; put: (k: string,
       if (idx < 0) idx = list.length > opts.length ? list.length - 1 : list.findIndex((o) => o.value === null || o.value === "");
       return (
         <Field label={f.label} hint={f.help}>
-          <select value={idx < 0 ? "" : String(idx)} onChange={(e) => put(f.key, list[Number(e.target.value)].value)}>
+          <Select value={idx < 0 ? "" : String(idx)} onChange={(e) => put(f.key, list[Number(e.target.value)].value)}>
             {idx < 0 && <option value="" disabled>Choose…</option>}
             {list.map((o, i) => <option key={i} value={i}>{o.label}</option>)}
-          </select>
+          </Select>
         </Field>
       );
     }

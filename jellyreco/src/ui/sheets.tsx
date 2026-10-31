@@ -3,6 +3,7 @@
 // "why would I like this", confirm/prompt, and the resume question.
 
 import { useEffect, useState } from "react";
+import { Select } from "./select";
 import { LIST_FIELDS } from "../core/api";
 import { getSocket } from "../core/socket";
 import type { Item, ItemsResult, MediaStream, RemoteImage, RemoteSearchResult, RemoteSubtitle, SessionInfo, SyncPlayGroup } from "../core/types";
@@ -228,7 +229,7 @@ function EditMetadata({ item, close }: { item: Item; close: () => void }) {
         {EDITABLE.filter((f) => f.key in draft || ["Name", "Overview", "Genres", "Tags", "OfficialRating", "PremiereDate", "ProductionYear"].includes(f.key as string)).map((f) => {
           const v = draft[f.key] as unknown;
           if (f.key === "OfficialRating" && ratings.length) return (
-            <Field key={f.key} label={f.label}><select value={(v as string) ?? ""} onChange={(e) => set(f.key, e.target.value || null)}><option value="">None</option>{ratings.map((r) => <option key={r.Name} value={r.Name}>{r.Name}</option>)}</select></Field>
+            <Field key={f.key} label={f.label}><Select value={(v as string) ?? ""} onChange={(e) => set(f.key, e.target.value || null)}><option value="">None</option>{ratings.map((r) => <option key={r.Name} value={r.Name}>{r.Name}</option>)}</Select></Field>
           );
           if (f.type === "area") return <Field key={f.key} label={f.label}><textarea rows={6} value={(v as string) ?? ""} onChange={(e) => set(f.key, e.target.value)} /></Field>;
           if (f.type === "list") return <Field key={f.key} label={f.label} hint="Separate with commas"><input value={((v as string[]) ?? []).join(", ")} onChange={(e) => set(f.key, e.target.value.split(",").map((x) => x.trim()).filter(Boolean))} /></Field>;
@@ -291,8 +292,8 @@ function EditImages({ item, close }: { item: Item; close: () => void }) {
       </div>
       <div className="toolbar-row wrap">
         <h3>Find images</h3>
-        <select value={type} onChange={(e) => setType(e.target.value)}>{IMAGE_TYPES.map((t) => <option key={t}>{t}</option>)}</select>
-        <select value={provider} onChange={(e) => setProvider(e.target.value)}><option value="">All providers</option>{providers?.map((p) => <option key={p.Name}>{p.Name}</option>)}</select>
+        <Select value={type} onChange={(e) => setType(e.target.value)}>{IMAGE_TYPES.map((t) => <option key={t}>{t}</option>)}</Select>
+        <Select value={provider} onChange={(e) => setProvider(e.target.value)}><option value="">All providers</option>{providers?.map((p) => <option key={p.Name}>{p.Name}</option>)}</Select>
         <Toggle label="All languages" checked={allLangs} onChange={setAllLangs} />
         <button className="glass-button" onClick={() => void upload()}><Icon name="plus" size={15} /> Upload</button>
       </div>
@@ -385,7 +386,7 @@ function Subtitles({ item, close }: { item: Item; close: () => void }) {
       )}
       <div className="toolbar-row">
         <h3>Search online</h3>
-        <select value={lang} onChange={(e) => setLang(e.target.value)}>{(cultures ?? []).filter((c) => c.ThreeLetterISOLanguageName).map((c) => <option key={c.ThreeLetterISOLanguageName} value={c.ThreeLetterISOLanguageName!}>{c.DisplayName}</option>)}</select>
+        <Select value={lang} onChange={(e) => setLang(e.target.value)}>{(cultures ?? []).filter((c) => c.ThreeLetterISOLanguageName).map((c) => <option key={c.ThreeLetterISOLanguageName} value={c.ThreeLetterISOLanguageName!}>{c.DisplayName}</option>)}</Select>
         <button className="glass-button prominent" disabled={busy} onClick={() => void search()}>Search</button>
       </div>
       {results && (results.length ? (

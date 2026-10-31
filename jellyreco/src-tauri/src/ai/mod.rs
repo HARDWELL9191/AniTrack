@@ -174,11 +174,11 @@ impl Engine {
                                 let detail = if npu_only { "Snapdragon NPU (QNN)" } else { "Snapdragon NPU with CPU help (QNN)" };
                                 return Ok((finish(session, tokenizer, env)?, Status { backend: backend.into(), detail: detail.into() }));
                             }
-                            Err(e) => notes.push(format!("{backend}: {e}")),
+                            Err(e) => notes.push(format!("{backend}: {}", short_reason(&e))),
                         }
                     }
                 }
-                Err(e) => notes.push(format!("QNN plugin: {e}")),
+                Err(e) => notes.push(format!("QNN plugin: {}", short_reason(&e.to_string()))),
             }
         }
         // Linux: any Vulkan GPU (Nvidia, AMD, Intel) through ONNX Runtime's WebGPU plugin.
@@ -188,7 +188,7 @@ impl Engine {
                 Ok((session, name)) => {
                     return Ok((finish(session, tokenizer, env)?, Status { backend: "gpu".into(), detail: format!("GPU: {name} (WebGPU over Vulkan)") }));
                 }
-                Err(e) => notes.push(format!("GPU: {e}")),
+                Err(e) => notes.push(format!("GPU: {}", short_reason(&e))),
             }
         }
         let session = base_builder(&env)?
@@ -198,17 +198,21 @@ impl Engine {
         Ok((finish(session, tokenizer, env)?, Status { backend: "cpu".into(), detail }))
     }
 
-    /// A session on the GPU through the WebGPU plugin (the first GPU it finds).
+    /// A session on the GPU through the WebGPU plugin. The plugin takes one GPU at a time, so with
+    /// several (e.g. a Radeon or GeForce card plus the processor's own graphics) it gets the best one:
+    /// a discrete card first.
     #[cfg(target_os = "linux")]
     fn gpu_session(&self, env: &ort::environment::Environment, model: &Path, plugin: &Path) -> Result<(Session, String), String> {
         env.register_ep_library("webgpu", plugin).map_err(|e| format!("plugin: {e}"))?;
         let is_gpu = |d: &ort::device::Device<'_>| d.ep().is_ok_and(|ep| ep.to_ascii_lowercase().contains("webgpu")) && d.hardware_device().ty() == DeviceType::GPU;
-        let name = env.devices().find(|d| is_gpu(d)).map(|d| d.hardware_device().vendor().unwrap_or("GPU").to_string()).ok_or("no Vulkan GPU found")?;
+        let best = env.devices().filter(|d| is_gpu(d)).enumerate().min_by_key(|(i, d)| (gpu_rank(d), *i)).map(|(i, _)| i).ok_or("no Vulkan GPU found")?;
+        let chosen = || env.devices().filter(|d| is_gpu(d)).nth(best);
+        let name = chosen().map(|d| gpu_name(&d)).unwrap_or_else(|| "GPU".into());
         let options: Vec<(String, String)> = Vec::new();
         let session = base_builder(env)?
             .with_config_entry("session.disable_cpu_ep_fallback", "0")
             .map_err(|e| e.to_string())?
-            .with_devices(env.devices().filter(|d| is_gpu(d)), Some(&options))
+            .with_devices(chosen().into_iter(), Some(&options))
             .map_err(|e| e.to_string())?
             .commit_from_file(model)
             .map_err(|e| e.to_string())?;
@@ -313,4 +317,61 @@ fn embed(l: &mut Loaded, text: &str) -> Result<Vec<f32>, String> {
         return Err("empty embedding".into());
     }
     Ok(pooled.iter().map(|x| x / norm).collect())
+}
+
+/// PCI vendor ids.
+#[cfg(target_os = "linux")]
+const AMD: u32 = 0x1002;
+#[cfg(target_os = "linux")]
+const NVIDIA: u32 = 0x10de;
+#[cfg(target_os = "linux")]
+const INTEL: u32 = 0x8086;
+
+/// The GPU's PCI vendor id and whether ONNX Runtime found it to be a discrete card (if it says).
+#[cfg(target_os = "linux")]
+fn gpu_facts(d: &ort::device::Device<'_>) -> (u32, Option<bool>) {
+    use ort::AsPointer;
+    let hw = d.hardware_device();
+    let api = ort::api();
+    // SAFETY: read-only ONNX Runtime getters on a live device; the strings belong to the device.
+    unsafe {
+        let vendor = (api.HardwareDevice_VendorId)(hw.ptr());
+        let kv = (api.HardwareDevice_Metadata)(hw.ptr());
+        let discrete = if kv.is_null() {
+            None
+        } else {
+            let v = (api.GetKeyValue)(kv, c"Discrete".as_ptr());
+            (!v.is_null()).then(|| matches!(std::ffi::CStr::from_ptr(v).to_bytes(), b"1" | b"true" | b"True"))
+        };
+        (vendor, discrete)
+    }
+}
+
+/// Lower is better: a discrete card, then a Radeon/GeForce, then other GPUs, integrated graphics last.
+#[cfg(target_os = "linux")]
+fn gpu_rank(d: &ort::device::Device<'_>) -> u8 {
+    match gpu_facts(d) {
+        (_, Some(true)) => 0,
+        (AMD | NVIDIA, None) => 1,
+        (_, None) => 2,
+        (_, Some(false)) => 3,
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn gpu_name(d: &ort::device::Device<'_>) -> String {
+    let (vendor, _) = gpu_facts(d);
+    match vendor {
+        AMD => "AMD Radeon".into(),
+        NVIDIA => "Nvidia GeForce".into(),
+        INTEL => "Intel".into(),
+        _ => d.hardware_device().vendor().unwrap_or("GPU").to_string(),
+    }
+}
+
+/// A short reason for the settings page (ONNX Runtime's errors include source paths and C++ signatures).
+fn short_reason(e: &str) -> String {
+    let last = e.rsplit(" : ").next().unwrap_or(e);
+    let t = last.trim().trim_end_matches(')').trim();
+    if t.len() > 140 { format!("{}…", &t[..t.char_indices().take_while(|(i, _)| *i < 140).last().map(|(i, c)| i + c.len_utf8()).unwrap_or(0)]) } else { t.to_string() }
 }

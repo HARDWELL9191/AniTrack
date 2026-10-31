@@ -100,18 +100,24 @@ jobs:
           ../tools/ci_run.sh "AI check" python3 -I ../tools/ai_check.py target/release/examples/embed_check "$ai" "$RUNNER_TEMP/ai-check"
 
       # The app itself starts on a plain X server (software OpenGL) and shows its window.
-      - name: Start-up check
+      # The app itself, in a non-English locale (Slovenian: decimal commas, which libmpv refuses
+      # unless the app resets number formatting), started with a video file: it must open mpv's
+      # renderer under the page and draw frames, and the window must draw.
+      - name: Start-up and playback check (Slovenian locale)
         run: |
-          export DISPLAY=:99 LIBGL_ALWAYS_SOFTWARE=1
+          sudo locale-gen sl_SI.UTF-8 > /dev/null
+          export DISPLAY=:99 LIBGL_ALWAYS_SOFTWARE=1 LANG=sl_SI.UTF-8 LC_ALL=sl_SI.UTF-8 JELLYRECO_DEBUG_VIDEO=1
           Xvfb :99 -screen 0 1360x880x24 > /dev/null 2>&1 &
           sleep 2
-          ./out/JellyReco-x86_64.AppImage > "$RUNNER_TEMP/app.log" 2>&1 &
+          ./out/JellyReco-x86_64.AppImage "$RUNNER_TEMP/media/hevc10_eac3_ass.mkv" > "$RUNNER_TEMP/app.log" 2>&1 &
           pid=$!
           sleep 25
           import -window root "$RUNNER_TEMP/startup.png" || true
-          if ! kill -0 $pid 2>/dev/null; then cat "$RUNNER_TEMP/app.log"; echo "::error::The app exited during start-up"; exit 1; fi
+          if ! kill -0 $pid 2>/dev/null; then tail -60 "$RUNNER_TEMP/app.log"; echo "::error::The app exited during start-up"; exit 1; fi
           kill $pid || true
-          tail -40 "$RUNNER_TEMP/app.log"
+          grep "\[video\]" "$RUNNER_TEMP/app.log" | head -5 || true
+          grep -q "\[video\] frame 2" "$RUNNER_TEMP/app.log" || { tail -60 "$RUNNER_TEMP/app.log"; echo "::error::mpv didn't draw video in the app (Slovenian locale)"; exit 1; }
+          echo "::notice::The app plays video under the page with a Slovenian locale"
           python3 - "$RUNNER_TEMP/startup.png" <<'EOF'
           import subprocess, sys
           # A blank (all one color) screenshot means the window never drew.

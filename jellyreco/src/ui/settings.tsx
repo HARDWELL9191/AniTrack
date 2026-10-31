@@ -3,6 +3,7 @@
 // is saved to your Jellyfin account, so a new PC picks it up.
 
 import { useEffect, useState } from "react";
+import { Select } from "./select";
 import { getEmbedder, type EngineStatus } from "../core/ai";
 import { APP_VERSION } from "../core/api";
 import { getEngine } from "../core/engine";
@@ -233,15 +234,15 @@ function PlaybackSettings() {
       {config && (
         <Group title="Languages (your Jellyfin account)">
           <Field label="Preferred audio language">
-            <select value={config.AudioLanguagePreference ?? ""} onChange={(e) => save({ AudioLanguagePreference: e.target.value || null })}>
+            <Select value={config.AudioLanguagePreference ?? ""} onChange={(e) => save({ AudioLanguagePreference: e.target.value || null })}>
               <option value="">Any (the file's default)</option>{langs.map((c) => <option key={c.ThreeLetterISOLanguageName} value={c.ThreeLetterISOLanguageName!}>{c.DisplayName}</option>)}
-            </select>
+            </Select>
           </Field>
           <Toggle label="Play the default audio track whatever its language" checked={config.PlayDefaultAudioTrack} onChange={(v) => save({ PlayDefaultAudioTrack: v })} />
           <Field label="Preferred subtitle language">
-            <select value={config.SubtitleLanguagePreference ?? ""} onChange={(e) => save({ SubtitleLanguagePreference: e.target.value || null })}>
+            <Select value={config.SubtitleLanguagePreference ?? ""} onChange={(e) => save({ SubtitleLanguagePreference: e.target.value || null })}>
               <option value="">Any</option>{langs.map((c) => <option key={c.ThreeLetterISOLanguageName} value={c.ThreeLetterISOLanguageName!}>{c.DisplayName}</option>)}
-            </select>
+            </Select>
           </Field>
           <Field label="Subtitles" hint="Smart: subtitles on when the audio isn't in your language.">
             <Segmented value={config.SubtitleMode} options={[{ value: "Default", label: "Default" }, { value: "Smart", label: "Smart" }, { value: "OnlyForced", label: "Only forced" }, { value: "Always", label: "Always" }, { value: "None", label: "None" }]} onChange={(v) => save({ SubtitleMode: v })} />
@@ -257,9 +258,9 @@ function PlaybackSettings() {
         {(["Intro", "Recap", "Outro", "Preview", "Commercial"] as const).map((t) => (
           <div key={t} className="toggle-row">
             <span>{t === "Outro" ? "Credits" : t === "Commercial" ? "Ads" : t}</span>
-            <select value={s.segmentActions[t]} onChange={(e) => set("segmentActions", { ...s.segmentActions, [t]: e.target.value as SegmentAction })}>
+            <Select value={s.segmentActions[t]} onChange={(e) => set("segmentActions", { ...s.segmentActions, [t]: e.target.value as SegmentAction })}>
               <option value="ask">Show a skip button</option><option value="skip">Skip automatically</option><option value="skipOnce">Skip the first time</option><option value="none">Never</option>
-            </select>
+            </Select>
           </div>
         ))}
         <p className="muted small">Intro and credits times come from your server's media segments (e.g. the Intro Skipper plugin or chapter names).</p>
@@ -271,8 +272,8 @@ function PlaybackSettings() {
       </Group>
       <Group title="Quality">
         <p className="muted small">Original plays every file as stored (direct play). A lower cap asks the server to transcode and is only for slow connections.</p>
-        <Field label="On your home network"><select value={s.maxBitrateLocal} onChange={(e) => set("maxBitrateLocal", Number(e.target.value))}>{BITRATES.map((b) => <option key={b.value} value={b.value}>{b.label}</option>)}</select></Field>
-        <Field label="Over the internet"><select value={s.maxBitrateRemote} onChange={(e) => set("maxBitrateRemote", Number(e.target.value))}>{BITRATES.map((b) => <option key={b.value} value={b.value}>{b.label}</option>)}</select></Field>
+        <Field label="On your home network"><Select value={s.maxBitrateLocal} onChange={(e) => set("maxBitrateLocal", Number(e.target.value))}>{BITRATES.map((b) => <option key={b.value} value={b.value}>{b.label}</option>)}</Select></Field>
+        <Field label="Over the internet"><Select value={s.maxBitrateRemote} onChange={(e) => set("maxBitrateRemote", Number(e.target.value))}>{BITRATES.map((b) => <option key={b.value} value={b.value}>{b.label}</option>)}</Select></Field>
       </Group>
     </>
   );
@@ -288,27 +289,27 @@ function PlayerSettings() {
     <>
       <Group title="Picture">
         <div className="toggle-row"><span>Hardware decoding <small className="muted">(this computer)</small></span>
-          <select value={s.hwdec} onChange={(e) => set("hwdec", e.target.value as Settings["hwdec"])}>
+          <Select value={s.hwdec} onChange={(e) => set("hwdec", e.target.value as Settings["hwdec"])}>
             <option value="auto-safe">Automatic (recommended)</option>
             {document.documentElement.classList.contains("platform-linux") ? <>
               <option value="vaapi">VA-API (Intel, AMD)</option><option value="vaapi-copy">VA-API (copy)</option>
               <option value="nvdec">NVDEC (Nvidia)</option><option value="nvdec-copy">NVDEC (copy)</option><option value="vulkan">Vulkan</option>
             </> : <><option value="d3d11va">Direct3D 11 (zero-copy)</option><option value="d3d11va-copy">Direct3D 11 (copy)</option></>}
             <option value="no">Off (software)</option>
-          </select></div>
+          </Select></div>
         <Toggle label="High-quality rendering" detail="mpv's gpu-next with sharp scaling and dithering" checked={s.highQuality} onChange={(v) => set("highQuality", v)} />
         {s.highQuality && (
           <div className="toggle-row"><span>Upscaler</span>
-            <select value={s.upscaler} onChange={(e) => set("upscaler", e.target.value as Settings["upscaler"])}>
+            <Select value={s.upscaler} onChange={(e) => set("upscaler", e.target.value as Settings["upscaler"])}>
               <option value="ewa_lanczossharp">EWA Lanczos sharp (best)</option><option value="spline36">Spline36</option><option value="lanczos">Lanczos</option><option value="bilinear">Bilinear (fastest)</option>
-            </select></div>
+            </Select></div>
         )}
         <Toggle label="Deband" detail="Smooths color banding (great for anime)" checked={s.deband} onChange={(v) => set("deband", v)} />
         <Toggle label="Motion interpolation" detail="Smoother motion on displays not at the video's frame rate" checked={s.interpolation} onChange={(v) => set("interpolation", v)} />
         <div className="toggle-row"><span>HDR tone mapping</span>
-          <select value={s.toneMapping} onChange={(e) => set("toneMapping", e.target.value as Settings["toneMapping"])}>
+          <Select value={s.toneMapping} onChange={(e) => set("toneMapping", e.target.value as Settings["toneMapping"])}>
             <option value="auto">Automatic</option><option value="bt.2390">BT.2390</option><option value="spline">Spline</option><option value="hable">Hable</option><option value="mobius">Mobius</option><option value="reinhard">Reinhard</option><option value="clip">Clip</option>
-          </select></div>
+          </Select></div>
         <Toggle label="Detect HDR peak brightness per scene" checked={s.hdrPeakDetect} onChange={(v) => set("hdrPeakDetect", v)} />
         <div className="toggle-row"><span>Default picture</span><Segmented value={s.videoFit} options={[{ value: "contain", label: "Fit" }, { value: "cover", label: "Fill" }, { value: "stretch", label: "Stretch" }]} onChange={(v) => set("videoFit", v)} /></div>
         <Toggle label="Trickplay previews on the timeline" checked={s.trickplay} onChange={(v) => set("trickplay", v)} />
@@ -359,7 +360,7 @@ function SubtitleSettings() {
       <div className="sub-preview" style={{ fontFamily: s.font, fontWeight: s.bold ? 700 : 500, color: toHex(s.color), fontSize: s.fontSize / 2, WebkitTextStroke: `${s.borderSize / 3}px ${toHex(s.borderColor)}`, background: s.backgroundColor.endsWith("00") ? "transparent" : toHex(s.backgroundColor) }}>
         The quick brown fox jumps over the lazy dog
       </div>
-      <Field label="Font"><select value={s.font} onChange={(e) => set({ font: e.target.value })}>{["Segoe UI", "Arial", "Verdana", "Tahoma", "Trebuchet MS", "Georgia", "Times New Roman", "Consolas", "Bahnschrift", "Yu Gothic UI", "Meiryo UI"].map((f) => <option key={f}>{f}</option>)}</select></Field>
+      <Field label="Font"><Select value={s.font} onChange={(e) => set({ font: e.target.value })}>{["Segoe UI", "Arial", "Verdana", "Tahoma", "Trebuchet MS", "Georgia", "Times New Roman", "Consolas", "Bahnschrift", "Yu Gothic UI", "Meiryo UI"].map((f) => <option key={f}>{f}</option>)}</Select></Field>
       <div className="slider-row"><div className="slider-head"><span>Size</span><span className="muted tabular">{s.fontSize}</span></div><Range min={24} max={90} value={s.fontSize} onChange={(e) => set({ fontSize: Number(e.target.value) })} /></div>
       <Toggle label="Bold" checked={s.bold} onChange={(v) => set({ bold: v })} />
       <div className="toggle-row"><span>Text color</span><input type="color" value={toHex(s.color)} onChange={(e) => set({ color: `${e.target.value.toUpperCase()}FF` })} /></div>
@@ -370,9 +371,9 @@ function SubtitleSettings() {
           {!s.backgroundColor.endsWith("00") && <input type="color" value={toHex(s.backgroundColor)} onChange={(e) => set({ backgroundColor: `${e.target.value.toUpperCase()}B0` })} />}</span></div>
       <div className="slider-row"><div className="slider-head"><span>Distance from the bottom</span><span className="muted tabular">{s.marginY}</span></div><Range min={0} max={150} value={s.marginY} onChange={(e) => set({ marginY: Number(e.target.value) })} /></div>
       <div className="toggle-row"><span>Styled subtitles (ASS, anime typesetting)</span>
-        <select value={s.assOverride} onChange={(e) => set({ assOverride: e.target.value as typeof s.assOverride })}>
+        <Select value={s.assOverride} onChange={(e) => set({ assOverride: e.target.value as typeof s.assOverride })}>
           <option value="no">Keep their own styling (recommended)</option><option value="scale">Keep styling, use my size</option><option value="force">Force my style</option><option value="strip">Plain text</option>
-        </select></div>
+        </Select></div>
       <button className="text-button" onClick={() => model.updateSettings({ subtitleStyle: DEFAULT_SUB_STYLE })}><Icon name="undo" size={15} /> Reset subtitle style</button>
     </Group>
   );

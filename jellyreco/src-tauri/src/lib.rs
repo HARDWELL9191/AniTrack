@@ -142,6 +142,16 @@ fn linux_environment() {
     }
 }
 
+/// The video file the app was started with, once (the page asks when it's ready).
+#[tauri::command]
+fn launch_file() -> Option<String> {
+    static TAKEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if TAKEN.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return None;
+    }
+    std::env::args().skip(1).find(|a| !a.starts_with('-') && std::path::Path::new(a).is_file())
+}
+
 /// "windows" or "linux" (the page adapts a few platform details).
 #[tauri::command]
 fn platform() -> &'static str {
@@ -224,7 +234,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             mpv_info, mpv_start, mpv_command, mpv_set, mpv_get, mpv_destroy, ai_status, ai_cached, ai_vectors, accounts_load,
-            accounts_save, power_saver, device_name, platform, write_text_file, read_file_base64
+            accounts_save, power_saver, device_name, platform, launch_file, write_text_file, read_file_base64
         ])
         .run(tauri::generate_context!())
         .expect("error while running JellyReco");

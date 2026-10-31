@@ -240,6 +240,12 @@ fn native_display() -> (c_int, *mut c_void) {
     // SAFETY: GDK's own backend accessors, resolved from the already-loaded GDK library.
     unsafe {
         let this = libloading::os::unix::Library::this();
+        // libva's Wayland backend crashes on a compositor without a GPU behind it (no render node,
+        // e.g. a virtual machine): there mpv decodes with a copy instead of zero-copy.
+        let has_render_node = std::fs::read_dir("/dev/dri").map(|d| d.flatten().any(|e| e.file_name().to_string_lossy().starts_with("renderD"))).unwrap_or(false);
+        if kind.contains("Wayland") && !has_render_node {
+            return (0, std::ptr::null_mut());
+        }
         if kind.contains("Wayland") {
             if let Ok(f) = this.get::<unsafe extern "C" fn(*mut gtk::gdk::ffi::GdkDisplay) -> *mut c_void>(b"gdk_wayland_display_get_wl_display\0") {
                 return (ffi::RENDER_PARAM_WL_DISPLAY, f(raw));
