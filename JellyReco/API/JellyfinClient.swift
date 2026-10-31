@@ -121,7 +121,7 @@ final class JellyfinClient: @unchecked Sendable {
 
     @discardableResult
     func send(_ method: String, _ path: String, query: [String: Any?] = [:], body: Data? = nil,
-              timeout: TimeInterval? = nil) async throws -> Data {
+              timeout: TimeInterval? = nil, contentType: String = "application/json") async throws -> Data {
         guard let url = url(path, query) else { throw JellyfinError.badURL }
         var request = URLRequest(url: url)
         request.httpMethod = method
@@ -130,7 +130,7 @@ final class JellyfinClient: @unchecked Sendable {
         if let timeout { request.timeoutInterval = timeout }
         if let body {
             request.httpBody = body
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         }
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw JellyfinError.http(0, nil) }

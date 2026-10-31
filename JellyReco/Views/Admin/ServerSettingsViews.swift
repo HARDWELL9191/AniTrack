@@ -1,4 +1,6 @@
 import SwiftUI
+import PhotosUI
+import UIKit
 
 // MARK: - Store
 
@@ -28,6 +30,10 @@ final class ConfigEditor {
     private(set) var values: [ConfigStore: [String: Any]] = [:]
     private(set) var dirty: Set<ConfigStore> = []
     private(set) var loading = false
+    /// Values loaded from the server (for Discard).
+    @ObservationIgnored private var original: [ConfigStore: [String: Any]] = [:]
+    /// Server lists some dropdowns need (languages, countries, users).
+    var ctx: [String: [ConfigOption]] = [:]
     private(set) var saving = false
     var error: String?
     var savedNote: String?
@@ -40,6 +46,7 @@ final class ConfigEditor {
             do {
                 let data = try await client.send("GET", store.path)
                 values[store] = (try JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+                original[store] = values[store]
             } catch {
                 if !AppModel.isCancellation(error) { self.error = "\(store.title): \(error.localizedDescription)" }
             }
@@ -111,7 +118,15 @@ final class ConfigEditor {
         savedNote = nil
     }
 
-    func has(_ store: ConfigStore, _ key: String) -> Bool { value(store, key) != nil }
+    func has(_ store: ConfigStore, _ key: String) -> Bool {
+        value(store, key) != nil
+    }
+
+    func discard() {
+        for (store, v) in original { values[store] = v }
+        dirty = []
+        savedNote = nil
+    }
 
     private static func realKey(_ dict: [String: Any], _ key: String) -> String {
         dict.keys.first { $0.caseInsensitiveCompare(key) == .orderedSame } ?? key
@@ -184,26 +199,84 @@ final class ConfigEditor {
     }
 }
 
-// MARK: - Field descriptions
+// MARK: - Field descriptions (jellyfin-web's dashboard pages, as in JellyReco desktop)
+
+/// A dropdown value: Jellyfin stores strings, numbers, booleans or null.
+enum ConfigValue: Hashable {
+    case string(String), int(Int), bool(Bool), null
+
+    init(_ raw: Any?) {
+        switch raw {
+        case let n as NSNumber where CFGetTypeID(n) == CFBooleanGetTypeID(): self = .bool(n.boolValue)
+        case let n as NSNumber: self = .int(n.intValue)
+        case let s as String: self = s.isEmpty ? .null : .string(s)
+        default: self = .null
+        }
+    }
+
+    var raw: Any {
+        switch self {
+        case .string(let s): return s
+        case .int(let i): return i
+        case .bool(let b): return b
+        case .null: return NSNull()
+        }
+    }
+}
+
+struct ConfigOption: Hashable {
+    let value: ConfigValue
+    let label: String
+    init(_ value: ConfigValue, _ label: String) { self.value = value; self.label = label }
+}
+
+/// One switch in a "switches" set: a value in a list (`listValue`) or its own true/false key (`flag`).
+struct ConfigSwitch {
+    let label: String
+    var listValue: String? = nil
+    var flag: String? = nil
+    var show: (@MainActor (ConfigEditor) -> Bool)? = nil
+}
 
 struct ConfigField: Identifiable {
+    struct NumberSpec {
+        var min: Double? = nil
+        var max: Double? = nil
+        /// Stored value = shown value × scale (Mbps → bits, minutes → seconds).
+        var scale: Double = 1
+        var nullable = false
+        var integer = true
+        var placeholder: String? = nil
+    }
     enum Kind {
         case toggle, int, double, text, multiline, secure, list, mbps
         case choice([(value: String, label: String)])
+        case number(NumberSpec)
+        case select(options: @MainActor (ConfigEditor) -> [ConfigOption], emptyAs: ConfigValue?)
+        case switches(@MainActor (ConfigEditor) -> [ConfigSwitch])
+        case tags(numeric: Bool, placeholder: String)
+        case path(files: Bool)
+        case readOnly
+        case note(warn: Bool)
+        case publishedURIs
+        case splash
     }
     let store: ConfigStore
     let key: String
     let label: String
     var footer: String?
     let kind: Kind
-    var id: String { "\(store.rawValue).\(key)" }
+    var show: (@MainActor (ConfigEditor) -> Bool)? = nil
+    var id: String { "\(store.rawValue).\(key).\(label)" }
 
-    init(_ store: ConfigStore, _ key: String, _ label: String, _ kind: Kind, _ footer: String? = nil) {
+    init(_ store: ConfigStore, _ key: String, _ label: String, _ kind: Kind, _ footer: String? = nil,
+         show: (@MainActor (ConfigEditor) -> Bool)? = nil) {
         self.store = store
         self.key = key
         self.label = label
         self.kind = kind
         self.footer = footer
+        self.show = show
     }
 }
 
@@ -211,17 +284,24 @@ struct ConfigSection: Identifiable {
     let title: String
     var footer: String?
     let fields: [ConfigField]
+    var show: (@MainActor (ConfigEditor) -> Bool)? = nil
     var id: String { title + (fields.first?.id ?? "") }
-    init(_ title: String, footer: String? = nil, _ fields: [ConfigField]) {
+    init(_ title: String, footer: String? = nil, show: (@MainActor (ConfigEditor) -> Bool)? = nil, _ fields: [ConfigField]) {
         self.title = title
         self.footer = footer
+        self.show = show
         self.fields = fields
     }
 }
 
+/// Server lists a page's dropdowns need.
+enum ConfigContext: String { case languages, cultures, countries, users }
+
 struct ConfigPage: Identifiable, Hashable {
     let title: String
     let symbol: String
+    var intro: String? = nil
+    var context: [ConfigContext] = []
     let sections: [ConfigSection]
     var id: String { title }
     var stores: [ConfigStore] { Array(Set(sections.flatMap { $0.fields.map(\.store) })).sorted { $0.rawValue < $1.rawValue } }
@@ -229,264 +309,389 @@ struct ConfigPage: Identifiable, Hashable {
     func hash(into h: inout Hasher) { h.combine(title) }
 }
 
-private func opts(_ values: String...) -> [(value: String, label: String)] {
-    values.map { ($0, $0.prefix(1).uppercased() + $0.dropFirst()) }
+// MARK: - Catalog
+
+private typealias F = ConfigField
+private typealias S = ConfigSection
+private func o(_ pairs: (ConfigValue, String)...) -> [ConfigOption] { pairs.map { ConfigOption($0.0, $0.1) } }
+private func s(_ pairs: [(String, String)]) -> [ConfigOption] { pairs.map { ConfigOption(.string($0.0), $0.1) } }
+@MainActor private func fixed(_ list: [ConfigOption]) -> @MainActor (ConfigEditor) -> [ConfigOption] { { _ in list } }
+@MainActor private func has(_ store: ConfigStore, _ key: String) -> @MainActor (ConfigEditor) -> Bool { { $0.value(store, key) != nil } }
+
+/// Transcoding helpers (jellyfin-web features/playback/constants/codecs.ts).
+@MainActor private enum HW {
+    static let types = s([("none", "None"), ("amf", "AMD AMF"), ("nvenc", "Nvidia NVENC"), ("qsv", "Intel Quicksync (QSV)"),
+                          ("vaapi", "Video Acceleration API (VAAPI)"), ("rkmpp", "Rockchip MPP (RKMPP)"),
+                          ("videotoolbox", "Apple VideoToolBox"), ("v4l2m2m", "Video4Linux2 (V4L2)")])
+    static let codecs: [(name: String, codec: String, types: [String])] = [
+        ("H264", "h264", ["amf", "nvenc", "qsv", "vaapi", "rkmpp", "videotoolbox", "v4l2m2m"]),
+        ("HEVC", "hevc", ["amf", "nvenc", "qsv", "vaapi", "rkmpp", "videotoolbox"]),
+        ("MPEG1", "mpeg1video", ["rkmpp"]),
+        ("MPEG2", "mpeg2video", ["amf", "nvenc", "qsv", "vaapi", "rkmpp"]),
+        ("MPEG4", "mpeg4", ["nvenc", "rkmpp"]),
+        ("VC1", "vc1", ["amf", "nvenc", "qsv", "vaapi"]),
+        ("VP8", "vp8", ["nvenc", "qsv", "vaapi", "rkmpp", "videotoolbox"]),
+        ("VP9", "vp9", ["amf", "nvenc", "qsv", "vaapi", "rkmpp", "videotoolbox"]),
+        ("AV1", "av1", ["amf", "nvenc", "qsv", "vaapi", "rkmpp", "videotoolbox"]),
+    ]
+    static let tenBit = ["amf", "nvenc", "qsv", "vaapi", "rkmpp"]
+    static let rext = ["nvenc", "qsv", "vaapi"]
+    static let hwa = ["amf", "nvenc", "qsv", "vaapi", "rkmpp", "videotoolbox"]
+    /// Older servers saved "" for no acceleration.
+    static func current(_ e: ConfigEditor) -> String {
+        let v = e.value(.encoding, "HardwareAccelerationType") as? String ?? ""
+        return v.isEmpty ? "none" : v
+    }
+    static func only(_ t: String...) -> @MainActor (ConfigEditor) -> Bool { { t.contains(current($0)) } }
+    static func on(_ e: ConfigEditor) -> Bool { current(e) != "none" }
+    /// jellyfin-web's "Enable hardware decoding for" checkboxes for the chosen acceleration.
+    static func decodeSwitches(_ e: ConfigEditor) -> [ConfigSwitch] {
+        let type = current(e)
+        var out: [ConfigSwitch] = codecs.filter { $0.types.contains(type) }.map { ConfigSwitch(label: $0.name, listValue: $0.codec) }
+        if tenBit.contains(type) {
+            out.append(ConfigSwitch(label: "HEVC 10bit", flag: "EnableDecodingColorDepth10Hevc"))
+            out.append(ConfigSwitch(label: "VP9 10bit", flag: "EnableDecodingColorDepth10Vp9"))
+        }
+        if rext.contains(type) {
+            if e.value(.encoding, "EnableDecodingColorDepth10HevcRext") != nil {
+                out.append(ConfigSwitch(label: "HEVC RExt 8/10bit", flag: "EnableDecodingColorDepth10HevcRext"))
+            }
+            if e.value(.encoding, "EnableDecodingColorDepth12HevcRext") != nil {
+                out.append(ConfigSwitch(label: "HEVC RExt 12bit", flag: "EnableDecodingColorDepth12HevcRext"))
+            }
+        }
+        return out
+    }
+    static func accel(_ e: ConfigEditor) -> Bool { hwa.contains(current(e)) }
 }
 
-/// The dashboard pages of jellyfin-web, field by field (property names from Jellyfin's own
-/// configuration classes).
-enum ServerSettingsCatalog {
-    static let pages: [ConfigPage] = [
-        ConfigPage(title: "General", symbol: "gearshape.fill", sections: [
-            ConfigSection("Settings", [
-                ConfigField(.system, "ServerName", "Server name", .text, "Shown to clients and on the login screen."),
-                ConfigField(.system, "UICulture", "Preferred display language", .text, "Language code, e.g. en-US."),
-            ]),
-            ConfigSection("Paths", [
-                ConfigField(.system, "CachePath", "Cache path", .text),
-                ConfigField(.system, "MetadataPath", "Metadata path", .text),
-            ]),
-            ConfigSection("Quick Connect", [
-                ConfigField(.system, "QuickConnectAvailable", "Enable Quick Connect on this server", .toggle),
-            ]),
-            ConfigSection("Performance", [
-                ConfigField(.system, "LibraryScanFanoutConcurrency", "Parallel library scan tasks limit", .int, "0 = automatic (number of CPU cores)."),
-                ConfigField(.system, "LibraryMetadataRefreshConcurrency", "Parallel metadata refresh limit", .int, "0 = automatic."),
-                ConfigField(.system, "ParallelImageEncodingLimit", "Parallel image encoding limit", .int, "0 = automatic."),
-            ]),
-            ConfigSection("Logs", [
-                ConfigField(.system, "LogFileRetentionDays", "Log file retention (days)", .int),
-                ConfigField(.system, "ActivityLogRetentionDays", "Activity log retention (days)", .int, "Empty = keep forever."),
-                ConfigField(.system, "AllowClientLogUpload", "Allow clients to upload logs", .toggle),
-            ]),
+private let resolutions = s([("MatchSource", "Match source"), ("P2160", "2160p"), ("P1440", "1440p"), ("P1080", "1080p"),
+                             ("P720", "720p"), ("P480", "480p"), ("P360", "360p"), ("P240", "240p"), ("P144", "144p")])
+
+@MainActor private func fromContext(_ key: ConfigContext, leading: [ConfigOption] = []) -> @MainActor (ConfigEditor) -> [ConfigOption] {
+    { leading + ($0.ctx[key.rawValue] ?? []) }
+}
+
+@MainActor enum ServerSettingsCatalog {
+    static let pages: [ConfigPage] = [general, branding, display, metadata, nfo, transcoding, resume, streaming, trickplay, networking, dvr]
+
+    static let general = ConfigPage(title: "General", symbol: "gearshape.fill", context: [.languages], sections: [
+        S("Settings", [
+            F(.system, "ServerName", "Server name", .text, "Identifies this server. Defaults to the server's hostname."),
+            F(.system, "UICulture", "Preferred display language", .select(options: fromContext(.languages), emptyAs: nil),
+              "The language of the server's own pages and messages."),
         ]),
-        ConfigPage(title: "Branding", symbol: "paintpalette.fill", sections: [
-            ConfigSection("Login screen", [
-                ConfigField(.branding, "LoginDisclaimer", "Login disclaimer", .multiline),
-                ConfigField(.branding, "SplashscreenEnabled", "Enable the splash screen", .toggle),
-            ]),
-            ConfigSection("Custom CSS", footer: "Applies to the Jellyfin web client.", [
-                ConfigField(.branding, "CustomCss", "Custom CSS", .multiline),
-            ]),
+        S("Paths", [
+            F(.system, "CachePath", "Cache path", .path(files: false), "Where cache files like images go. Leave blank for the server default."),
+            F(.system, "MetadataPath", "Metadata path", .path(files: false), "Where downloaded artwork and metadata go."),
         ]),
-        ConfigPage(title: "Display", symbol: "rectangle.on.rectangle", sections: [
-            ConfigSection("Display", [
-                ConfigField(.system, "EnableFolderView", "Display a folder view to show plain media folders", .toggle),
-                ConfigField(.system, "DisplaySpecialsWithinSeasons", "Display specials within seasons they aired in", .toggle),
-                ConfigField(.system, "EnableGroupingMoviesIntoCollections", "Group movies into collections", .toggle),
-                ConfigField(.system, "EnableGroupingShowsIntoCollections", "Group shows into collections", .toggle),
-                ConfigField(.system, "EnableExternalContentInSuggestions", "Enable external content in suggestions", .toggle),
-                ConfigField(.metadata, "UseFileCreationTimeForDateAdded", "Use the file's creation date for 'date added'", .toggle,
-                            "Off: date the file was scanned into the library."),
-            ]),
+        S("Quick Connect", [
+            F(.system, "QuickConnectAvailable", "Enable Quick Connect on this server", .toggle,
+              "Sign in on a new device with a code from one that's already signed in."),
         ]),
-        ConfigPage(title: "Metadata", symbol: "text.below.photo.fill", sections: [
-            ConfigSection("Preferred metadata", [
-                ConfigField(.system, "PreferredMetadataLanguage", "Language", .text, "Two-letter code, e.g. en."),
-                ConfigField(.system, "MetadataCountryCode", "Country", .text, "Two-letter code, e.g. US."),
-            ]),
-            ConfigSection("Chapters", [
-                ConfigField(.system, "DummyChapterDuration", "Dummy chapter duration (seconds)", .int, "0 = off."),
-                ConfigField(.system, "ChapterImageResolution", "Chapter image resolution", .choice([
-                    ("MatchSource", "Match source"), ("P144", "144p"), ("P240", "240p"), ("P360", "360p"), ("P480", "480p"),
-                    ("P720", "720p"), ("P1080", "1080p"), ("P1440", "1440p"), ("P2160", "2160p")])),
-                ConfigField(.system, "ImageExtractionTimeoutMs", "Image extraction timeout (ms)", .int, "0 = default."),
-            ]),
+        S("Performance", [
+            F(.system, "LibraryScanFanoutConcurrency", "Parallel library scan tasks limit", .number(.init(min: 0)),
+              "The most tasks a library scan runs at once. 0 picks a limit from the CPU core count. Too high can cause problems with network drives."),
+            F(.system, "ParallelImageEncodingLimit", "Parallel image encoding limit", .number(.init(min: 0)),
+              "The most image encodings at once. 0 picks a limit from the CPU core count."),
         ]),
-        ConfigPage(title: "NFO Settings", symbol: "doc.text.fill", sections: [
-            ConfigSection("NFO", footer: "User id whose watch data is saved to NFO files (empty = none).", [
-                ConfigField(.xbmcmetadata, "UserId", "Save user watch data for user id", .text),
-                ConfigField(.xbmcmetadata, "ReleaseDateFormat", "Release date format", .text),
-                ConfigField(.xbmcmetadata, "SaveImagePathsInNfo", "Save image paths within NFO files", .toggle),
-                ConfigField(.xbmcmetadata, "EnablePathSubstitution", "Enable path substitution", .toggle),
-                ConfigField(.xbmcmetadata, "EnableExtraThumbsDuplication", "Copy extrafanart to extrathumbs", .toggle),
-            ]),
+        S("More server options", footer: "Options jellyfin-web doesn't show (they're normally only in the server's config file).", [
+            F(.system, "LibraryMetadataRefreshConcurrency", "Parallel metadata refreshes", .number(.init(min: 0)),
+              "0 picks a limit from the CPU core count.", show: has(.system, "LibraryMetadataRefreshConcurrency")),
+            F(.system, "ActivityLogRetentionDays", "Keep activity for (days)", .number(.init(min: 0, nullable: true, placeholder: "Forever")),
+              show: has(.system, "ActivityLogRetentionDays")),
+            F(.system, "LogFileRetentionDays", "Keep log files for (days)", .number(.init(min: 1)), show: has(.system, "LogFileRetentionDays")),
+            F(.system, "EnableMetrics", "Prometheus metrics", .toggle, "Serve server metrics at /metrics.", show: has(.system, "EnableMetrics")),
+            F(.system, "EnableSlowResponseWarning", "Log slow responses", .toggle, show: has(.system, "EnableSlowResponseWarning")),
+            F(.system, "SlowResponseThresholdMs", "Slow response threshold (ms)", .number(.init(min: 0)),
+              show: { $0.value(.system, "SlowResponseThresholdMs") != nil && (($0.value(.system, "EnableSlowResponseWarning") as? NSNumber)?.boolValue ?? false) }),
+            F(.system, "InactiveSessionThreshold", "Stop inactive sessions after (minutes)", .number(.init(min: 0)), "0 never stops them.",
+              show: has(.system, "InactiveSessionThreshold")),
+            F(.system, "EnableLegacyAuthorization", "Accept old clients' authorization", .toggle,
+              "Lets old apps sign requests with api_key or X-Emby-Token.", show: has(.system, "EnableLegacyAuthorization")),
         ]),
-        ConfigPage(title: "Resume", symbol: "playpause.fill", sections: [
-            ConfigSection("Video", [
-                ConfigField(.system, "MinResumePct", "Minimum resume percentage", .int),
-                ConfigField(.system, "MaxResumePct", "Maximum resume percentage", .int),
-                ConfigField(.system, "MinResumeDurationSeconds", "Shortest video duration for resume (seconds)", .int),
-            ]),
-            ConfigSection("Audiobooks", [
-                ConfigField(.system, "MinAudiobookResume", "Minimum resume (minutes)", .int),
-                ConfigField(.system, "MaxAudiobookResume", "Remaining minutes to count as finished", .int),
-            ]),
+    ])
+
+    static let branding = ConfigPage(title: "Branding", symbol: "paintpalette.fill", sections: [
+        S("Splash screen", [
+            F(.branding, "SplashscreenEnabled", "Enable the splash screen image", .toggle),
+            F(.branding, "splash", "Splash image", .splash),
         ]),
-        ConfigPage(title: "Streaming", symbol: "dot.radiowaves.left.and.right", sections: [
-            ConfigSection("Streaming", footer: "Per-stream limit for devices outside your network. Empty = no limit.", [
-                ConfigField(.system, "RemoteClientBitrateLimit", "Internet streaming bitrate limit (Mbps)", .mbps),
-            ]),
+        S("Text and style", [
+            F(.branding, "LoginDisclaimer", "Login disclaimer", .multiline, "Shown at the bottom of the sign-in page."),
+            F(.branding, "CustomCss", "Custom CSS code", .multiline, "Your own CSS for theming the web interface."),
         ]),
-        ConfigPage(title: "Transcoding", symbol: "cpu.fill", sections: [
-            ConfigSection("Hardware acceleration", [
-                ConfigField(.encoding, "HardwareAccelerationType", "Hardware acceleration", .choice([
-                    ("none", "None"), ("amf", "AMD AMF"), ("qsv", "Intel QuickSync (QSV)"), ("nvenc", "NVIDIA NVENC"),
-                    ("v4l2m2m", "Video4Linux2 (V4L2)"), ("vaapi", "Video Acceleration API (VAAPI)"),
-                    ("videotoolbox", "Apple VideoToolbox"), ("rkmpp", "Rockchip MPP (RKMPP)")])),
-                ConfigField(.encoding, "VaapiDevice", "VA-API device", .text),
-                ConfigField(.encoding, "QsvDevice", "QSV device", .text),
-                ConfigField(.encoding, "HardwareDecodingCodecs", "Hardware decoding codecs (one per line)", .list),
-                ConfigField(.encoding, "EnableDecodingColorDepth10Hevc", "HEVC 10-bit decoding", .toggle),
-                ConfigField(.encoding, "EnableDecodingColorDepth10Vp9", "VP9 10-bit decoding", .toggle),
-                ConfigField(.encoding, "EnableDecodingColorDepth10HevcRext", "HEVC RExt 8/10-bit decoding", .toggle),
-                ConfigField(.encoding, "EnableDecodingColorDepth12HevcRext", "HEVC RExt 12-bit decoding", .toggle),
-                ConfigField(.encoding, "EnableEnhancedNvdecDecoder", "Enhanced NVDEC decoder", .toggle),
-                ConfigField(.encoding, "PreferSystemNativeHwDecoder", "Prefer OS native DXVA or VA-API decoders", .toggle),
-                ConfigField(.encoding, "EnableHardwareEncoding", "Hardware encoding", .toggle),
-                ConfigField(.encoding, "EnableIntelLowPowerH264HwEncoder", "Intel low-power H.264 encoder", .toggle),
-                ConfigField(.encoding, "EnableIntelLowPowerHevcHwEncoder", "Intel low-power HEVC encoder", .toggle),
-            ]),
-            ConfigSection("Encoding formats", [
-                ConfigField(.encoding, "AllowHevcEncoding", "Allow encoding in HEVC", .toggle),
-                ConfigField(.encoding, "AllowAv1Encoding", "Allow encoding in AV1", .toggle),
-            ]),
-            ConfigSection("Tone mapping", [
-                ConfigField(.encoding, "EnableTonemapping", "Enable tone mapping", .toggle),
-                ConfigField(.encoding, "EnableVppTonemapping", "Enable VPP tone mapping", .toggle),
-                ConfigField(.encoding, "EnableVideoToolboxTonemapping", "Enable VideoToolbox tone mapping", .toggle),
-                ConfigField(.encoding, "TonemappingAlgorithm", "Algorithm", .choice(opts("none", "clip", "linear", "gamma", "reinhard", "hable", "mobius", "bt2390"))),
-                ConfigField(.encoding, "TonemappingMode", "Mode", .choice(opts("auto", "max", "rgb", "lum", "itp"))),
-                ConfigField(.encoding, "TonemappingRange", "Range", .choice(opts("auto", "tv", "pc"))),
-                ConfigField(.encoding, "TonemappingDesat", "Desat", .double),
-                ConfigField(.encoding, "TonemappingPeak", "Peak", .double),
-                ConfigField(.encoding, "TonemappingParam", "Param", .double),
-                ConfigField(.encoding, "VppTonemappingBrightness", "VPP brightness gain", .double),
-                ConfigField(.encoding, "VppTonemappingContrast", "VPP contrast gain", .double),
-            ]),
-            ConfigSection("Encoding", [
-                ConfigField(.encoding, "EncoderPreset", "Encoding preset", .choice(opts("auto", "placebo", "veryslow", "slower", "slow", "medium", "fast", "faster", "veryfast", "superfast", "ultrafast"))),
-                ConfigField(.encoding, "H264Crf", "H.264 encoding CRF", .int),
-                ConfigField(.encoding, "H265Crf", "HEVC encoding CRF", .int),
-                ConfigField(.encoding, "EncodingThreadCount", "Transcoding thread count", .int, "-1 = automatic, 0 = maximum."),
-                ConfigField(.encoding, "DeinterlaceMethod", "Deinterlacing method", .choice([("yadif", "YADIF"), ("bwdif", "BWDIF")])),
-                ConfigField(.encoding, "DeinterlaceDoubleRate", "Double the frame rate when deinterlacing", .toggle),
-                ConfigField(.encoding, "MaxMuxingQueueSize", "Max muxing queue size", .int),
-            ]),
-            ConfigSection("Audio", [
-                ConfigField(.encoding, "EnableAudioVbr", "Enable VBR audio encoding", .toggle),
-                ConfigField(.encoding, "DownMixAudioBoost", "Audio boost when downmixing", .double),
-                ConfigField(.encoding, "DownMixStereoAlgorithm", "Stereo downmix algorithm", .choice([
-                    ("None", "None"), ("Dave750", "Dave750"), ("NightmodeDialogue", "Night mode dialogue"), ("Rfc7845", "RFC 7845"), ("Ac4", "AC-4")])),
-                ConfigField(.encoding, "HlsAudioSeekStrategy", "HLS audio seek strategy", .choice([
-                    ("TrimCopiedAudio", "Trim copied audio"), ("TranscodeAudio", "Transcode audio")])),
-            ]),
-            ConfigSection("Paths & files", [
-                ConfigField(.encoding, "EncoderAppPathDisplay", "FFmpeg path", .text),
-                ConfigField(.encoding, "TranscodingTempPath", "Transcode path", .text),
-                ConfigField(.encoding, "EnableFallbackFont", "Enable fallback fonts", .toggle),
-                ConfigField(.encoding, "FallbackFontPath", "Fallback font folder path", .text),
-            ]),
-            ConfigSection("Throttling & segments", [
-                ConfigField(.encoding, "EnableThrottling", "Throttle transcodes", .toggle),
-                ConfigField(.encoding, "ThrottleDelaySeconds", "Throttle after (seconds)", .int),
-                ConfigField(.encoding, "EnableSegmentDeletion", "Delete segments", .toggle),
-                ConfigField(.encoding, "SegmentKeepSeconds", "Time to keep segments (seconds)", .int),
-            ]),
-            ConfigSection("Subtitles", [
-                ConfigField(.encoding, "EnableSubtitleExtraction", "Allow subtitle extraction on the fly", .toggle),
-                ConfigField(.encoding, "SubtitleExtractionTimeoutMinutes", "Subtitle extraction timeout (minutes)", .int),
-            ]),
-            ConfigSection("Keyframes", [
-                ConfigField(.encoding, "AllowOnDemandMetadataBasedKeyframeExtractionForExtensions", "On-demand keyframe extraction for extensions (one per line)", .list),
-            ]),
+    ])
+
+    static let display = ConfigPage(title: "Display", symbol: "rectangle.on.rectangle", sections: [
+        S("Display", [
+            F(.metadata, "UseFileCreationTimeForDateAdded", "Date added behavior for new content",
+              .select(options: fixed(o((.bool(false), "Use date scanned into the library"), (.bool(true), "Use file creation date"))), emptyAs: nil),
+              "A date from the metadata is always used first."),
+            F(.system, "EnableFolderView", "Display a folder view to show plain media folders", .toggle, "Shows your folders next to your libraries."),
+            F(.system, "DisplaySpecialsWithinSeasons", "Display specials within the seasons they aired in", .toggle),
+            F(.system, "EnableGroupingMoviesIntoCollections", "Group movies into collections", .toggle, "Movies in a collection show as one item in movie lists."),
+            F(.system, "EnableGroupingShowsIntoCollections", "Group shows into collections", .toggle, "Shows in a collection show as one item in show lists.",
+              show: has(.system, "EnableGroupingShowsIntoCollections")),
+            F(.system, "EnableExternalContentInSuggestions", "Enable external content in suggestions", .toggle,
+              "Lets internet trailers and live TV programs appear in suggestions."),
         ]),
-        ConfigPage(title: "Trickplay", symbol: "photo.stack.fill", sections: [
-            ConfigSection("Hardware", [
-                ConfigField(.system, "TrickplayOptions.EnableHwAcceleration", "Enable hardware decoding", .toggle),
-                ConfigField(.system, "TrickplayOptions.EnableHwEncoding", "Enable hardware-accelerated MJPEG encoding", .toggle),
-                ConfigField(.system, "TrickplayOptions.EnableKeyFrameOnlyExtraction", "Only generate images from key frames", .toggle),
-            ]),
-            ConfigSection("Generation", [
-                ConfigField(.system, "TrickplayOptions.ScanBehavior", "Scan behaviour", .choice([("NonBlocking", "Non-blocking"), ("Blocking", "Blocking")])),
-                ConfigField(.system, "TrickplayOptions.ProcessPriority", "Process priority", .choice([
-                    ("Idle", "Idle"), ("BelowNormal", "Below normal"), ("Normal", "Normal"), ("AboveNormal", "Above normal"),
-                    ("High", "High"), ("RealTime", "Real time")])),
-                ConfigField(.system, "TrickplayOptions.Interval", "Image interval (ms)", .int),
-                ConfigField(.system, "TrickplayOptions.WidthResolutions", "Width resolutions (one per line)", .list),
-                ConfigField(.system, "TrickplayOptions.TileWidth", "Tile width", .int),
-                ConfigField(.system, "TrickplayOptions.TileHeight", "Tile height", .int),
-                ConfigField(.system, "TrickplayOptions.Qscale", "Quality scale (qscale)", .int),
-                ConfigField(.system, "TrickplayOptions.JpegQuality", "JPEG quality", .int),
-                ConfigField(.system, "TrickplayOptions.ProcessThreads", "FFmpeg threads", .int),
-            ]),
+    ])
+
+    static let metadata = ConfigPage(title: "Metadata", symbol: "text.below.photo.fill", context: [.cultures, .countries], sections: [
+        S("Preferred metadata language", footer: "Defaults for new libraries; each library can have its own.", [
+            F(.system, "PreferredMetadataLanguage", "Language", .select(options: fromContext(.cultures, leading: [ConfigOption(.null, "Default")]), emptyAs: nil)),
+            F(.system, "MetadataCountryCode", "Country/Region", .select(options: fromContext(.countries, leading: [ConfigOption(.null, "Default")]), emptyAs: nil)),
         ]),
-        ConfigPage(title: "Networking", symbol: "network", sections: [
-            ConfigSection("Server address", [
-                ConfigField(.network, "LocalNetworkAddresses", "Bind to local network address (one per line)", .list),
-                ConfigField(.network, "LocalNetworkSubnets", "LAN networks (one per line)", .list),
-                ConfigField(.network, "KnownProxies", "Known proxies (one per line)", .list),
-                ConfigField(.network, "PublishedServerUriBySubnet", "Published server URIs (one per line)", .list),
-                ConfigField(.network, "EnablePublishedServerUriByRequest", "Published server URI from request", .toggle),
-            ]),
-            ConfigSection("Ports", footer: "Port changes need a server restart.", [
-                ConfigField(.network, "InternalHttpPort", "Local HTTP port", .int),
-                ConfigField(.network, "InternalHttpsPort", "Local HTTPS port", .int),
-                ConfigField(.network, "PublicHttpPort", "Public HTTP port", .int),
-                ConfigField(.network, "PublicHttpsPort", "Public HTTPS port", .int),
-            ]),
-            ConfigSection("HTTPS", [
-                ConfigField(.network, "EnableHttps", "Enable HTTPS", .toggle),
-                ConfigField(.network, "RequireHttps", "Require HTTPS", .toggle),
-                ConfigField(.network, "CertificatePath", "Custom SSL certificate path", .text),
-                ConfigField(.network, "CertificatePassword", "Certificate password", .secure),
-            ]),
-            ConfigSection("Remote access", [
-                ConfigField(.network, "EnableRemoteAccess", "Allow remote connections to this server", .toggle),
-                ConfigField(.network, "RemoteIPFilter", "Remote IP address filter (one per line)", .list),
-                ConfigField(.network, "IsRemoteIPFilterBlacklist", "Filter is a blocklist (off = allowlist)", .toggle),
-                ConfigField(.network, "EnableUPnP", "Enable automatic port mapping", .toggle),
-            ]),
-            ConfigSection("IP protocols & discovery", [
-                ConfigField(.network, "EnableIPv4", "Enable IPv4", .toggle),
-                ConfigField(.network, "EnableIPv6", "Enable IPv6", .toggle),
-                ConfigField(.network, "AutoDiscovery", "Enable auto-discovery", .toggle),
-                ConfigField(.network, "IgnoreVirtualInterfaces", "Ignore virtual interfaces", .toggle),
-                ConfigField(.network, "VirtualInterfaceNames", "Virtual interface names (one per line)", .list),
-            ]),
+        S("Chapter images", [
+            F(.system, "DummyChapterDuration", "Interval (seconds)", .number(.init(min: 0)),
+              "Time between generated chapters for videos without any. 0 turns this off. Doesn't change existing chapters."),
+            F(.system, "ChapterImageResolution", "Resolution", .select(options: fixed(resolutions), emptyAs: nil),
+              "The size of extracted chapter images. Doesn't change existing ones."),
         ]),
-        ConfigPage(title: "Live TV & DVR", symbol: "tv.fill", sections: [
-            ConfigSection("Guide", [
-                ConfigField(.livetv, "GuideDays", "Number of days of guide data", .int, "Empty = automatic."),
-            ]),
-            ConfigSection("Recordings", [
-                ConfigField(.livetv, "RecordingPath", "Default recording path", .text),
-                ConfigField(.livetv, "MovieRecordingPath", "Movie recording path", .text),
-                ConfigField(.livetv, "SeriesRecordingPath", "Series recording path", .text),
-                ConfigField(.livetv, "EnableRecordingSubfolders", "Create subfolders for categories", .toggle),
-                ConfigField(.livetv, "EnableOriginalAudioWithEncodedRecordings", "Keep original audio in encoded recordings", .toggle),
-                ConfigField(.livetv, "PrePaddingSeconds", "Start recording early (seconds)", .int),
-                ConfigField(.livetv, "PostPaddingSeconds", "Keep recording after the end (seconds)", .int),
-                ConfigField(.livetv, "SaveRecordingNFO", "Save recording EPG metadata in NFO files", .toggle),
-                ConfigField(.livetv, "SaveRecordingImages", "Save recording EPG images", .toggle),
-            ]),
-            ConfigSection("Post-processing", [
-                ConfigField(.livetv, "RecordingPostProcessor", "Post-processor application", .text),
-                ConfigField(.livetv, "RecordingPostProcessorArguments", "Post-processor arguments", .text),
-            ]),
+    ])
+
+    static let nfo = ConfigPage(title: "NFO Settings", symbol: "doc.text.fill",
+                                intro: "Changes apply to content added from now on. To turn NFO files on or off, edit a library and find Metadata savers.",
+                                context: [.users], sections: [
+        S("NFO", [
+            F(.xbmcmetadata, "UserId", "Save user watch data to NFO files for",
+              .select(options: fromContext(.users, leading: [ConfigOption(.null, "None")]), emptyAs: nil),
+              "Saves watch data into NFO files for other apps (like Kodi) to use."),
+            F(.xbmcmetadata, "SaveImagePathsInNfo", "Save image paths within NFO files", .toggle,
+              "Recommended if your image file names don't follow Kodi's naming."),
+            F(.xbmcmetadata, "EnablePathSubstitution", "Enable path substitution", .toggle, "Rewrites image paths with the server's path substitutions."),
+            F(.xbmcmetadata, "EnableExtraThumbsDuplication", "Copy extrafanart to extrathumbs", .toggle, "Saves images to both, for the most Kodi skins."),
         ]),
-        ConfigPage(title: "Advanced", symbol: "slider.horizontal.3", sections: [
-            ConfigSection("Library monitoring", [
-                ConfigField(.system, "LibraryMonitorDelay", "Library monitor delay (seconds)", .int),
-                ConfigField(.system, "LibraryUpdateDuration", "Library update delay (seconds)", .int),
-            ]),
-            ConfigSection("Sorting", [
-                ConfigField(.system, "SortRemoveWords", "Words ignored when sorting (one per line)", .list),
-                ConfigField(.system, "SortRemoveCharacters", "Characters removed when sorting (one per line)", .list),
-                ConfigField(.system, "SortReplaceCharacters", "Characters replaced when sorting (one per line)", .list),
-            ]),
-            ConfigSection("Server", [
-                ConfigField(.system, "CorsHosts", "CORS hosts (one per line)", .list),
-                ConfigField(.system, "EnableSlowResponseWarning", "Warn about slow responses", .toggle),
-                ConfigField(.system, "SlowResponseThresholdMs", "Slow response threshold (ms)", .int),
-                ConfigField(.system, "EnableMetrics", "Enable Prometheus metrics", .toggle),
-                ConfigField(.system, "InactiveSessionThreshold", "Inactive session threshold (minutes)", .int, "0 = off."),
-                ConfigField(.system, "CacheSize", "Cache size", .int),
-                ConfigField(.system, "SaveMetadataHidden", "Save metadata as hidden files", .toggle),
-                ConfigField(.system, "EnableLegacyAuthorization", "Enable legacy authorization", .toggle),
-            ]),
+    ])
+
+    static let transcoding = ConfigPage(title: "Transcoding", symbol: "cpu.fill", sections: [
+        S("Hardware acceleration", [
+            F(.encoding, "warn", "Enabling hardware acceleration may cause instability in some environments. Make sure the server's operating system and video drivers are fully up to date. If video doesn't play after enabling this, change it back to None.", .note(warn: true)),
+            F(.encoding, "HardwareAccelerationType", "Hardware acceleration", .select(options: fixed(HW.types), emptyAs: .string("none")),
+              "Hardware acceleration requires additional configuration on the server (see jellyfin.org/docs → Hardware Acceleration)."),
+            F(.encoding, "VaapiDevice", "VA-API device", .text, "The render node used for hardware acceleration, e.g. /dev/dri/renderD128.", show: HW.only("vaapi")),
+            F(.encoding, "QsvDevice", "QSV device", .text,
+              "The device for Intel QSV on a multi-GPU system. On Linux, the render node (e.g. /dev/dri/renderD128); on Windows, the device index starting from 0. Leave blank unless you know what you're doing.",
+              show: HW.only("qsv")),
         ]),
-    ]
+        S("Enable hardware decoding for", show: HW.on, [
+            F(.encoding, "HardwareDecodingCodecs", "Hardware decoding", .switches(HW.decodeSwitches)),
+            F(.encoding, "EnableEnhancedNvdecDecoder", "Enable enhanced NVDEC decoder", .toggle, "Turn this off to use CUVID if you get decoding errors.", show: HW.only("nvenc")),
+            F(.encoding, "PreferSystemNativeHwDecoder", "Prefer OS native DXVA or VA-API hardware decoders", .toggle, show: HW.only("qsv")),
+        ]),
+        S("Hardware encoding options", show: HW.on, [
+            F(.encoding, "EnableHardwareEncoding", "Enable hardware encoding", .toggle),
+            F(.encoding, "EnableIntelLowPowerH264HwEncoder", "Enable Intel Low-Power H.264 hardware encoder", .toggle, show: HW.only("qsv", "vaapi")),
+            F(.encoding, "EnableIntelLowPowerHevcHwEncoder", "Enable Intel Low-Power HEVC hardware encoder", .toggle,
+              "Low-power encoding avoids unnecessary CPU-GPU sync. On Linux, turn these off if the i915 HuC firmware isn't configured.", show: HW.only("qsv", "vaapi")),
+        ]),
+        S("Encoding format options", footer: "The video formats Jellyfin may transcode to. It uses software encoding when hardware acceleration for a format isn't available. H.264 is always allowed.", [
+            F(.encoding, "AllowHevcEncoding", "Allow encoding in HEVC format", .toggle),
+            F(.encoding, "AllowAv1Encoding", "Allow encoding in AV1 format", .toggle, show: has(.encoding, "AllowAv1Encoding")),
+        ]),
+        S("VPP tone mapping", show: HW.only("qsv", "vaapi"), [
+            F(.encoding, "EnableVppTonemapping", "Enable VPP tone mapping", .toggle,
+              "Intel driver tone mapping. Works only on certain hardware with HDR10 video; takes priority over the OpenCL tone mapping."),
+            F(.encoding, "VppTonemappingBrightness", "VPP tone mapping brightness gain", .number(.init(min: 0, max: 100, integer: false)), "Recommended: 16."),
+            F(.encoding, "VppTonemappingContrast", "VPP tone mapping contrast gain", .number(.init(min: 1, max: 2, integer: false)), "Recommended: 1."),
+        ]),
+        S("VideoToolbox tone mapping", show: HW.only("videotoolbox"), [
+            F(.encoding, "EnableVideoToolboxTonemapping", "Enable VideoToolbox tone mapping", .toggle,
+              "Works with HDR10, HDR10+ and HLG, not Dolby Vision profile 5. Takes priority over the Metal tone mapping."),
+        ]),
+        S("Tone mapping", show: { HW.current($0) == "none" || HW.accel($0) }, [
+            F(.encoding, "EnableTonemapping", "Enable tone mapping", .toggle,
+              "Converts HDR video to SDR while keeping detail and color. Works with 10-bit HDR10, HLG and Dolby Vision, and needs the matching GPU compute runtime.",
+              show: HW.accel),
+            F(.encoding, "TonemappingAlgorithm", "Tone mapping algorithm", .select(options: fixed(s([("none", "None"), ("clip", "Clip"), ("linear", "Linear"),
+                ("gamma", "Gamma"), ("reinhard", "Reinhard"), ("hable", "Hable"), ("mobius", "Mobius"), ("bt2390", "BT.2390")])), emptyAs: nil),
+              "If you're not sure, keep the default. Recommended: BT.2390."),
+            F(.encoding, "TonemappingMode", "Tone mapping mode", .select(options: fixed(s([("auto", "Auto"), ("max", "MAX"), ("rgb", "RGB"), ("lum", "LUM"), ("itp", "ITP")])), emptyAs: nil),
+              "If highlights look blown out, try RGB.", show: HW.accel),
+            F(.encoding, "TonemappingRange", "Tone mapping range", .select(options: fixed(s([("auto", "Auto"), ("tv", "TV"), ("pc", "PC")])), emptyAs: nil),
+              "The output color range. Auto is the same as the input."),
+            F(.encoding, "TonemappingDesat", "Tone mapping desat", .number(.init(min: 0, integer: false)), "Desaturates highlights brighter than this. Recommended: 0 (off)."),
+            F(.encoding, "TonemappingPeak", "Tone mapping peak", .number(.init(min: 0, integer: false)), "Overrides the video's own peak value. Default: 100 (1000 nits)."),
+            F(.encoding, "TonemappingParam", "Tone mapping param", .number(.init(min: 0, nullable: true, integer: false)), "Tunes the algorithm. Usually leave it blank."),
+        ]),
+        S("Transcoding", [
+            F(.encoding, "EncodingThreadCount", "Transcoding thread count",
+              .select(options: fixed([ConfigOption(.int(-1), "Auto")] + (1...16).map { ConfigOption(.int($0), "\($0)") } + [ConfigOption(.int(0), "Max")]), emptyAs: nil),
+              "The most threads a transcode may use. Fewer threads lower CPU use but may not keep up with playback."),
+            F(.encoding, "EncoderAppPathDisplay", "FFmpeg path", .readOnly, "Set on the server (in its config or with --ffmpeg)."),
+            F(.encoding, "TranscodingTempPath", "Transcode path", .path(files: false), "Where transcoded files for clients go. Leave blank for the server default."),
+            F(.encoding, "FallbackFontPath", "Fallback font folder", .path(files: false), "Fonts some clients use to render subtitles."),
+            F(.encoding, "EnableFallbackFont", "Enable fallback fonts", .toggle, "Custom fonts that can fix wrongly rendered subtitles."),
+            F(.encoding, "EnableAudioVbr", "Enable VBR audio encoding", .toggle,
+              "Better quality for the bitrate, but in rare cases can cause buffering or compatibility problems.", show: has(.encoding, "EnableAudioVbr")),
+            F(.encoding, "DownMixAudioBoost", "Audio boost when downmixing", .number(.init(min: 0.5, max: 3, integer: false)), "1 keeps the original volume."),
+            F(.encoding, "DownMixStereoAlgorithm", "Stereo downmix algorithm", .select(options: fixed(s([("None", "None"), ("Dave750", "Dave750"),
+                ("NightmodeDialogue", "NightmodeDialogue"), ("Rfc7845", "RFC7845"), ("Ac4", "AC-4")])), emptyAs: nil),
+              "How multi-channel audio is mixed down to stereo.", show: has(.encoding, "DownMixStereoAlgorithm")),
+            F(.encoding, "HlsAudioSeekStrategy", "Audio seek strategy", .select(options: fixed(s([("TrimCopiedAudio", "TrimCopiedAudio"), ("TranscodeAudio", "TranscodeAudio")])), emptyAs: nil),
+              "How audio is handled when seeking in HLS streams.", show: has(.encoding, "HlsAudioSeekStrategy")),
+            F(.encoding, "MaxMuxingQueueSize", "Max muxing queue size", .number(.init(min: 0)),
+              "Packets buffered while waiting for all streams to start. Raise it if FFmpeg logs \"Too many packets buffered for output stream\". Recommended: 2048."),
+            F(.encoding, "EncoderPreset", "Encoding preset", .select(options: fixed(s([("auto", "Auto"), ("veryslow", "veryslow"), ("slower", "slower"), ("slow", "slow"),
+                ("medium", "medium"), ("fast", "fast"), ("faster", "faster"), ("veryfast", "veryfast"), ("superfast", "superfast"), ("ultrafast", "ultrafast")])), emptyAs: .string("auto")),
+              "Faster improves performance, slower improves quality."),
+            F(.encoding, "H265Crf", "H.265 encoding CRF", .number(.init(min: 0, max: 51))),
+            F(.encoding, "H264Crf", "H.264 encoding CRF", .number(.init(min: 0, max: 51)),
+              "Quality for the x264/x265 software encoders, 0–51: lower is better quality and bigger files. 18–28 is sensible; x264's default is 23, x265's 28. Hardware encoders don't use this."),
+            F(.encoding, "DeinterlaceMethod", "Deinterlacing method", .select(options: fixed(s([("yadif", "Yet Another DeInterlacing Filter (YADIF)"),
+                ("bwdif", "Bob Weaver DeInterlacing Filter (BWDIF)")])), emptyAs: nil),
+              "For software transcoding of interlaced video. With hardware deinterlacing available, that's used instead."),
+            F(.encoding, "DeinterlaceDoubleRate", "Double the frame rate when deinterlacing", .toggle, "\"Bob\" deinterlacing: full motion like interlaced video on a TV."),
+            F(.encoding, "EnableSubtitleExtraction", "Allow subtitle extraction on the fly", .toggle,
+              "Embedded subtitles are extracted and sent as text to avoid transcoding video. Can stall playback while extracting on some systems; turn off to burn them in instead."),
+            F(.encoding, "EnableThrottling", "Throttle transcodes", .toggle,
+              "Pause a transcode once it's far enough ahead of playback, to use fewer resources. Turn off if you get playback problems."),
+            F(.encoding, "EnableSegmentDeletion", "Delete segments", .toggle,
+              "Delete old segments once the client has them, so the whole transcode isn't stored on disk. Turn off if you get playback problems."),
+            F(.encoding, "ThrottleDelaySeconds", "Throttle after (seconds)", .number(.init(min: 10, max: 3600)),
+              "Must be long enough for the client to keep a healthy buffer. Only with throttling on."),
+            F(.encoding, "SegmentKeepSeconds", "Time to keep segments (seconds)", .number(.init(min: 10, max: 3600)),
+              "How long segments are kept after the client downloads them. Only with segment deletion on."),
+        ]),
+    ])
+
+    static let resume = ConfigPage(title: "Resume", symbol: "playpause.fill", sections: [
+        S("Resume", [
+            F(.system, "MinResumePct", "Minimum resume percentage", .number(.init(min: 0, max: 100)), "Titles stopped before this count as unplayed."),
+            F(.system, "MaxResumePct", "Maximum resume percentage", .number(.init(min: 1, max: 100)), "Titles stopped after this count as fully played."),
+            F(.system, "MinAudiobookResume", "Minimum audiobook resume (minutes)", .number(.init(min: 0, max: 100)), "Audiobooks stopped before this count as unplayed."),
+            F(.system, "MaxAudiobookResume", "Audiobook remaining minutes to resume", .number(.init(min: 1, max: 100)),
+              "Audiobooks stopped with less than this left count as fully played."),
+            F(.system, "MinResumeDurationSeconds", "Minimum resume duration (seconds)", .number(.init(min: 0)), "The shortest video that saves where you stopped."),
+        ]),
+    ])
+
+    static let streaming = ConfigPage(title: "Streaming", symbol: "dot.radiowaves.left.and.right", sections: [
+        S("Streaming", [
+            F(.system, "RemoteClientBitrateLimit", "Internet streaming bitrate limit (Mbps)",
+              .number(.init(min: 0, max: 2147.25, scale: 1_000_000, integer: false, placeholder: "No limit")),
+              "An optional per-stream limit for devices outside your network, so they don't ask for more than your upload can handle. May make the server transcode more. Blank or 0 = no limit."),
+        ]),
+    ])
+
+    static let trickplay = ConfigPage(title: "Trickplay", symbol: "photo.stack.fill", sections: [
+        S("Trickplay", [
+            F(.system, "TrickplayOptions.EnableHwAcceleration", "Enable hardware decoding", .toggle),
+            F(.system, "TrickplayOptions.EnableHwEncoding", "Enable hardware accelerated MJPEG encoding", .toggle,
+              "Only with QSV, VA-API, VideoToolbox and RKMPP.", show: has(.system, "TrickplayOptions.EnableHwEncoding")),
+            F(.system, "TrickplayOptions.EnableKeyFrameOnlyExtraction", "Only generate images from key frames", .toggle,
+              "Much faster, with less exact timing. Falls back to software decoding if the hardware decoder can't do this.",
+              show: has(.system, "TrickplayOptions.EnableKeyFrameOnlyExtraction")),
+            F(.system, "TrickplayOptions.ScanBehavior", "Scan behavior", .select(options: fixed(s([("NonBlocking", "Non blocking: queue generation, then return"),
+                ("Blocking", "Blocking: wait for generation before finishing the scan")])), emptyAs: nil),
+              "Non-blocking adds media before its trickplay images are done. Blocking waits for them, which makes scans much longer."),
+            F(.system, "TrickplayOptions.ProcessPriority", "Process priority", .select(options: fixed(s([("High", "High"), ("AboveNormal", "Above normal"),
+                ("Normal", "Normal"), ("BelowNormal", "Below normal"), ("Idle", "Idle")])), emptyAs: nil),
+              "Lower it if the server slows down while generating images."),
+            F(.system, "TrickplayOptions.Interval", "Image interval (ms)", .number(.init(min: 1)), "Time between trickplay images."),
+            F(.system, "TrickplayOptions.WidthResolutions", "Width resolutions (px)", .tags(numeric: true, placeholder: "e.g. 320"),
+              "Widths to generate images at. A width of 320 on a 16:9 video gives about 320×180."),
+            F(.system, "TrickplayOptions.TileWidth", "Tile width", .number(.init(min: 1)), "Most images per tile across."),
+            F(.system, "TrickplayOptions.TileHeight", "Tile height", .number(.init(min: 1)), "Most images per tile down."),
+            F(.system, "TrickplayOptions.JpegQuality", "JPEG quality", .number(.init(min: 1, max: 100))),
+            F(.system, "TrickplayOptions.Qscale", "Qscale", .number(.init(min: 2, max: 31)), "FFmpeg's image quality scale: 2 is best, 31 worst."),
+            F(.system, "TrickplayOptions.ProcessThreads", "FFmpeg threads", .number(.init(min: 0)), "Passed to FFmpeg's -threads. 0 = automatic."),
+        ]),
+    ])
+
+    static let networking = ConfigPage(title: "Networking", symbol: "network",
+                                       intro: "Wrong network settings can make the server unreachable. Most changes need a server restart.", sections: [
+        S("Server address settings", [
+            F(.network, "InternalHttpPort", "Local HTTP port number", .number(.init(min: 1, max: 65535))),
+            F(.network, "EnableHttps", "Enable HTTPS", .toggle, "Listen on the HTTPS port. Needs a valid certificate too."),
+            F(.network, "InternalHttpsPort", "Local HTTPS port number", .number(.init(min: 1, max: 65535))),
+            F(.network, "BaseUrl", "Base URL", .text, "A subfolder for the server's address, e.g. https://example.com/<base url>.", show: has(.network, "BaseUrl")),
+            F(.network, "LocalNetworkAddresses", "Bind to local network address", .tags(numeric: false, placeholder: "e.g. 192.168.1.10"),
+              "Addresses the server listens on. Empty = all of them."),
+            F(.network, "LocalNetworkSubnets", "LAN networks", .tags(numeric: false, placeholder: "e.g. 192.168.1.0/24"),
+              "IP addresses or IP/mask ranges that count as your local network. Empty = the usual private ranges (RFC 1918)."),
+            F(.network, "KnownProxies", "Known proxies", .tags(numeric: false, placeholder: "e.g. 127.0.0.1"),
+              "Reverse proxies in front of the server (IPs or hostnames), so X-Forwarded-For is trusted."),
+        ]),
+        S("HTTPS settings", [
+            F(.network, "RequireHttps", "Require HTTPS", .toggle, "Redirect every HTTP request to HTTPS. Only works while HTTPS is on."),
+            F(.network, "CertificatePath", "Custom SSL certificate path", .path(files: true), "A PKCS #12 (.pfx) file with the certificate and private key."),
+            F(.network, "CertificatePassword", "Certificate password", .secure),
+        ]),
+        S("Remote access settings", [
+            F(.network, "EnableRemoteAccess", "Allow remote connections to this server", .toggle, "Off blocks every connection from outside your network."),
+            F(.network, "RemoteIPFilter", "Remote IP address filter", .tags(numeric: false, placeholder: "e.g. 203.0.113.0/24"),
+              "IP addresses or IP/mask ranges. Empty = every remote address may connect."),
+            F(.network, "IsRemoteIPFilterBlacklist", "Remote IP address filter mode",
+              .select(options: fixed(o((.bool(false), "Whitelist (only these may connect)"), (.bool(true), "Blacklist (these are blocked)"))), emptyAs: nil)),
+            F(.network, "PublicHttpPort", "Public HTTP port number", .number(.init(min: 1, max: 65535)), "The public port mapped to the local HTTP port."),
+            F(.network, "PublicHttpsPort", "Public HTTPS port number", .number(.init(min: 1, max: 65535)), "The public port mapped to the local HTTPS port."),
+        ]),
+        S("IP protocols", [
+            F(.network, "EnableIPv4", "Enable IPv4", .toggle),
+            F(.network, "EnableIPv6", "Enable IPv6", .toggle),
+        ]),
+        S("Network discovery", [
+            F(.network, "AutoDiscovery", "Enable auto discovery", .toggle, "Lets apps find the server on UDP port 7359."),
+        ]),
+        S("Firewall and proxy settings", [
+            F(.network, "PublishedServerUriBySubnet", "Published server URI", .publishedURIs),
+        ]),
+    ])
+
+    static let dvr = ConfigPage(title: "DVR", symbol: "record.circle", sections: [
+        S("Default recording settings", [
+            F(.livetv, "GuideDays", "Number of days of guide data to download",
+              .select(options: fixed([ConfigOption(.null, "Auto")] + (1...14).map { ConfigOption(.int($0), "\($0)") }), emptyAs: nil),
+              "More days let you plan further ahead, but downloads take longer. Auto picks by the number of channels."),
+            F(.livetv, "RecordingPath", "Default recording path", .path(files: false), "Where recordings go. Leave blank to use the server's data folder."),
+            F(.livetv, "MovieRecordingPath", "Movie recording path (optional)", .path(files: false)),
+            F(.livetv, "SeriesRecordingPath", "Series recording path (optional)", .path(files: false)),
+            F(.livetv, "PrePaddingSeconds", "Start when possible (minutes before)", .number(.init(min: 0, scale: 60))),
+            F(.livetv, "PostPaddingSeconds", "Stop when possible (minutes after)", .number(.init(min: 0, scale: 60))),
+        ]),
+        S("Recording post-processing", [
+            F(.livetv, "RecordingPostProcessor", "Post-processing application", .path(files: true)),
+            F(.livetv, "RecordingPostProcessorArguments", "Post-processor command line arguments", .text, "Use {path} for the recording's path."),
+        ]),
+        S("Recording metadata", [
+            F(.livetv, "SaveRecordingNFO", "Save recording EPG metadata in NFO files", .toggle, "Saves the guide data next to the recording."),
+            F(.livetv, "SaveRecordingImages", "Save recording EPG images", .toggle, "Saves the guide images next to the recording."),
+        ]),
+    ])
+
+    /// Loads the server lists a page's dropdowns need.
+    static func loadContext(_ kinds: [ConfigContext], into editor: ConfigEditor, client: JellyfinClient?) async {
+        guard let client else { return }
+        func list(_ path: String) async -> [[String: Any]] {
+            guard let d = try? await client.send("GET", path) else { return [] }
+            return (try? JSONSerialization.jsonObject(with: d) as? [[String: Any]]) ?? []
+        }
+        func str(_ d: [String: Any], _ k: String) -> String? {
+            d.first { $0.key.caseInsensitiveCompare(k) == .orderedSame }?.value as? String
+        }
+        for kind in kinds {
+            switch kind {
+            case .languages:
+                editor.ctx[kind.rawValue] = await list("/Localization/Options").compactMap { l in
+                    str(l, "Value").map { ConfigOption(.string($0), str(l, "Name") ?? $0) }
+                }
+            case .cultures:
+                editor.ctx[kind.rawValue] = await list("/Localization/Cultures").compactMap { c in
+                    str(c, "TwoLetterISOLanguageName").flatMap { $0.isEmpty ? nil : ConfigOption(.string($0), str(c, "DisplayName") ?? $0) }
+                }
+            case .countries:
+                editor.ctx[kind.rawValue] = await list("/Localization/Countries").compactMap { c in
+                    str(c, "TwoLetterISORegionName").flatMap { $0.isEmpty ? nil : ConfigOption(.string($0), str(c, "DisplayName") ?? $0) }
+                }
+            case .users:
+                editor.ctx[kind.rawValue] = await list("/Users").compactMap { u in
+                    str(u, "Id").map { ConfigOption(.string($0), str(u, "Name") ?? $0) }
+                }
+            }
+        }
+    }
 }
 
 // MARK: - Views
@@ -499,12 +704,12 @@ struct ServerSettingsHub: View {
                     NavigationLink { ConfigPageView(page: page) } label: { Label(page.title, systemImage: page.symbol) }
                 }
             } footer: {
-                Text("The same settings as the Jellyfin web dashboard, saved straight to your server.")
+                Text("Jellyfin's dashboard settings, option for option, saved straight to your server.")
             }
             Section {
                 NavigationLink { AllServerSettingsView() } label: { Label("All settings", systemImage: "list.bullet.rectangle") }
             } footer: {
-                Text("Every value in the server's configuration, including ones not shown above.")
+                Text("Every value in the server's configuration, including ones the dashboard doesn't show.")
             }
         }
         .navigationTitle("Server settings")
@@ -518,16 +723,21 @@ struct ConfigPageView: View {
 
     var body: some View {
         Form {
+            if let intro = page.intro {
+                Section { Label(intro, systemImage: "exclamationmark.triangle.fill").font(.footnote).foregroundStyle(.orange) }
+            }
             if let error = editor.error {
                 Section { Text(error).foregroundStyle(.red).font(.footnote) }
             }
-            ForEach(page.sections) { section in
-                let fields = section.fields.filter { editor.loading || editor.has($0.store, $0.key) || editor.values[$0.store] == nil }
-                if !fields.isEmpty {
-                    Section {
-                        ForEach(fields) { ConfigFieldRow(field: $0, editor: editor) }
-                    } header: { Text(section.title) } footer: {
-                        if let footer = section.footer { Text(footer) }
+            if !editor.values.isEmpty {
+                ForEach(page.sections.filter { $0.show?(editor) ?? true }) { section in
+                    let fields = section.fields.filter { ($0.show?(editor) ?? true) && fieldExists($0) }
+                    if !fields.isEmpty {
+                        Section {
+                            ForEach(fields) { ConfigFieldRow(field: $0, editor: editor) }
+                        } header: { Text(section.title) } footer: {
+                            if let footer = section.footer { Text(footer) }
+                        }
                     }
                 }
             }
@@ -538,6 +748,9 @@ struct ConfigPageView: View {
         .navigationTitle(page.title)
         .keyboardDoneBar()
         .toolbar {
+            if !editor.dirty.isEmpty {
+                ToolbarItem(placement: .cancellationAction) { Button("Discard") { editor.discard() } }
+            }
             ToolbarItem(placement: .confirmationAction) {
                 Button("Save") {
                     Keyboard.dismiss()
@@ -547,23 +760,39 @@ struct ConfigPageView: View {
             }
         }
         .overlay { if editor.loading && editor.values.isEmpty { ProgressView() } }
-        .task { await editor.load(page.stores, client: model.client) }
+        .task {
+            await editor.load(page.stores, client: model.client)
+            await ServerSettingsCatalog.loadContext(page.context, into: editor, client: model.client)
+        }
         .refreshable { await editor.load(page.stores, client: model.client) }
     }
+
+    /// Version-dependent fields carry their own `show: has(...)` check; everything else always shows,
+    /// because Jellyfin leaves null values (e.g. GuideDays = Auto) out of its JSON.
+    private func fieldExists(_ f: ConfigField) -> Bool { true }
 }
 
 struct ConfigFieldRow: View {
     let field: ConfigField
     let editor: ConfigEditor
+    @State private var browsing = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             control
-            if let footer = field.footer {
+            if let footer = field.footer, !isNote {
                 Text(footer).font(.caption).foregroundStyle(.secondary)
             }
         }
+        .sheet(isPresented: $browsing) {
+            ServerPathPicker(files: isFilePath) { picked in
+                editor.set(field.store, field.key, picked)
+            }
+        }
     }
+
+    private var isNote: Bool { if case .note = field.kind { return true }; return false }
+    private var isFilePath: Bool { if case .path(let files) = field.kind { return files }; return false }
 
     @ViewBuilder
     private var control: some View {
@@ -571,20 +800,13 @@ struct ConfigFieldRow: View {
         case .toggle:
             Toggle(field.label, isOn: editor.bool(field.store, field.key))
         case .int:
-            LabeledContent(field.label) {
-                TextField("", text: editor.int(field.store, field.key))
-                    .keyboardType(.numbersAndPunctuation).multilineTextAlignment(.trailing).frame(maxWidth: 120)
-            }
+            numberRow(editor.int(field.store, field.key), placeholder: "")
         case .double:
-            LabeledContent(field.label) {
-                TextField("", text: editor.double(field.store, field.key))
-                    .keyboardType(.decimalPad).multilineTextAlignment(.trailing).frame(maxWidth: 120)
-            }
+            numberRow(editor.double(field.store, field.key), placeholder: "")
         case .mbps:
-            LabeledContent(field.label) {
-                TextField("No limit", text: editor.mbps(field.store, field.key))
-                    .keyboardType(.decimalPad).multilineTextAlignment(.trailing).frame(maxWidth: 120)
-            }
+            numberRow(editor.mbps(field.store, field.key), placeholder: "No limit")
+        case .number(let spec):
+            numberRow(editor.number(field.store, field.key, spec), placeholder: spec.placeholder ?? (spec.nullable ? "Auto" : ""))
         case .text:
             VStack(alignment: .leading, spacing: 4) {
                 Text(field.label).font(.subheadline)
@@ -593,6 +815,8 @@ struct ConfigFieldRow: View {
                     .submitLabel(.done)
                     .foregroundStyle(.secondary)
             }
+        case .readOnly:
+            LabeledContent(field.label, value: (editor.value(field.store, field.key) as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "—")
         case .secure:
             VStack(alignment: .leading, spacing: 4) {
                 Text(field.label).font(.subheadline)
@@ -620,6 +844,342 @@ struct ConfigFieldRow: View {
                 }
                 ForEach(options.indices, id: \.self) { i in Text(options[i].label).tag(options[i].value) }
             }
+        case .select(let source, let emptyAs):
+            let options = source(editor)
+            let selection = editor.option(field.store, field.key, emptyAs: emptyAs)
+            Picker(field.label, selection: selection) {
+                if !options.contains(where: { $0.value == selection.wrappedValue }) {
+                    Text(selection.wrappedValue == .null ? "Not set" : "\(selection.wrappedValue.raw)").tag(selection.wrappedValue)
+                }
+                ForEach(options.indices, id: \.self) { i in Text(options[i].label).tag(options[i].value) }
+            }
+            .pickerStyle(.menu)
+        case .switches(let source):
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(Array(source(editor).filter { $0.show?(editor) ?? true }.enumerated()), id: \.offset) { _, sw in
+                    Toggle(sw.label, isOn: editor.switchBinding(field.store, listKey: field.key, sw))
+                }
+            }
+        case .tags(let numeric, let placeholder):
+            TagsEditor(label: field.label, placeholder: placeholder, numeric: numeric,
+                       values: editor.tags(field.store, field.key, numeric: numeric))
+        case .path:
+            VStack(alignment: .leading, spacing: 4) {
+                Text(field.label).font(.subheadline)
+                HStack {
+                    TextField("Server default", text: editor.text(field.store, field.key))
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .font(.callout.monospaced()).submitLabel(.done)
+                    Button { browsing = true } label: { Image(systemName: "folder") }
+                        .buttonStyle(.glass)
+                }
+            }
+        case .note(let warn):
+            Label(field.label, systemImage: warn ? "exclamationmark.triangle.fill" : "info.circle")
+                .font(.footnote)
+                .foregroundStyle(warn ? Color.orange : Color.secondary)
+        case .publishedURIs:
+            PublishedURIsEditor(editor: editor, store: field.store, key: field.key)
+        case .splash:
+            SplashImageEditor()
+        }
+    }
+
+    private func numberRow(_ binding: Binding<String>, placeholder: String) -> some View {
+        LabeledContent(field.label) {
+            TextField(placeholder, text: binding)
+                .keyboardType(.numbersAndPunctuation).multilineTextAlignment(.trailing).frame(maxWidth: 120)
+                .submitLabel(.done)
+        }
+    }
+}
+
+extension ConfigEditor {
+    func option(_ store: ConfigStore, _ key: String, emptyAs: ConfigValue?) -> Binding<ConfigValue> {
+        Binding(get: {
+            let v = ConfigValue(self.value(store, key))
+            if v == .null, let emptyAs { return emptyAs }
+            return v
+        }, set: { self.set(store, key, $0.raw) })
+    }
+
+    func number(_ store: ConfigStore, _ key: String, _ spec: ConfigField.NumberSpec) -> Binding<String> {
+        Binding(get: {
+            guard let n = self.value(store, key) as? NSNumber else { return "" }
+            let shown = n.doubleValue / spec.scale
+            if spec.scale == 1_000_000 && shown == 0 { return "" }
+            return spec.integer && shown == shown.rounded() ? String(Int(shown)) : String(format: "%g", shown)
+        }, set: { text in
+            let t = text.replacingOccurrences(of: ",", with: ".").trimmingCharacters(in: .whitespaces)
+            if t.isEmpty {
+                self.set(store, key, spec.nullable ? NSNull() : 0)
+                return
+            }
+            guard var v = Double(t) else { return }
+            if let lo = spec.min { v = Swift.max(lo, v) }
+            if let hi = spec.max { v = Swift.min(hi, v) }
+            let stored = v * spec.scale
+            if spec.integer || spec.scale != 1 { self.set(store, key, Int(stored.rounded())) } else { self.set(store, key, stored) }
+        })
+    }
+
+    func switchBinding(_ store: ConfigStore, listKey: String, _ sw: ConfigSwitch) -> Binding<Bool> {
+        if let flag = sw.flag { return bool(store, flag) }
+        let value = sw.listValue ?? ""
+        return Binding(get: {
+            ((self.value(store, listKey) as? [Any]) ?? []).contains { ($0 as? String) == value }
+        }, set: { on in
+            var list = ((self.value(store, listKey) as? [Any]) ?? []).compactMap { $0 as? String }
+            list.removeAll { $0 == value }
+            if on { list.append(value) }
+            self.set(store, listKey, list)
+        })
+    }
+
+    func tags(_ store: ConfigStore, _ key: String, numeric: Bool) -> Binding<[String]> {
+        Binding(get: {
+            ((self.value(store, key) as? [Any]) ?? []).map { "\($0)" }
+        }, set: { items in
+            if numeric { self.set(store, key, items.compactMap { Int($0) }) } else { self.set(store, key, items) }
+        })
+    }
+}
+
+/// A list of values (IP ranges, proxies, widths) as removable chips plus an add field.
+struct TagsEditor: View {
+    let label: String
+    let placeholder: String
+    let numeric: Bool
+    @Binding var values: [String]
+    @State private var draft = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(label).font(.subheadline)
+            if !values.isEmpty {
+                FlowLayout(spacing: 6) {
+                    ForEach(values, id: \.self) { v in
+                        Button { values.removeAll { $0 == v } } label: {
+                            HStack(spacing: 4) {
+                                Text(v).font(.caption.monospaced())
+                                Image(systemName: "xmark").font(.caption2.weight(.bold))
+                            }
+                            .padding(.horizontal, 10).padding(.vertical, 5)
+                            .glassEffect(.regular, in: .capsule)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            HStack {
+                TextField(placeholder, text: $draft)
+                    .keyboardType(numeric ? .numberPad : .URL)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .submitLabel(.done)
+                    .onSubmit(add)
+                Button("Add", action: add).disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+    }
+
+    private func add() {
+        let v = draft.trimmingCharacters(in: .whitespaces)
+        guard !v.isEmpty, !values.contains(v), !numeric || Int(v) != nil else { return }
+        values.append(v)
+        draft = ""
+    }
+}
+
+/// jellyfin-web's "published server URI": one for everyone, or separate internal and external ones.
+struct PublishedURIsEditor: View {
+    let editor: ConfigEditor
+    let store: ConfigStore
+    let key: String
+    @State private var same = true
+    @State private var didInit = false
+
+    private var value: [String] { ((editor.value(store, key) as? [Any]) ?? []).compactMap { $0 as? String } }
+    private var uris: [String: String] {
+        if value.count == 1, !value[0].contains("=") { return ["all": value[0]] }
+        var out: [String: String] = [:]
+        for p in value { if let i = p.firstIndex(of: "=") { out[String(p[..<i])] = String(p[p.index(after: i)...]) } }
+        return out
+    }
+    /// Per-subnet entries (set in the config file) are kept as they are.
+    private var others: [String] { value.filter { p in p.contains("=") && !["all=", "internal=", "external="].contains { p.hasPrefix($0) } } }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Toggle("Use the same published server URI for internal and external access", isOn: Binding(get: { same }, set: { s in
+                let u = uris
+                same = s
+                if s { emit(["all": u["all"] ?? u["external"] ?? u["internal"]].compactMapValues { $0 }) }
+                else { emit(["internal": u["all"], "external": u["all"]].compactMapValues { $0 }) }
+            }))
+            if same {
+                uriField("Published server URI", "https://jellyfin.example.com", "all", "Overrides the address Jellyfin gives to apps.")
+            } else {
+                uriField("Internal URI", "http://192.168.1.10:8096", "internal", "The address given to apps on your network.")
+                uriField("External URI", "https://jellyfin.example.com", "external", "The address given to apps outside your network.")
+            }
+        }
+        .onAppear {
+            guard !didInit else { return }
+            didInit = true
+            let u = uris
+            same = u["all"] != nil || (u["internal"] == nil && u["external"] == nil)
+        }
+    }
+
+    private func uriField(_ title: String, _ placeholder: String, _ part: String, _ help: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title).font(.subheadline)
+            TextField(placeholder, text: Binding(get: { uris[part] ?? "" }, set: { v in
+                var u = uris
+                u[part] = v
+                emit(u)
+            }))
+            .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled().submitLabel(.done)
+            Text(help).font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private func emit(_ u: [String: String]) {
+        var list: [String] = []
+        for part in ["all", "internal", "external"] {
+            if let v = u[part], !v.isEmpty { list.append("\(part)=\(v)") }
+        }
+        editor.set(store, key, list + others)
+    }
+}
+
+/// Upload or delete the custom splash screen (16:9, at least 1920×1080), like jellyfin-web.
+struct SplashImageEditor: View {
+    @Environment(AppModel.self) private var model
+    @State private var item: PhotosPickerItem?
+    @State private var stamp = Date().timeIntervalSince1970
+    @State private var busy = false
+    @State private var message: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            RemoteImage(url: model.client.flatMap { URL(string: "\($0.baseURL.absoluteString)/Branding/Splashscreen?t=\(Int(stamp))") })
+                .aspectRatio(16 / 9, contentMode: .fit)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            Text("Custom images should be 16:9 and at least 1920×1080.").font(.caption).foregroundStyle(.secondary)
+            HStack {
+                PhotosPicker(selection: $item, matching: .images) {
+                    Label("Upload custom image", systemImage: "photo")
+                }
+                .buttonStyle(.glass)
+                .disabled(busy)
+                Button(role: .destructive) {
+                    Task { await delete() }
+                } label: { Label("Delete custom image", systemImage: "trash").foregroundStyle(.red) }
+                .buttonStyle(.glass)
+                .disabled(busy)
+            }
+            if let message { Text(message).font(.caption).foregroundStyle(.secondary) }
+        }
+        .onChange(of: item) { _, new in
+            guard let new else { return }
+            item = nil
+            Task { await upload(new) }
+        }
+    }
+
+    private func upload(_ item: PhotosPickerItem) async {
+        busy = true
+        defer { busy = false }
+        guard let data = try? await item.loadTransferable(type: Data.self),
+              let image = UIImage(data: data), let jpeg = image.jpegData(compressionQuality: 0.9) else {
+            message = "Couldn't read that image."
+            return
+        }
+        do {
+            _ = try await model.client?.send("POST", "/Branding/Splashscreen", body: jpeg.base64EncodedData(), contentType: "image/jpeg")
+            stamp = Date().timeIntervalSince1970
+            message = "Splash screen uploaded."
+        } catch { message = error.localizedDescription }
+    }
+
+    private func delete() async {
+        busy = true
+        defer { busy = false }
+        do {
+            _ = try await model.client?.send("DELETE", "/Branding/Splashscreen")
+            stamp = Date().timeIntervalSince1970
+            message = "Custom image deleted."
+        } catch { message = error.localizedDescription }
+    }
+}
+
+/// Browse folders (and files) on the server, like jellyfin-web's folder picker.
+struct ServerPathPicker: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    let files: Bool
+    let onPick: (String) -> Void
+    @State private var path: String?
+    @State private var entries: [(name: String, path: String, isFile: Bool)] = []
+    @State private var error: String?
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if let error { Text(error).foregroundStyle(.red).font(.footnote) }
+                if let path, let parent = parentPath(path) {
+                    Button { Task { await browse(parent) } } label: { Label("Up", systemImage: "arrow.up") }
+                }
+                ForEach(entries.indices, id: \.self) { i in
+                    let e = entries[i]
+                    Button {
+                        if e.isFile { onPick(e.path); dismiss() } else { Task { await browse(e.path) } }
+                    } label: {
+                        Label(e.name, systemImage: e.isFile ? "doc" : "folder.fill")
+                    }
+                    .foregroundStyle(.primary)
+                }
+            }
+            .navigationTitle(path ?? "Server")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                if !files, let path {
+                    ToolbarItem(placement: .confirmationAction) { Button("Choose") { onPick(path); dismiss() } }
+                }
+            }
+            .task { await browse(nil) }
+        }
+    }
+
+    private func parentPath(_ p: String) -> String? {
+        let trimmed = p.hasSuffix("/") && p.count > 1 ? String(p.dropLast()) : p
+        guard let i = trimmed.lastIndex(where: { $0 == "/" || $0 == "\\" }) else { return "" }
+        let parent = String(trimmed[..<i])
+        return parent.isEmpty ? "/" : parent
+    }
+
+    private func browse(_ target: String?) async {
+        guard let client = model.client else { return }
+        error = nil
+        func decode(_ d: Data?) -> [[String: Any]] { d.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [[String: Any]] } ?? [] }
+        func str(_ d: [String: Any], _ k: String) -> String? { d.first { $0.key.caseInsensitiveCompare(k) == .orderedSame }?.value as? String }
+        do {
+            let list: [[String: Any]]
+            if let target, !target.isEmpty {
+                list = decode(try await client.send("GET", "/Environment/DirectoryContents",
+                                                     query: ["path": target, "includeFiles": files, "includeDirectories": true]))
+            } else {
+                list = decode(try await client.send("GET", "/Environment/Drives"))
+            }
+            path = (target?.isEmpty ?? true) ? nil : target
+            entries = list.compactMap { e -> (name: String, path: String, isFile: Bool)? in
+                guard let p = str(e, "Path") else { return nil }
+                return (str(e, "Name") ?? p, p, (str(e, "Type") ?? "") == "File")
+            }
+        } catch {
+            self.error = error.localizedDescription
         }
     }
 }
