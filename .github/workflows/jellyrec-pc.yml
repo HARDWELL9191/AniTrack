@@ -107,7 +107,11 @@ jobs:
         run: |
           $v = "1.0.${{ github.run_number }}"
           "VITE_APP_VERSION=$v" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "APP_VERSION=$v" | Out-File -FilePath $env:GITHUB_ENV -Append
           "{`"version`": `"$v`"}" | Out-File -Encoding ascii src-tauri/version.json
+          # Installers left by earlier builds come back with the cache: remove them, so only this
+          # build's installer can be published (an old 1.0.0 one was picked before).
+          Remove-Item -Recurse -Force src-tauri/target/aarch64-pc-windows-msvc/release/bundle -ErrorAction SilentlyContinue
 
       - name: Build the installer
         run: npx tauri build --target aarch64-pc-windows-msvc --bundles nsis --config src-tauri/version.json
@@ -139,8 +143,14 @@ jobs:
 
       - name: Collect the .exe
         run: |
-          $setup = Get-ChildItem src-tauri/target/aarch64-pc-windows-msvc/release/bundle/nsis -Filter *.exe | Select-Object -First 1
-          if (-not $setup) { throw "No installer was produced" }
+          # Exactly this build's installer (its name carries the version), and the app inside it must
+          # report this version: otherwise the build fails instead of publishing an old one.
+          $setup = @(Get-ChildItem src-tauri/target/aarch64-pc-windows-msvc/release/bundle/nsis -Filter "*_$($env:APP_VERSION)_*.exe")
+          if ($setup.Count -ne 1) { Get-ChildItem src-tauri/target/aarch64-pc-windows-msvc/release/bundle/nsis | Format-Table Name; throw "Expected one installer for $env:APP_VERSION, found $($setup.Count)" }
+          $setup = $setup[0]
+          $built = (Get-Item src-tauri/target/aarch64-pc-windows-msvc/release/jellyreco.exe).VersionInfo.ProductVersion
+          Write-Host "Installer: $($setup.Name) · app version $built"
+          if (-not "$built".StartsWith($env:APP_VERSION)) { throw "The app is version $built, expected $env:APP_VERSION" }
           New-Item -ItemType Directory -Force out | Out-Null
           Copy-Item $setup.FullName out/JellyReco-Setup-arm64.exe
           Get-ChildItem out | Format-Table Name, Length
@@ -207,7 +217,10 @@ jobs:
         run: |
           v="1.0.${{ github.run_number }}"
           echo "VITE_APP_VERSION=$v" >> "$GITHUB_ENV"
+          echo "APP_VERSION=$v" >> "$GITHUB_ENV"
           printf '{"version": "%s"}' "$v" > src-tauri/version.json
+          # AppImages left by earlier builds come back with the cache: only this build's may be published.
+          rm -rf src-tauri/target/release/bundle
 
       - name: Build the AppImage
         run: ./tools/ci_run.sh "AppImage build" npx tauri build --bundles appimage --config src-tauri/version.json
@@ -218,8 +231,9 @@ jobs:
 
       - name: Collect the AppImage
         run: |
-          app=$(ls src-tauri/target/release/bundle/appimage/*.AppImage | head -1)
-          [ -n "$app" ] || { echo "::error::No AppImage was produced"; exit 1; }
+          app=$(ls src-tauri/target/release/bundle/appimage/*_"${APP_VERSION}"_*.AppImage 2>/dev/null | head -1)
+          [ -n "$app" ] || { ls -la src-tauri/target/release/bundle/appimage || true; echo "::error::No AppImage for ${APP_VERSION} was produced"; exit 1; }
+          echo "AppImage: $(basename "$app")"
           mkdir -p out
           cp "$app" out/JellyReco-x86_64.AppImage
           chmod +x out/JellyReco-x86_64.AppImage
