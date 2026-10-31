@@ -235,7 +235,10 @@ private struct PlayerContent: View {
             // portrait they stay clear of the Dynamic Island and the home indicator.
             .padding(.horizontal, layout.landscape ? 38 : 16)
             .padding(.top, layout.landscape ? 24 : layout.safe.top + 8)
-            .padding(.bottom, layout.landscape ? 24 : layout.safe.bottom + 8)
+            // The seek bar's lower edge sits 24 pt above the screen's bottom, where Apple TV's row of
+            // buttons ends (that row isn't in this player, so the bar takes its place). The bar's
+            // 28 pt touch area reaches 10 pt below it.
+            .padding(.bottom, layout.landscape ? 14 : layout.safe.bottom + 4)
             .ignoresSafeArea()
         }
         .foregroundStyle(.white)
