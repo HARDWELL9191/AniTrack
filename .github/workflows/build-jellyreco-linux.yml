@@ -117,7 +117,8 @@ jobs:
           if ! kill -0 $pid 2>/dev/null; then tail -60 "$RUNNER_TEMP/app.log"; echo "::error::The app exited during start-up"; exit 1; fi
           kill $pid || true
           grep "\[video\]" "$RUNNER_TEMP/app.log" | head -5 || true
-          grep -q "\[video\] frame 2" "$RUNNER_TEMP/app.log" || { tail -60 "$RUNNER_TEMP/app.log"; echo "::error::mpv didn't draw video in the app (Slovenian locale)"; exit 1; }
+          grep -E "VO: \[libmpv\]|first video frame" "$RUNNER_TEMP/app.log" | head -3 || true
+          { grep -q "VO: \[libmpv\]" "$RUNNER_TEMP/app.log" && grep -q "first video frame after restart shown" "$RUNNER_TEMP/app.log" && grep -q "\[video\] frame 4" "$RUNNER_TEMP/app.log"; } || { tail -60 "$RUNNER_TEMP/app.log"; echo "::error::mpv didn't draw video in the app (Slovenian locale)"; exit 1; }
           echo "::notice::The app plays video under the page with a Slovenian locale"
           python3 - "$RUNNER_TEMP/startup.png" <<'EOF'
           import subprocess, sys

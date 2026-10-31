@@ -290,7 +290,8 @@ export class PlayerController {
 
   private async load(index: number, opts: PlayOptions = {}) {
     const token = ++this.loadToken;
-    const api = this.api;
+    // A local file needs no server (it plays even before signing in).
+    const api = this.getApi();
     const s = this.getSettings();
     const base = this.state.queue[index];
     if (!base) return;
@@ -306,6 +307,7 @@ export class PlayerController {
       await this.engine.command(["loadfile", base.Path ?? base.Id.slice(6), "replace"]);
       return;
     }
+    if (!api) throw new Error("Not signed in.");
     this.patch({ index, item: base, loading: true, error: null, ended: false, position: 0, duration: ticksToSeconds(base.RunTimeTicks), tracks: [], audioOptions: [], subOptions: [], chapters: [], segments: [], trickplay: null, activeSegment: null, stats: {}, abLoop: [null, null] });
 
     // The item's details and the server's stream decision are fetched together when where to start
@@ -530,10 +532,15 @@ export class PlayerController {
   private async onEndFile(reason: string, error?: string) {
     const st = this.state;
     if (!st.active) return;
-    if (reason === "error") {
+    // No sound device (unplugged headphones, no audio server): mpv still plays the picture, and
+    // only says so when the file ends. That's the end of the video, not a failure.
+    const noSound = reason === "error" && !st.isAudio && /audio output/i.test(error ?? "");
+    if (noSound) this.onError?.("No sound device was available, so the video played without sound.");
+    if (reason === "error" && !noSound) {
       this.fail(new Error(error ? `Playback failed: ${error}` : "Playback failed."));
       return;
     }
+    if (noSound) reason = "eof";
     if (reason !== "eof") return; // replaced by another file or stopped by us
     await this.reportStop();
     if (st.repeat === "one") return this.load(st.index, { startSeconds: 0 });

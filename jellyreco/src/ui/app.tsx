@@ -74,7 +74,8 @@ export function App() {
   }); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!model.didBootstrap) return <div className="boot"><Spinner /></div>;
-  if (!model.signedIn) return (<><WelcomePage /><ErrorAlert /><Toasts /></>);
+  // A video file opened with the app plays even before signing in.
+  if (!model.signedIn) return (<>{!player.active && <WelcomePage />}{player.active && <Guard><PlayerOverlay /></Guard>}<ErrorAlert /><Toasts /></>);
 
   function select(tab: Tab, libraryId: string | null = null) {
     if (tab === model.tab && libraryId === model.libraryId) ui.popToRoot(tab);
