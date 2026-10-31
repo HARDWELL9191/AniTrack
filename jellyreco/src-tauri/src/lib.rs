@@ -142,6 +142,60 @@ fn linux_environment() {
     }
 }
 
+/// Linux: WebKitGTK caps page updates near 60 per second ("Prefer Page Rendering Updates near
+/// 60fps", on by default), so on a 120/144/165 Hz screen scrolling and animations run at 60. This
+/// turns that off, so the page follows the display's refresh rate. Through WebKitGTK's feature API
+/// (2.42+), looked up at run time so an older WebKitGTK just keeps its default.
+#[cfg(target_os = "linux")]
+fn tune_webkit(w: &tauri::WebviewWindow) {
+    use std::ffi::{c_char, c_int, c_void, CStr};
+    if std::env::var_os("JELLYRECO_WEBKIT_60HZ").is_some() {
+        return;
+    }
+    let _ = w.with_webview(|wv| {
+        use gtk::glib::object::ObjectType;
+        let view = wv.inner().as_ptr() as *mut c_void;
+        type GetSettings = unsafe extern "C" fn(*mut c_void) -> *mut c_void;
+        type AllFeatures = unsafe extern "C" fn() -> *mut c_void;
+        type ListLen = unsafe extern "C" fn(*mut c_void) -> usize;
+        type ListGet = unsafe extern "C" fn(*mut c_void, usize) -> *mut c_void;
+        type Ident = unsafe extern "C" fn(*mut c_void) -> *const c_char;
+        type SetEnabled = unsafe extern "C" fn(*mut c_void, *mut c_void, c_int);
+        type Unref = unsafe extern "C" fn(*mut c_void);
+        // SAFETY: WebKitGTK's documented C API, on the main thread, with the app's own WebView.
+        unsafe {
+            let this = libloading::os::unix::Library::this();
+            let (Ok(get_settings), Ok(all), Ok(len), Ok(get), Ok(ident), Ok(set), Ok(unref)) = (
+                this.get::<GetSettings>(b"webkit_web_view_get_settings\0"),
+                this.get::<AllFeatures>(b"webkit_settings_get_all_features\0"),
+                this.get::<ListLen>(b"webkit_feature_list_get_length\0"),
+                this.get::<ListGet>(b"webkit_feature_list_get\0"),
+                this.get::<Ident>(b"webkit_feature_get_identifier\0"),
+                this.get::<SetEnabled>(b"webkit_settings_set_feature_enabled\0"),
+                this.get::<Unref>(b"webkit_feature_list_unref\0"),
+            ) else {
+                return;
+            };
+            let settings = get_settings(view);
+            let list = all();
+            if settings.is_null() || list.is_null() {
+                return;
+            }
+            for i in 0..len(list) {
+                let f = get(list, i);
+                let id = ident(f);
+                if !id.is_null() && CStr::from_ptr(id).to_bytes() == b"PreferPageRenderingUpdatesNear60FPS" {
+                    set(settings, f, 0);
+                    if std::env::var_os("JELLYRECO_DEBUG_VIDEO").is_some() {
+                        eprintln!("[webkit] page updates follow the display's refresh rate");
+                    }
+                }
+            }
+            unref(list);
+        }
+    });
+}
+
 /// The video file the app was started with, once (the page asks when it's ready).
 #[tauri::command]
 fn launch_file() -> Option<String> {
@@ -208,6 +262,7 @@ pub fn run() {
                 if let Err(e) = mpv::gl::install(&w) {
                     eprintln!("video surface: {e}");
                 }
+                tune_webkit(&w);
             }
             let root = app.path().resource_dir().unwrap_or_default();
             let data = app.path().app_data_dir().unwrap_or_default();

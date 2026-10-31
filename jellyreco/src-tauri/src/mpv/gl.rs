@@ -15,7 +15,11 @@ use std::sync::{mpsc, Arc, OnceLock};
 thread_local! {
     static AREA: RefCell<Option<gtk::GLArea>> = const { RefCell::new(None) };
     static RENDER: RefCell<Option<(Arc<Api>, usize)>> = const { RefCell::new(None) };
+    static TICK: RefCell<Option<gtk::TickCallbackId>> = const { RefCell::new(None) };
 }
+
+/// mpv has a new frame waiting (set on mpv's thread, taken on the next display refresh).
+static PENDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Puts a GL area under the WebView (once, at start-up, on the main thread).
 pub fn install(window: &tauri::WebviewWindow) -> Result<(), String> {
@@ -95,6 +99,16 @@ fn attach_here(api: Arc<Api>, handle: ffi::Handle) -> Result<(), String> {
     // SAFETY: the callback only schedules a redraw on the main thread.
     unsafe { set_update(ctx, Some(on_update), std::ptr::null_mut()) };
     RENDER.with(|r| *r.borrow_mut() = Some((api, ctx as usize)));
+    // New frames are drawn on the display's own refresh (GTK's frame clock), so video keeps moving
+    // at the screen's rate without waiting for something else in the window to redraw (that made
+    // playback look stuck until you paused and played again), and high refresh rates are kept.
+    let id = area.add_tick_callback(|area, _| {
+        if PENDING.swap(false, std::sync::atomic::Ordering::AcqRel) {
+            area.queue_render();
+        }
+        glib::ControlFlow::Continue
+    });
+    TICK.with(|t| *t.borrow_mut() = Some(id));
     if debug() {
         eprintln!("[video] renderer attached (display param {kind}, {}x{})", area.allocated_width(), area.allocated_height());
     }
@@ -105,6 +119,9 @@ fn attach_here(api: Arc<Api>, handle: ffi::Handle) -> Result<(), String> {
 /// Frees mpv's renderer (main thread; before mpv itself is destroyed).
 pub fn detach() {
     on_main(|| {
+        if let Some(id) = TICK.with(|t| t.borrow_mut().take()) {
+            id.remove();
+        }
         let Some((api, ctx)) = RENDER.with(|r| r.borrow_mut().take()) else { return };
         if let Some(area) = AREA.with(|a| a.borrow().clone()) {
             area.make_current();
@@ -119,6 +136,7 @@ pub fn detach() {
 
 /// mpv has a new frame (called on one of mpv's threads): redraw on the main thread.
 unsafe extern "C" fn on_update(_: *mut c_void) {
+    PENDING.store(true, std::sync::atomic::Ordering::Release);
     glib::MainContext::default().invoke(|| {
         AREA.with(|a| {
             if let Some(area) = a.borrow().as_ref() {

@@ -113,15 +113,29 @@ async function playLocalFile(path: string) {
 // Liquid Glass: the light on a glass control follows the pointer (CSS reads --mx/--my).
 const GLASS = ".glass-button, .round-button, .dropdown-button, .segmented button, .tabbar button";
 let lit: HTMLElement | null = null;
+let litRect: DOMRect | null = null;
+let pointer: PointerEvent | null = null;
+let frame = 0;
+// Once per frame at most, and the control's position is measured only when the pointer enters it
+// (measuring on every move forces a layout each time).
 window.addEventListener("pointermove", (e) => {
-  const el = (e.target as HTMLElement | null)?.closest?.(GLASS) as HTMLElement | null;
-  if (lit && lit !== el) { lit.style.removeProperty("--mx"); lit.style.removeProperty("--my"); }
-  lit = el;
-  if (!el) return;
-  const r = el.getBoundingClientRect();
-  el.style.setProperty("--mx", `${e.clientX - r.left}px`);
-  el.style.setProperty("--my", `${e.clientY - r.top}px`);
+  pointer = e;
+  if (frame) return;
+  frame = requestAnimationFrame(() => {
+    frame = 0;
+    const ev = pointer;
+    if (!ev) return;
+    const el = (ev.target as HTMLElement | null)?.closest?.(GLASS) as HTMLElement | null;
+    if (lit && lit !== el) { lit.style.removeProperty("--mx"); lit.style.removeProperty("--my"); }
+    if (el !== lit) litRect = el ? el.getBoundingClientRect() : null;
+    lit = el;
+    if (!el || !litRect) return;
+    el.style.setProperty("--mx", `${ev.clientX - litRect.left}px`);
+    el.style.setProperty("--my", `${ev.clientY - litRect.top}px`);
+  });
 }, { passive: true });
+// Scrolling moves the controls: measure again next time.
+window.addEventListener("scroll", () => { litRect = null; lit = null; }, { passive: true, capture: true });
 
 // No browser right-click menu (the app has its own) and no Ctrl+wheel page zoom.
 window.addEventListener("contextmenu", (e) => {

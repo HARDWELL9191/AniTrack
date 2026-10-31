@@ -143,7 +143,9 @@ impl Engine {
         for (k, v) in &options {
             // Linux: mpv draws through the render API, so its own output and GPU options don't apply.
             #[cfg(target_os = "linux")]
-            if matches!(k.as_str(), "vo" | "gpu-api" | "gpu-context" | "wid" | "d3d11-flip" | "d3d11-output-csp" | "d3d11-exclusive-fs") {
+            // force-window would make mpv set up its video output right away, racing the render
+            // context created just after mpv starts: when mpv wins, video is switched off.
+            if matches!(k.as_str(), "vo" | "gpu-api" | "gpu-context" | "wid" | "force-window" | "d3d11-flip" | "d3d11-output-csp" | "d3d11-exclusive-fs") {
                 continue;
             }
             // An option an older/newer libmpv doesn't know shouldn't stop playback.
@@ -154,6 +156,7 @@ impl Engine {
         #[cfg(target_os = "linux")]
         {
             set_opt("vo", "libmpv")?;
+            set_opt("force-window", "no")?;
             // Zero-copy hardware decoding where the GL context allows it, else hardware decoding with a copy.
             // (A Windows-only choice like d3d11va synced from another PC counts as automatic.)
             if options.get("hwdec").is_some_and(|h| h == "auto-safe" || h.starts_with("d3d11")) {
@@ -170,7 +173,7 @@ impl Engine {
             unsafe { (api.terminate_destroy)(handle) };
             return Err(e);
         }
-        let level = ffi::cstring("warn");
+        let level = ffi::cstring(if std::env::var_os("JELLYRECO_DEBUG_VIDEO").is_some() { "v" } else { "warn" });
         unsafe { (api.request_log_messages)(handle, level.as_ptr()) };
         for (i, name) in observe.iter().enumerate() {
             let n = ffi::cstring(name);
@@ -208,7 +211,7 @@ impl Engine {
     pub fn set(&self, name: &str, value: &str) -> Result<(), String> {
         // Linux: the render API output stays as it is (the page re-sends every live option).
         #[cfg(target_os = "linux")]
-        if matches!(name, "vo" | "gpu-api" | "gpu-context" | "wid") || name.starts_with("d3d11") {
+        if matches!(name, "vo" | "gpu-api" | "gpu-context" | "wid" | "force-window") || name.starts_with("d3d11") {
             return Ok(());
         }
         #[cfg(target_os = "linux")]
@@ -317,6 +320,13 @@ fn event_loop(api: Arc<ffi::Api>, h: ffi::Handle, stop: Arc<AtomicBool>, app: Ap
             },
             _ => continue,
         };
+        // JELLYRECO_DEBUG_VIDEO=1: mpv's warnings and errors also go to the terminal.
+        if let Event::Log { level, prefix, text } = &event {
+            static DEBUG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+            if *DEBUG.get_or_init(|| std::env::var_os("JELLYRECO_DEBUG_VIDEO").is_some()) {
+                eprintln!("[mpv {level}] {prefix}: {text}");
+            }
+        }
         let _ = app.emit("mpv", event);
     }
 }

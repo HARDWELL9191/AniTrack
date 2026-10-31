@@ -106,7 +106,8 @@ jobs:
       - name: Start-up and playback check (Slovenian locale)
         run: |
           sudo locale-gen sl_SI.UTF-8 > /dev/null
-          export DISPLAY=:99 LIBGL_ALWAYS_SOFTWARE=1 LANG=sl_SI.UTF-8 LC_ALL=sl_SI.UTF-8 JELLYRECO_DEBUG_VIDEO=1
+          # (LP_NUM_THREADS=0: Mesa's software renderer on the runner races between GL contexts when threaded.)
+          export DISPLAY=:99 LIBGL_ALWAYS_SOFTWARE=1 LP_NUM_THREADS=0 LANG=sl_SI.UTF-8 LC_ALL=sl_SI.UTF-8 JELLYRECO_DEBUG_VIDEO=1
           Xvfb :99 -screen 0 1360x880x24 > /dev/null 2>&1 &
           sleep 2
           ./out/JellyReco-x86_64.AppImage "$RUNNER_TEMP/media/hevc10_eac3_ass.mkv" > "$RUNNER_TEMP/app.log" 2>&1 &

@@ -302,11 +302,39 @@ export class PlayerController {
     if (base.Id.startsWith("local:")) {
       this.patch({ index, item: base, loading: true, error: null, ended: false, position: 0, duration: 0, tracks: [], audioOptions: [], subOptions: [], chapters: [], segments: [], trickplay: null, activeSegment: null, mediaSource: null, playMethod: "DirectPlay", isAudio: false });
       await this.engine.set("start", "none");
+      await this.engine.set("pause", "no");
       await this.engine.command(["loadfile", base.Path ?? base.Id.slice(6), "replace"]);
       return;
     }
     this.patch({ index, item: base, loading: true, error: null, ended: false, position: 0, duration: ticksToSeconds(base.RunTimeTicks), tracks: [], audioOptions: [], subOptions: [], chapters: [], segments: [], trickplay: null, activeSegment: null, stats: {}, abLoop: [null, null] });
 
+    // The item's details and the server's stream decision are fetched together when where to start
+    // is already known (no "Resume?" question), instead of one after the other.
+    const maxBitrate = this.state.maxBitrate || (this.isRemote() ? s.maxBitrateRemote : s.maxBitrateLocal);
+    const fetchInfo = (startSeconds: number) => api.playbackInfo(base.Id, {
+      StartTimeTicks: secondsToTicks(startSeconds),
+      MediaSourceId: opts.mediaSourceId,
+      AudioStreamIndex: opts.audioIndex,
+      SubtitleStreamIndex: opts.subtitleIndex,
+      MaxStreamingBitrate: maxBitrate || undefined,
+      EnableDirectPlay: !maxBitrate,
+      EnableDirectStream: !maxBitrate,
+      EnableTranscoding: true,
+      AllowVideoStreamCopy: true,
+      AllowAudioStreamCopy: true,
+      AutoOpenLiveStream: true,
+      DeviceProfile: deviceProfile(maxBitrate),
+    });
+    const knownSaved = base.UserData ? ticksToSeconds(base.UserData.PlaybackPositionTicks) : null;
+    const knownStart = opts.startSeconds !== undefined ? opts.startSeconds
+      : !opts.resume ? 0
+      : knownSaved === null ? null
+      : knownSaved <= 5 ? 0
+      : s.resumeBehavior === "resume" ? knownSaved
+      : s.resumeBehavior === "start" ? 0
+      : null;
+    const early = knownStart !== null ? fetchInfo(knownStart) : null;
+    early?.catch(() => {});
     const item = await api.itemFull(base.Id).catch(() => base);
     if (token !== this.loadToken) return;
     const isAudio = item.MediaType === "Audio" || item.Type === "Audio" || item.Type === "AudioBook";
@@ -327,21 +355,7 @@ export class PlayerController {
     // Direct play first (the file as stored, decoded by mpv). Remuxing (direct stream) and then
     // transcoding are fallbacks only, for when the server can't hand over the file as is, or when a
     // lower quality is chosen on purpose.
-    const maxBitrate = this.state.maxBitrate || (this.isRemote() ? s.maxBitrateRemote : s.maxBitrateLocal);
-    const info = await api.playbackInfo(item.Id, {
-      StartTimeTicks: secondsToTicks(start),
-      MediaSourceId: opts.mediaSourceId,
-      AudioStreamIndex: opts.audioIndex,
-      SubtitleStreamIndex: opts.subtitleIndex,
-      MaxStreamingBitrate: maxBitrate || undefined,
-      EnableDirectPlay: !maxBitrate,
-      EnableDirectStream: !maxBitrate,
-      EnableTranscoding: true,
-      AllowVideoStreamCopy: true,
-      AllowAudioStreamCopy: true,
-      AutoOpenLiveStream: true,
-      DeviceProfile: deviceProfile(maxBitrate),
-    });
+    const info = early && knownStart === start ? await early : await fetchInfo(start);
     if (token !== this.loadToken) return;
     if (info.ErrorCode) throw new Error(info.ErrorCode === "NotAllowed" ? "Your account isn't allowed to play this." : info.ErrorCode === "RateLimitExceeded" ? "The server's streaming limit was reached." : "The server couldn't find a way to stream this.");
     const source = (opts.mediaSourceId && info.MediaSources.find((m) => m.Id === opts.mediaSourceId)) || info.MediaSources[0];
@@ -379,6 +393,8 @@ export class PlayerController {
     const headers = source.RequiredHttpHeaders ? Object.entries(source.RequiredHttpHeaders).map(([k, v]) => `${k}: ${v}`) : [];
     await this.engine.set("http-header-fields", headers.join(","));
     await this.engine.set("force-media-title", mediaTitle(item));
+    // mpv keeps "paused" from the last video: a new one always starts playing.
+    await this.engine.set("pause", "no");
     await this.engine.command(["loadfile", url, "replace"]);
     this.transcodeOffset = method === "Transcode" ? start : 0;
     if (method !== "DirectPlay") this.onError?.(method === "Transcode" ? "This file is being transcoded by the server (it couldn't be direct played)." : "This file is being remuxed by the server (it couldn't be direct played).");
@@ -386,6 +402,9 @@ export class PlayerController {
     // Segments (intro/credits) and next episode, in the background.
     void api.segments(item.Id).then((r) => { if (token === this.loadToken) this.patch({ segments: r.Items ?? [] }); }).catch(() => {});
   }
+
+  private lastTimeEmit = 0;
+  private timeEmitTimer: ReturnType<typeof setTimeout> | undefined;
 
   /** Transcoded streams start at 0 where the file is at `transcodeOffset`. */
   private transcodeOffset = 0;
@@ -421,7 +440,10 @@ export class PlayerController {
         const pos = num(value) + this.transcodeOffset;
         this.state = { ...this.state, position: pos };
         this.onTime(pos);
-        this.emit();
+        // mpv reports the position every video frame; the controls redraw at most 10 times a second.
+        const now = performance.now();
+        if (now - this.lastTimeEmit >= 100) { this.lastTimeEmit = now; this.emit(); }
+        else if (!this.timeEmitTimer) this.timeEmitTimer = setTimeout(() => { this.timeEmitTimer = undefined; this.lastTimeEmit = performance.now(); this.emit(); }, 100);
         break;
       }
       case "duration": if (value !== null) this.patch({ duration: num(value) + this.transcodeOffset }); break;
@@ -686,7 +708,7 @@ export class PlayerController {
       if (local < 0 || target > st.position + 60) {
         return this.load(st.index, { startSeconds: target, mediaSourceId: st.mediaSource?.Id ?? undefined, audioIndex: this.currentAudioIndex() ?? undefined, subtitleIndex: this.currentSubIndex() ?? undefined });
       }
-      await this.engine.command(["seek", String(local), "absolute"]);
+      await this.engine.command(["seek", String(local), "absolute+exact"]);
     } else await this.engine.command(["seek", String(target), "absolute+exact"]);
     this.state = { ...this.state, position: target };
     if (st.upNextCountdown !== null && st.duration - target > 30) this.clearUpNext();
@@ -1051,7 +1073,9 @@ export function mpvOptions(s: Settings): Record<string, string> {
     "network-timeout": "60",
     "stream-buffer-size": "4MiB",
     "force-seekable": "yes",
-    "hr-seek": "yes",
+    // Starting (resume) lands on the nearest keyframe, so it starts at once instead of decoding up to
+    // the exact second first; seeking with the controls is still exact ("+exact" on those seeks).
+    "hr-seek": "no",
     // Subtitles: embedded fonts (ASS in MKV) are used automatically.
     "embeddedfonts": "yes",
     "sub-auto": "no",
