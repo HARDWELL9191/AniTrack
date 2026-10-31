@@ -1159,3 +1159,15 @@ html.platform-linux .mono { font-family: "JetBrains Mono", "Cascadia Mono", "Dej
 /* Play / pause and seek feedback: a round glass disc in the middle, like iOS. */
 .player .player-flash { width: 104px; height: 104px; min-width: 0; min-height: 0; padding: 0; border-radius: 50%; gap: 2px; }
 .player .player-flash span { font-size: 12.5px; }
+
+/* The iPhone's GlassIcon: a 24 px black glass circle on the poster's top-left corner. */
+.card-badge-left { position: absolute; top: 6px; left: 6px; }
+.glass-icon { width: 24px; height: 24px; display: grid; place-items: center; border-radius: 50%; color: #fff;
+  background-color: rgba(0, 0, 0, 0.55); box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.22), 0 2px 8px rgba(0, 0, 0, 0.25); }
+
+/* Shelves: the first card isn't cut at the left (the row reaches a little past the shelf so hover
+   shadows have room, and the shelf mustn't clip it), and no scrollbar under the posters (scroll
+   with the arrows, a trackpad or Shift+wheel), with room below for the hover highlight. */
+.shelf { content-visibility: visible; contain: none; }
+.shelf-row { padding-bottom: 18px; scrollbar-width: none; }
+.shelf-row::-webkit-scrollbar { display: none; height: 0; }

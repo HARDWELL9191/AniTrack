@@ -217,14 +217,15 @@ function TmdbKeySetup() {
 }
 
 /** A poster for a title you don't have (opens its details). */
-export function TitleCard({ t, match, onClick, width = 140, highlighted }: { t: ExternalTitle; match?: number; onClick?: () => void; width?: number; highlighted?: boolean }) {
+export function TitleCard({ t, match, onClick, width = 140, highlighted, notOnServer }: { t: ExternalTitle; match?: number; onClick?: () => void; width?: number; highlighted?: boolean; notOnServer?: boolean }) {
   const open = onClick ?? (() => ui.openSheet({ kind: "tmdb", item: t }));
   return (
     <div className={`card ${highlighted ? "highlighted" : ""}`} style={{ width, ["--ar" as string]: "2 / 3" }}>
       <button className="card-cover" onClick={open} title={t.title}>
         <Cover url={resized(t.posterURL, "w342")} width={width} height={Math.round(width * 1.5)} radius={14} icon="film" />
         {match !== undefined && <div className="card-age"><span className="bubble bubble-match">{match}%</span></div>}
-        <div className="card-status ext" title="Not on your server"><Icon name="cloud" size={13} /></div>
+        {/* As on the iPhone: a My List title you don't have yet gets the cloud-with-arrow badge. */}
+        {notOnServer && <div className="card-badge-left glass-icon" title="Not on your server yet"><Icon name="cloudDown" size={16} strokeWidth={2.1} /></div>}
       </button>
       <div className="card-title">{t.title}</div>
       {t.year && <div className="card-sub">{t.year}</div>}

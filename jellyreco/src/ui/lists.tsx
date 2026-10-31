@@ -36,7 +36,7 @@ export function MyListPage({ back }: { back?: () => void }) {
   const onServer = (e: MyListEntry) => !!e.serverId || nowOnServer(e);
   const shown = entries.filter((e) => (filter === "all" ? true : filter === "server" ? onServer(e) : !!e.external && !nowOnServer(e)));
   const count = (f: Filter) => entries.filter((e) => (f === "all" ? true : f === "server" ? onServer(e) : !!e.external && !nowOnServer(e))).length;
-  const labels: Record<Filter, [string, string]> = { all: ["All", "bookmark"], server: ["On your server", "server"], outside: ["Not on server yet", "cloud"] };
+  const labels: Record<Filter, [string, string]> = { all: ["All", "bookmark"], server: ["On your server", "server"], outside: ["Not on server yet", "cloudDown"] };
 
   return (
     <div className="page">
@@ -52,7 +52,7 @@ export function MyListPage({ back }: { back?: () => void }) {
             {shown.map((e) => {
               const item = e.serverId ? serverItems?.get(e.serverId) : undefined;
               if (item) return <ItemCard key={entryId(e)} item={item} width={undefined} />;
-              if (e.external) return <TitleCard key={entryId(e)} t={e.external} width={model.settings.libraryCardSize} />;
+              if (e.external) return <TitleCard key={entryId(e)} t={e.external} width={model.settings.libraryCardSize} notOnServer />;
               return <MissingCard key={entryId(e)} entry={e} />;
             })}
           </Grid>

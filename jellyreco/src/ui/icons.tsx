@@ -127,6 +127,8 @@ const paths: Record<string, JSX.Element> = {
   arrowDown: <path d="M12 5v14M6 13l6 6 6-6" />,
   hash: <path d="M5 9h14M5 15h14M10 4 8 20M16 4l-2 16" />,
   cloud: <path d="M7 18a5 5 0 1 1 .9-9.9A6 6 0 0 1 19.5 10 4 4 0 0 1 18 18z" />,
+  // SF Symbols "icloud.and.arrow.down": a cloud with an arrow down through it.
+  cloudDown: <><path d="M8 15.5H6.6a3.9 3.9 0 1 1 .8-7.72A5 5 0 0 1 17.2 8.4a3.55 3.55 0 0 1 .2 7.1H16" /><path d="M12 9.5v11.5" /><path d="m8.8 17.8 3.2 3.2 3.2-3.2" /></>,
   syncplay: <><circle cx="8" cy="8" r="3" /><circle cx="16" cy="16" r="3" /><path d="M11 8h5a2 2 0 0 1 2 2v3M13 16H8a2 2 0 0 1-2-2v-3" /></>,
   remote: <><rect x="7" y="2" width="10" height="20" rx="3" /><circle cx="12" cy="8" r="2" /><path d="M10 14h.01M14 14h.01M10 17h.01M14 17h.01" /></>,
   menu: <><circle cx="5" cy="12" r="1.4" fill="currentColor" /><circle cx="12" cy="12" r="1.4" fill="currentColor" /><circle cx="19" cy="12" r="1.4" fill="currentColor" /></>,

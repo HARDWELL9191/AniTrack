@@ -111,7 +111,7 @@ function TmdbSheet({ item, close }: { item: ExternalTitle; close: () => void }) 
         <div className="tmdb-top">
           <Cover url={resized(t.posterURL, "w500")} width={200} height={300} radius={16} icon="film" />
           <div className="tmdb-text">
-            <span className="chip chip-muted"><Icon name="cloud" size={12} /> Not on your server</span>
+            <span className="chip chip-muted"><Icon name="cloudDown" size={12} /> Not on your server</span>
             <h2>{t.title}{t.year ? <span className="muted"> ({t.year})</span> : null}</h2>
             {d?.tagline && <p className="tagline">{d.tagline}</p>}
             <div className="muted small">{meta}</div>

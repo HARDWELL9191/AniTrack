@@ -111,7 +111,7 @@ function MyListShelf({ refreshKey }: { refreshKey: number }) {
   if (!data?.length) return null;
   return (
     <Shelf title="My List" icon="bookmark" action={{ label: "See all", run: () => { model.tab = "myList"; model.notify(); } }}>
-      {data.map((x) => (x.item ? <ItemCard key={entryId(x.e)} item={x.item} /> : x.e.external ? <TitleCard key={entryId(x.e)} t={x.e.external} width={model.settings.libraryCardSize} /> : null))}
+      {data.map((x) => (x.item ? <ItemCard key={entryId(x.e)} item={x.item} /> : x.e.external ? <TitleCard key={entryId(x.e)} t={x.e.external} width={model.settings.libraryCardSize} notOnServer /> : null))}
     </Shelf>
   );
 }
