@@ -277,8 +277,10 @@ jobs:
           SUB="${subs[0]:-}"
           if [ -n "$SUB" ] && [ -f "$SUB" ]; then
             (cd "$(dirname "$SUB")" && python3 -m http.server 8765 >/dev/null 2>&1 &) ; sleep 2
-            cp "$SUB" jfsubs/fetched.sup
-            for u in "$PWD/$SUB" "$PWD/jfsubs/fetched.sup" "http://127.0.0.1:8765/$(basename "$SUB")" "http://127.0.0.1:8765/fetched.sup"; do
+            # The app's fix: wrap the served PGS in Matroska with the app's own Swift code.
+            swiftc -O JellyReco/Player/PGSContainer.swift tools/formattest/sup2mks/main.swift -o sup2mks
+            ./sup2mks "$SUB" jfsubs/wrapped.mks | tee -a rendertest.log
+            for u in "$PWD/jfsubs/wrapped.mks" "http://127.0.0.1:8765/wrapped.mks" "$PWD/samples/subs.srt" "$PWD/samples/subs.ass" "$PWD/samples/subs.vtt"; do
               echo "=== external subtitle: $u" | tee -a rendertest.log
               curl -s -o /dev/null -w "    (http check: %{http_code})\n" "$u" 2>/dev/null | tee -a rendertest.log || true
               RENDERTEST_LOG=v RENDERTEST_SUBURL="$u" ./rendertest --fonts "$PWD/fonts" "Helvetica" samples/render/render_pgs_zlib.mkv 2>&1 \

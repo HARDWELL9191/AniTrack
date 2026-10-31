@@ -173,6 +173,7 @@ final class PlaybackController {
         didApplyTracks = false
         playingSince = nil
         externalSubs = []
+        loadGeneration &+= 1
         skippedEmbedded = []
         pendingSubtitleSelection = nil
         skippedSegments = []
@@ -256,6 +257,7 @@ final class PlaybackController {
     /// them: fetch each such subtitle from the server (PGS as the original .sup stream, text
     /// as-is) and add it as a separate subtitle. Nothing is converted or burned in.
     @ObservationIgnored private var skippedEmbedded: Set<Int> = []
+    @ObservationIgnored private var loadGeneration = 0
     @ObservationIgnored private var pendingSubtitleSelection: Int?
 
     private func noteSkippedTrack(_ message: String) {
@@ -281,9 +283,35 @@ final class PlaybackController {
         plain.deliveryUrl = nil
         guard let url = client.subtitleURL(itemId: item.id, sourceId: src.id, stream: plain, format: format) else { return }
         skippedEmbedded.insert(stream.index)
-        externalSubs.append(stream)
-        player.loadExternalSubtitle(url, selecting: nil)
         diagnostics.append("[JellyReco] Loading subtitle \(stream.index) (\(codec)) from the server instead")
+        if format == "pgssub" {
+            // The player can't open a bare .sup file: wrap the server's PGS stream in Matroska.
+            let itemId = item.id
+            let generation = loadGeneration
+            Task { [weak self] in
+                do {
+                    let (data, response) = try await URLSession.shared.data(from: url)
+                    let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+                    guard (200..<300).contains(code), let mks = PGSContainer.matroska(fromSUP: data, language: stream.language ?? "und") else {
+                        self?.diagnostics.append("[JellyReco] Subtitle \(stream.index): server answered HTTP \(code), \(data.count) bytes, not PGS")
+                        return
+                    }
+                    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("jellyreco-subs", isDirectory: true)
+                    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                    let file = dir.appendingPathComponent("\(itemId)-\(stream.index).mks")
+                    try mks.write(to: file, options: .atomic)
+                    guard let self, self.loadGeneration == generation else { return }
+                    self.externalSubs.append(stream)
+                    self.player.loadExternalSubtitle(file, selecting: nil)
+                    self.diagnostics.append("[JellyReco] Subtitle \(stream.index) ready (\(data.count) bytes of PGS)")
+                } catch {
+                    self?.diagnostics.append("[JellyReco] Subtitle \(stream.index): \(error.localizedDescription)")
+                }
+            }
+        } else {
+            externalSubs.append(stream)
+            player.loadExternalSubtitle(url, selecting: nil)
+        }
         // It's the subtitle that should be on: select it as soon as it arrives.
         let wanted = request.subtitleIndex ?? source?.defaultSubtitleStreamIndex ?? -1
         if wanted == stream.index { pendingSubtitleSelection = stream.index }
@@ -485,8 +513,14 @@ final class PlaybackController {
     // MARK: Tracks
 
     private var embeddedAudio: [MediaStream] { streams.filter { $0.isAudio && !($0.isExternal ?? false) }.sorted { $0.index < $1.index } }
+    // mpv still lists a track it skipped (no data), so it keeps its place in the numbering.
     private var embeddedSubs: [MediaStream] {
-        streams.filter { $0.isSubtitle && !($0.isExternal ?? false) && !skippedEmbedded.contains($0.index) }.sorted { $0.index < $1.index }
+        streams.filter { $0.isSubtitle && !($0.isExternal ?? false) }.sorted { $0.index < $1.index }
+    }
+
+    /// An embedded subtitle mpv skipped (zlib): its working copy is the external track.
+    private func isDeadTrack(_ t: MPVMediaTrack) -> Bool {
+        t.type == .subtitle && !t.isExternal && (stream(for: t).map { skippedEmbedded.contains($0.index) } ?? false)
     }
 
     /// The Jellyfin stream behind an mpv track (mpv numbers each type from 1 in file order;
@@ -509,12 +543,12 @@ final class PlaybackController {
     }
 
     private func track(forJellyfinIndex index: Int, type: MPVTrackType) -> MPVMediaTrack? {
-        let tracks = type == .audio ? player.audioTracks : player.subtitleTracks
+        let tracks = type == .audio ? player.audioTracks : player.subtitleTracks.filter { !isDeadTrack($0) }
         return tracks.first { stream(for: $0)?.index == index }
     }
 
     var audioOptions: [TrackOption] { player.audioTracks.map(option) }
-    var subtitleOptions: [TrackOption] { player.subtitleTracks.map(option) }
+    var subtitleOptions: [TrackOption] { player.subtitleTracks.filter { !isDeadTrack($0) }.map(option) }
 
     private func option(_ t: MPVMediaTrack) -> TrackOption {
         let s = stream(for: t)

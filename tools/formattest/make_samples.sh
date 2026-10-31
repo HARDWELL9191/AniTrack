@@ -9,6 +9,7 @@ A="-f lavfi -i sine=frequency=440:sample_rate=48000:duration=6"
 A6="-f lavfi -i sine=frequency=440:sample_rate=48000:duration=6,aformat=channel_layouts=5.1"
 printf '1\n00:00:00,500 --> 00:00:05,000\nHello from JellyReco\n' > subs.srt
 ffmpeg -nostdin -loglevel error -y -i subs.srt subs.ass
+ffmpeg -nostdin -loglevel error -y -i subs.srt subs.vtt
 make() { name="$1"; shift; if timeout 120 ffmpeg -nostdin -loglevel error -y "$@" -shortest "$name"; then echo "made $name"; else echo "SKIPPED $name (encoder missing)"; rm -f "$name"; fi; }
 
 make hevc10_truehd_ass.mkv $V $A6 -i subs.ass -map 0 -map 1 -map 2 -c:v libx265 -preset ultrafast -pix_fmt yuv420p10le -x265-params log-level=error -c:a truehd -strict -2 -c:s ass
