@@ -1,0 +1,44 @@
+{
+  "name": "JellyReco",
+  "subtitle": "A Jellyfin player for iPhone with AI picks from your own library.",
+  "description": "Official source for JellyReco. Add it in AltStore to install JellyReco and get every new build as an update.",
+  "iconURL": "https://raw.githubusercontent.com/HARDWELL9191/AniTrack/altstore/icon.png",
+  "website": "https://github.com/HARDWELL9191/AniTrack/tree/jellyfin",
+  "tintColor": "#3D99FF",
+  "nsfw": false,
+  "featuredApps": [
+    "com.tim.jellyreco"
+  ],
+  "apps": [
+    {
+      "name": "JellyReco",
+      "bundleIdentifier": "com.tim.jellyreco",
+      "developerName": "Tim",
+      "subtitle": "Jellyfin player with AI recommendations.",
+      "localizedDescription": "A Jellyfin player for iPhone with a Liquid Glass look.\n\n• Plays every file directly on the phone (mpv engine), with server conversion only as a last resort\n• Picture in Picture, AirPlay, HDR, two subtitles at once, skip intro/credits, trickplay\n• For You: AI picks from your own library, explained by Apple Intelligence\n• My List and Not for me are saved on your Jellyfin server, not the phone\n• Server dashboard for administrators\n\nRequires your own Jellyfin server. iOS 26 or later.",
+      "iconURL": "https://raw.githubusercontent.com/HARDWELL9191/AniTrack/altstore/icon.png",
+      "tintColor": "#3D99FF",
+      "category": "entertainment",
+      "screenshots": [],
+      "versions": [
+        {
+          "version": "1.0.21",
+          "buildVersion": "21",
+          "date": "2026-10-31T19:18:28Z",
+          "localizedDescription": "Use the repo's canonical name in AltStore URLs",
+          "downloadURL": "https://github.com/HARDWELL9191/AniTrack/releases/download/jellyreco-latest/JellyReco.ipa",
+          "size": 26180831,
+          "minOSVersion": "26.0"
+        }
+      ],
+      "appPermissions": {
+        "entitlements": [],
+        "privacy": {
+          "NSFaceIDUsageDescription": "Unlock JellyReco with Face ID.",
+          "NSLocalNetworkUsageDescription": "JellyReco connects to your Jellyfin server on your home network."
+        }
+      }
+    }
+  ],
+  "news": []
+}
