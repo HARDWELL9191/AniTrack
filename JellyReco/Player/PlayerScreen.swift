@@ -107,13 +107,12 @@ private struct PlayerContent: View {
     @State private var scrubbing: Double?
     @State private var hud: HUD?
     @State private var hudTask: Task<Void, Never>?
-    @State private var holdSpeed = false
     @State private var pinch: CGFloat?          // live pinch scale (nil when not pinching)
     @State private var volume = SystemVolume()
     @State private var menuOpen = false
 
     enum HUD: Equatable {
-        case brightness(Double), volume(Double), jump(Double), text(String)
+        case jump(Double), text(String)
     }
 
     private var player: MPVPlayer { controller.player }
@@ -129,9 +128,7 @@ private struct PlayerContent: View {
                 onTap: { toggleControls() },
                 onDoubleTap: { side in doubleTap(side) },
                 onPinch: { scale, ended in pinchChanged(scale, ended: ended) },
-                onVerticalPan: { side, delta, ended in verticalPan(side: side, delta: delta, ended: ended) },
                 onSwipeDown: { close() },
-                onHold: { holding in hold(holding) },
                 isLocked: locked
             )
             .ignoresSafeArea()
@@ -155,14 +152,6 @@ private struct PlayerContent: View {
 
             if !locked { cornerCards }
             if let hud { HUDView(hud: hud).allowsHitTesting(false).transition(.opacity) }
-            if holdSpeed {
-                Label("2×", systemImage: "forward.fill")
-                    .font(.subheadline.weight(.bold)).foregroundStyle(.white)
-                    .padding(.horizontal, 14).padding(.vertical, 8)
-                    .glassEffect(.regular, in: .capsule)
-                    .frame(maxHeight: .infinity, alignment: .top).padding(.top, 20)
-                    .allowsHitTesting(false)
-            }
             if controller.askStillWatching { StillWatchingCard(controller: controller, close: close) }
             VolumeViewHost(volume: volume).frame(width: 1, height: 1).opacity(0.01).allowsHitTesting(false)
         }
@@ -474,25 +463,19 @@ private struct PlayerContent: View {
 
     private func doubleTap(_ side: TouchLayer.Side) {
         guard !locked else { return }
-        switch settings.doubleTap {
-        case .jump:
-            switch side {
-            case .left:
-                controller.jump(-Double(settings.jumpBackward)); showHUD(.jump(-Double(settings.jumpBackward)))
-            case .right:
-                controller.jump(Double(settings.jumpForward)); showHUD(.jump(Double(settings.jumpForward)))
-            case .center:
-                withAnimation(.smooth(duration: 0.35)) { controller.toggleFill() }   // like Apple: double-tap the middle to zoom
-            }
-        case .playPause:
-            controller.togglePlay()
-        case .none:
-            break
+        // Apple's player: double-tap a side to skip, the middle to zoom.
+        switch side {
+        case .left:
+            controller.jump(-Double(settings.jumpBackward)); showHUD(.jump(-Double(settings.jumpBackward)))
+        case .right:
+            controller.jump(Double(settings.jumpForward)); showHUD(.jump(Double(settings.jumpForward)))
+        case .center:
+            withAnimation(.smooth(duration: 0.35)) { controller.toggleFill() }
         }
     }
 
     private func pinchChanged(_ scale: CGFloat, ended: Bool) {
-        guard !locked, settings.pinchToFill else { return }
+        guard !locked else { return }
         if ended {
             // One transaction: the live pinch size eases into fit or fill (no jump back first).
             let fill = controller.isFilled ? scale > 0.92 : scale > 1.08
@@ -505,36 +488,6 @@ private struct PlayerContent: View {
             t.disablesAnimations = true
             withTransaction(t) { pinch = scale }
         }
-    }
-
-    @State private var panStart: Double = 0
-
-    private func verticalPan(side: TouchLayer.Side, delta: CGFloat?, ended: Bool) {
-        guard !locked else { return }
-        let action = side == .left ? settings.gestureLeftVertical : settings.gestureRightVertical
-        guard let delta else {   // began
-            panStart = action == .brightness ? Double(Screen.brightness) : Double(volume.value)
-            return
-        }
-        guard !ended else { return }
-        let v = min(1, max(0, panStart + Double(delta)))
-        switch action {
-        case .brightness:
-            Screen.brightness = CGFloat(v)
-            showHUD(.brightness(v))
-        case .volume:
-            volume.value = Float(v)
-            showHUD(.volume(v))
-        default:
-            break
-        }
-    }
-
-    private func hold(_ holding: Bool) {
-        guard !locked, settings.longPress == .speed2x else { return }
-        if holding && player.isPaused { return }
-        holdSpeed = holding
-        controller.setSpeed(holding ? 2.0 : settings.defaultSpeed)
     }
 
     private func scheduleHide() {
@@ -707,10 +660,7 @@ private struct TouchLayer: UIViewRepresentable {
     let onTap: () -> Void
     let onDoubleTap: (Side) -> Void
     let onPinch: (CGFloat, Bool) -> Void
-    /// delta nil = began; values are fractions of the screen height (up = positive).
-    let onVerticalPan: (Side, CGFloat?, Bool) -> Void
     let onSwipeDown: () -> Void
-    let onHold: (Bool) -> Void
     let isLocked: Bool
 
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
@@ -727,9 +677,7 @@ private struct TouchLayer: UIViewRepresentable {
         let pinch = UIPinchGestureRecognizer(target: c, action: #selector(Coordinator.pinch(_:)))
         let pan = UIPanGestureRecognizer(target: c, action: #selector(Coordinator.pan(_:)))
         pan.maximumNumberOfTouches = 1
-        let hold = UILongPressGestureRecognizer(target: c, action: #selector(Coordinator.hold(_:)))
-        hold.minimumPressDuration = 0.45
-        for g in [double, single, pinch, pan, hold] as [UIGestureRecognizer] {
+        for g in [double, single, pinch, pan] as [UIGestureRecognizer] {
             g.delegate = c
             view.addGestureRecognizer(g)
         }
@@ -742,9 +690,7 @@ private struct TouchLayer: UIViewRepresentable {
 
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         var parent: TouchLayer
-        private var panSide: Side = .center
-        private var panMode: PanMode = .none
-        enum PanMode { case none, vertical, dismiss }
+        private var dismissing = false
 
         init(parent: TouchLayer) { self.parent = parent }
 
@@ -769,39 +715,19 @@ private struct TouchLayer: UIViewRepresentable {
             }
         }
 
+        /// Swipe down to close, like Apple's player.
         @objc func pan(_ g: UIPanGestureRecognizer) {
             guard let v = g.view, !parent.isLocked else { return }
             let t = g.translation(in: v)
             switch g.state {
             case .began:
                 let vel = g.velocity(in: v)
-                panSide = side(g)
-                if panSide == .center && vel.y > 0 && abs(vel.y) > abs(vel.x) {
-                    panMode = .dismiss
-                } else if abs(vel.y) > abs(vel.x) && panSide != .center {
-                    panMode = .vertical
-                    parent.onVerticalPan(panSide, nil, false)
-                } else {
-                    panMode = .none
-                }
-            case .changed:
-                if panMode == .vertical {
-                    parent.onVerticalPan(panSide, -t.y / max(v.bounds.height * 0.75, 1), false)
-                }
+                dismissing = vel.y > 0 && abs(vel.y) > abs(vel.x)
             case .ended:
-                if panMode == .dismiss && t.y > v.bounds.height * 0.22 { parent.onSwipeDown() }
-                if panMode == .vertical { parent.onVerticalPan(panSide, 0, true) }
-                panMode = .none
+                if dismissing && t.y > v.bounds.height * 0.22 { parent.onSwipeDown() }
+                dismissing = false
             default:
-                panMode = .none
-            }
-        }
-
-        @objc func hold(_ g: UILongPressGestureRecognizer) {
-            switch g.state {
-            case .began: parent.onHold(true)
-            case .ended, .cancelled, .failed: parent.onHold(false)
-            default: break
+                if g.state != .changed { dismissing = false }
             }
         }
 
@@ -811,14 +737,7 @@ private struct TouchLayer: UIViewRepresentable {
     }
 }
 
-// MARK: - Brightness & volume
-
-enum Screen {
-    @MainActor static var brightness: CGFloat {
-        get { UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.screen }.first?.brightness ?? 0.5 }
-        set { UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.screen }.first?.brightness = newValue }
-    }
-}
+// MARK: - Volume
 
 /// System volume: read live from the audio session (so the hardware buttons move the slider)
 /// and set through a hidden MPVolumeView slider (the supported way; it also keeps the system
@@ -979,8 +898,6 @@ private struct HUDView: View {
     var body: some View {
         Group {
             switch hud {
-            case .brightness(let v): bar("sun.max.fill", v)
-            case .volume(let v): bar(v == 0 ? "speaker.slash.fill" : "speaker.wave.2.fill", v)
             case .jump(let s):
                 Image(systemName: s < 0 ? "gobackward.\(Int(abs(s)))" : "goforward.\(Int(s))")
                     .font(.system(size: 30, weight: .semibold))

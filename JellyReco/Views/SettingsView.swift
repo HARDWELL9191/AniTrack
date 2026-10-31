@@ -40,7 +40,6 @@ struct SettingsView: View {
                 Section("Playback") {
                     NavigationLink { PlayerSettingsView() } label: { Label("Video player", systemImage: "play.rectangle.fill") }
                     NavigationLink { SubtitleAudioSettingsView() } label: { Label("Subtitles & audio", systemImage: "captions.bubble.fill") }
-                    NavigationLink { GestureSettingsView() } label: { Label("Gestures", systemImage: "hand.draw.fill") }
                 }
 
                 Section("Browsing") {
@@ -323,28 +322,6 @@ struct PlayerSettingsView: View {
             }
         }
         .navigationTitle("Video player")
-    }
-}
-
-struct GestureSettingsView: View {
-    @Environment(AppModel.self) private var model
-    var body: some View {
-        @Bindable var s = model.settings
-        let vertical: [GestureAction] = [.none, .brightness, .volume]
-        Form {
-            Section {
-                Picker("Double tap", selection: $s.doubleTap) { ForEach(DoubleTapAction.allCases) { Text($0.label).tag($0) } }
-                Toggle("Pinch to zoom", isOn: $s.pinchToFill)
-            } header: { Text("Like Apple's player") } footer: {
-                Text("Double-tap the left or right side to jump, the middle to zoom; pinch to fill the screen; swipe down to close.")
-            }
-            Section {
-                Picker("Swipe up/down on the left", selection: $s.gestureLeftVertical) { ForEach(vertical) { Text($0.label).tag($0) } }
-                Picker("Swipe up/down on the right", selection: $s.gestureRightVertical) { ForEach(vertical) { Text($0.label).tag($0) } }
-                Picker("Touch and hold", selection: $s.longPress) { ForEach(LongPressAction.allCases) { Text($0.label).tag($0) } }
-            } header: { Text("Extras") }
-        }
-        .navigationTitle("Gestures")
     }
 }
 
