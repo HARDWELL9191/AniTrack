@@ -665,9 +665,10 @@ final class JellyfinClient: @unchecked Sendable {
 
     // MARK: Search
 
-    func search(_ term: String, types: [ItemKind], limit: Int = 40) async throws -> [BaseItem] {
+    func search(_ term: String, types: [ItemKind], limit: Int = 40, genre: String? = nil) async throws -> [BaseItem] {
         var q = ItemQuery()
         q.searchTerm = term
+        if let genre { q.genres = [genre] }
         q.includeItemTypes = types
         q.sortBy = ["SortName"]
         q.limit = limit

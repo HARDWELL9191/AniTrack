@@ -11,14 +11,31 @@ struct SearchView: View {
     @State private var collections: [BaseItem] = []
     @State private var genres: [BaseItem] = []
     @State private var isSearching = false
+    @State private var searchGenre: String?
+    @State private var path = NavigationPath()
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 24) {
                     if query.trimmingCharacters(in: .whitespaces).isEmpty {
                         suggestions
                     } else {
+                        // AniReco: category filter dropdown on the right.
+                        categoryFilter
+                        let matching = genres.filter { $0.displayName.localizedCaseInsensitiveContains(query.trimmingCharacters(in: .whitespaces)) }
+                        if !matching.isEmpty {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Categories").font(.title3.bold())
+                                ForEach(matching.prefix(5)) { g in
+                                    NavigationLink(value: GenreLink(name: g.displayName, parentId: nil)) {
+                                        Label("Browse \(g.displayName)", systemImage: "square.stack.fill")
+                                            .font(.subheadline.weight(.semibold))
+                                    }
+                                }
+                            }
+                            .padding(.horizontal)
+                        }
                         Shelf(title: "Movies", items: movies)
                         Shelf(title: "Shows", items: shows)
                         Shelf(title: "Episodes", items: episodes, landscape: true)
@@ -34,7 +51,7 @@ struct SearchView: View {
             .navigationTitle("Search")
             .toolbarTitleDisplayMode(.inlineLarge)
             .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Movies, shows, episodes, people")
-            .task(id: query) {
+            .task(id: "\(query)|\(searchGenre ?? "")") {
                 let term = query.trimmingCharacters(in: .whitespaces)
                 guard !term.isEmpty else { return }
                 try? await Task.sleep(nanoseconds: 300_000_000)   // debounce typing
@@ -47,22 +64,49 @@ struct SearchView: View {
         }
     }
 
+    /// AniReco's "Categories" dropdown on the right: picking one opens that genre.
     private var suggestions: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Browse by genre").font(.title3.bold()).padding(.horizontal)
-            FlowLayout(spacing: 8) {
-                ForEach(genres) { g in
-                    NavigationLink(value: GenreLink(name: g.displayName, parentId: nil)) {
-                        Text(g.displayName)
-                            .font(.subheadline.weight(.semibold))
-                            .padding(.horizontal, 14).padding(.vertical, 9)
-                            .glassEffect(.regular.tint(Theme.accent.opacity(0.15)), in: .capsule)
+        VStack(spacing: 24) {
+            HStack {
+                Spacer()
+                Menu {
+                    ForEach(genres) { g in
+                        Button(g.displayName) { path.append(GenreLink(name: g.displayName, parentId: nil)) }
                     }
-                    .buttonStyle(.plain)
+                } label: {
+                    DropdownLabel(text: "Categories", symbol: "line.3.horizontal.decrease")
                 }
+                .menuStyle(.button)
+                .buttonStyle(.glass)
+                .disabled(genres.isEmpty)
             }
-            .padding(.horizontal)
+            .padding(.horizontal, 16)
+            ContentUnavailableView("Search your server", systemImage: "magnifyingglass",
+                                   description: Text("Movies, shows, episodes, collections and people. Pick a category to browse it."))
         }
+    }
+
+    /// Search results filtered to one category ("Any category" = everything).
+    private var categoryFilter: some View {
+        HStack {
+            Spacer()
+            Menu {
+                Button { searchGenre = nil } label: {
+                    if searchGenre == nil { Label("Any category", systemImage: "checkmark") } else { Text("Any category") }
+                }
+                Divider()
+                ForEach(genres) { g in
+                    Button { searchGenre = g.displayName } label: {
+                        if searchGenre == g.displayName { Label(g.displayName, systemImage: "checkmark") } else { Text(g.displayName) }
+                    }
+                }
+            } label: {
+                DropdownLabel(text: searchGenre ?? "Any category", symbol: "line.3.horizontal.decrease")
+            }
+            .menuStyle(.button)
+            .buttonStyle(.glass)
+        }
+        .padding(.horizontal, 16)
     }
 
     private var peopleRow: some View {
@@ -92,10 +136,11 @@ struct SearchView: View {
         guard let client = model.client else { return }
         isSearching = true
         defer { isSearching = false }
-        async let m = client.search(term, types: [.movie])
-        async let s = client.search(term, types: [.series])
-        async let e = client.search(term, types: [.episode], limit: 30)
-        async let c = client.search(term, types: [.boxSet], limit: 20)
+        let g = searchGenre
+        async let m = client.search(term, types: [.movie], genre: g)
+        async let s = client.search(term, types: [.series], genre: g)
+        async let e = client.search(term, types: [.episode], limit: 30, genre: g)
+        async let c = client.search(term, types: [.boxSet], limit: 20, genre: g)
         async let p = client.searchPeople(term)
         movies = (try? await m) ?? []
         shows = (try? await s) ?? []
