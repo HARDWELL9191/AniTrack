@@ -139,4 +139,17 @@ final class SettingsPagesUITests: XCTestCase {
             app.navigationBars.buttons.element(boundBy: 0).tap()
         }
     }
+
+    /// Press and hold a card: the lifted preview must show the whole text (the "S" of S1E4).
+    func testLongPressPreviewKeepsText() {
+        let app = launch("longpress")
+        let label = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'S1E4'")).firstMatch
+        XCTAssertTrue(label.waitForExistence(timeout: 30), "card")
+        shot(app, "longpress-0-card")
+        label.press(forDuration: 1.2)
+        let menu = app.buttons["Mark as watched"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 5), "long-press menu")
+        shot(app, "longpress-1-menu")
+        print("RESULT long press menu shown: \(menu.exists)")
+    }
 }

@@ -103,7 +103,7 @@ struct MyListView: View {
                         .overlay(alignment: .topLeading) { GlassIcon(symbol: "icloud.and.arrow.down").padding(5) }
                 }
                 .buttonStyle(PressStyle())
-                .contextMenu {
+                .cardContextMenu {
                     Button("Remove from My List", systemImage: "bookmark.slash", role: .destructive) {
                         Task { await model.removeFromMyList(entry) }
                     }
@@ -118,7 +118,7 @@ struct MyListView: View {
                     .overlay(Image(systemName: "questionmark").foregroundStyle(.secondary))
                 Text(entry.name ?? "Removed from server").font(.caption.weight(.semibold)).lineLimit(2)
             }
-            .contextMenu {
+            .cardContextMenu {
                 Button("Remove from My List", systemImage: "bookmark.slash", role: .destructive) {
                     Task { await model.removeFromMyList(entry) }
                 }

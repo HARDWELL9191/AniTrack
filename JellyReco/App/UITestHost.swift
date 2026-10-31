@@ -25,6 +25,10 @@ struct UITestHost: View {
      "HlsAudioSeekStrategy":"TranscodeAudio"}
     """
 
+    static let episodeJSON = """
+    {"Id":"e1","Name":"Romio and Hasuki","Type":"Episode","SeriesName":"Boarding School Juliet","IndexNumber":4,"ParentIndexNumber":1}
+    """
+
     var body: some View {
         ZStack {
             Color.clear
@@ -38,6 +42,19 @@ struct UITestHost: View {
                 NavigationStack { AdminDashboardView() }
             } else if ready, mode == "settings" {
                 SettingsView()
+            } else if ready, mode == "longpress" {
+                // Your Next Up card: text starting at the card's left edge, where the lifted
+                // preview's rounded corner cut the "S".
+                ScrollView {
+                    HStack(spacing: 14) {
+                        if let item = try? JSONCoding.decoder.decode(BaseItem.self, from: Data(Self.episodeJSON.utf8)) {
+                            LandscapeCard(item: item, width: 280)
+                            PosterCard(item: item, width: 112)
+                        }
+                    }
+                    .padding(.horizontal)
+                    .padding(.top, 120)
+                }
             } else if ready {
                 ForYouView()
                     .overlay(alignment: .bottom) {

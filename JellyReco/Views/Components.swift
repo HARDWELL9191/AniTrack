@@ -417,7 +417,7 @@ struct ItemActionsMenu: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .contextMenu {
+            .cardContextMenu {
                 if item.kind.isPlayableVideo || item.kind == .series || item.kind == .season {
                     Button("Play", systemImage: "play.fill") { model.play(item) }
                     if (model.userData(for: item)?.playbackPositionTicks ?? 0) > 0 {
@@ -447,6 +447,17 @@ struct ItemActionsMenu: ViewModifier {
 
 extension View {
     func itemActions(_ item: BaseItem) -> some View { modifier(ItemActionsMenu(item: item)) }
+
+    /// A long-press menu for a card. When iOS lifts the card it cuts it to rounded corners at
+    /// its exact edge, which shaved off text sitting in a corner (the "S" of "S1E4"). The lifted
+    /// preview gets a margin around the card instead; the card's layout doesn't change.
+    func cardContextMenu<Menu: View>(margin: CGFloat = 10, @ViewBuilder _ menu: @escaping () -> Menu) -> some View {
+        self
+            .padding(margin)
+            .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .contextMenu { menu() }
+            .padding(-margin)
+    }
 }
 
 /// Titles like this one from your own library, unwatched, best match first.
