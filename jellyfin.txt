@@ -1,0 +1,10 @@
+wizard ready (HTTP 200)
+{"LocalAddress":"http://172.17.0.2:8096","ServerName":"8c2453ad9a6b","Version":"12.4.0","ProductName":"Jellyfin Server","OperatingSystem":"","Id":"01d9e0a40f3048788e60614afd7da95a","StartupWizardCompleted":false}
+  POST /Startup/Configuration -> 204
+  GET /Startup/User -> 200
+  POST /Startup/User -> 204
+  POST /Startup/RemoteAccess -> 204
+  POST /Startup/Complete -> 204
+  POST /Users/AuthenticateByName -> 200
+token ok: 32 chars
+[19:15:44.137] [INF] [4] Jellyfin.Server.Migrations.JellyfinMigrationService: Seed migration null-FixLibrarySubtitleDownloadLanguages.
