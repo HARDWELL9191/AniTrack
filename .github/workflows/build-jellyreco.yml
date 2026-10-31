@@ -277,7 +277,13 @@ jobs:
           SUB="${subs[0]:-}"
           if [ -n "$SUB" ] && [ -f "$SUB" ]; then
             (cd "$(dirname "$SUB")" && python3 -m http.server 8765 >/dev/null 2>&1 &) ; sleep 2
-            RENDERTEST_SUBURL="http://127.0.0.1:8765/$(basename "$SUB" | sed 's/ /%20/g')" ./rendertest --fonts "$PWD/fonts" "Helvetica" samples/render/render_pgs_zlib.mkv 2>&1 | tee -a rendertest.log || true
+            cp "$SUB" jfsubs/fetched.sup
+            for u in "$PWD/$SUB" "$PWD/jfsubs/fetched.sup" "http://127.0.0.1:8765/$(basename "$SUB")" "http://127.0.0.1:8765/fetched.sup"; do
+              echo "=== external subtitle: $u" | tee -a rendertest.log
+              curl -s -o /dev/null -w "    (http check: %{http_code})\n" "$u" 2>/dev/null | tee -a rendertest.log || true
+              RENDERTEST_LOG=v RENDERTEST_SUBURL="$u" ./rendertest --fonts "$PWD/fonts" "Helvetica" samples/render/render_pgs_zlib.mkv 2>&1 \
+                | grep -i -E "PASS|FAIL|sub-add|external|sup|pgs|demux|lavf|probe|format|open" | head -40 | tee -a rendertest.log || true
+            done
           else
             echo "NO SUBTITLE FILE FROM JELLYFIN" | tee -a rendertest.log
           fi

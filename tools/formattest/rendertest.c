@@ -48,7 +48,8 @@ int main(int argc, char **argv) {
         mpv_set_option_string(h, "sub-border-style", "outline-and-shadow");
         mpv_set_option_string(h, "sub-border-size", "3");
         if (demuxer) mpv_set_option_string(h, "demuxer", demuxer);
-        mpv_request_log_messages(h, "warn");
+        mpv_request_log_messages(h, getenv("RENDERTEST_LOG") ? getenv("RENDERTEST_LOG") : "warn");
+        if (getenv("RENDERTEST_SUBDEMUXER")) mpv_set_option_string(h, "sub-demuxer", getenv("RENDERTEST_SUBDEMUXER"));
         if (fontsDir) {
             mpv_set_option_string(h, "sub-fonts-dir", fontsDir);
             mpv_set_option_string(h, "sub-font", family);
