@@ -157,13 +157,13 @@ struct MenuPickerRow<Value: Hashable, Options: View>: View {
     }
 }
 
-/// A menu entry with a white icon (Apple's style), not the accent colour.
+/// A menu entry (Settings, Dashboard): the icon in the app's blue accent.
 struct MenuLabel: View {
     let title: String
     let symbol: String
     init(_ title: String, _ symbol: String) { self.title = title; self.symbol = symbol }
     var body: some View {
-        Label { Text(title) } icon: { Image(systemName: symbol).foregroundStyle(.primary) }
+        Label { Text(title) } icon: { Image(systemName: symbol).foregroundStyle(Theme.accent) }
     }
 }
 
