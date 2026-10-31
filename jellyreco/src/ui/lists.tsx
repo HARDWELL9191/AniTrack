@@ -5,12 +5,11 @@
 
 import { useState } from "react";
 import { type ExternalListName } from "../core/storage";
-import { type ExternalTitle, entryId, metaLine, type MyListEntry, resized, titleId } from "../core/titles";
+import { type ExternalTitle, entryId, type MyListEntry, titleId } from "../core/titles";
 import type { Item } from "../core/types";
 import { Cover, Dropdown, Empty, Grid, ItemCard, PageHeader, useLoad } from "./components";
 import { TitleCard, titleAction } from "./foryou";
-import { Icon } from "./icons";
-import { ui, useModel } from "./state";
+import { type MenuAction, ui, useModel } from "./state";
 
 type Filter = "all" | "server" | "outside";
 
@@ -55,7 +54,7 @@ export function MyListPage({ back }: { back?: () => void }) {
               // A pick you've since added to the server: that server title, with the green cloud (iPhone).
               const owned = e.external && c && model.reco.ready ? model.discovery.ownedItem(c, e.external) : undefined;
               if (owned) return <ItemCard key={entryId(e)} item={owned} width={undefined} nowOnServer />;
-              if (e.external) return <TitleCard key={entryId(e)} t={e.external} width={model.settings.libraryCardSize} notOnServer />;
+              if (e.external) return <TitleCard key={entryId(e)} t={e.external} width={model.settings.libraryCardSize} notOnServer actions={myListActions(model, e.external)} />;
               return <MissingCard key={entryId(e)} entry={e} />;
             })}
           </Grid>
@@ -91,24 +90,35 @@ export function NotForMePage({ back }: { back?: () => void }) {
       </PageHeader>
       {!st?.loaded ? <div className="spinner-wrap"><span className="spinner" /></div>
         : !list.length ? <Empty icon={tab === "notforme" ? "thumbsDown" : "eye"} title="Nothing here" text={tab === "notforme" ? 'Titles you mark "Not for me" in For You show up here.' : 'Titles you mark "Already seen" in For You show up here.'} />
-        : <div className="rows columns">{list.map((t) => <TurnedDownRow key={titleId(t)} t={t} tab={tab} />)}</div>}
+        : (
+          // The same poster grid as My List (age bubbles; right-click or … to undo or add to My List).
+          <Grid min={model.settings.libraryCardSize}>
+            {list.map((t) => <TitleCard key={titleId(t)} t={t} width={model.settings.libraryCardSize} actions={turnedDownActions(model, t, tab)} />)}
+          </Grid>
+        )}
       <p className="footnote">For titles on your server, Not for me is Jellyfin's own thumbs-down: undo it on the title's page.</p>
     </div>
   );
 }
 
-function TurnedDownRow({ t, tab }: { t: ExternalTitle; tab: ExternalListName }) {
-  const model = useModel();
-  return (
-    <div className="row static">
-      <button className="row-open" onClick={() => ui.openSheet({ kind: "tmdb", item: t })}>
-        <Cover url={resized(t.posterURL, "w185")} width={50} height={75} radius={8} icon="film" />
-        <div className="row-text"><div className="row-title">{t.title}</div><div className="row-sub">{metaLine(t)}</div></div>
-      </button>
-      <button className="glass-button" onClick={() => void titleAction(model, t, tab === "notforme" ? "undoNotForMe" : "undoSeen")}><Icon name="undo" size={14} /> Undo</button>
-      <button className="glass-button" onClick={() => void titleAction(model, t, "myList")}><Icon name="bookmark" size={14} /> My List</button>
-    </div>
-  );
+/** What a turned-down pick offers (the iPhone's long-press menu): undo, My List, details. */
+function turnedDownActions(model: ReturnType<typeof useModel>, t: ExternalTitle, tab: ExternalListName): MenuAction[] {
+  const onList = !!model.storage?.hasTitle(t);
+  return [
+    { label: tab === "notforme" ? "Undo Not for me" : "Undo Already seen", icon: "undo", run: () => void titleAction(model, t, tab === "notforme" ? "undoNotForMe" : "undoSeen") },
+    { label: onList ? "Remove from My List" : "Add to My List", icon: "bookmark", run: () => void titleAction(model, t, "myList") },
+    { label: "Details", icon: "info", run: () => ui.openSheet({ kind: "tmdb", item: t }) },
+  ];
+}
+
+/** A My List pick's menu (as on the iPhone): remove it, or mark it seen / not for me. */
+export function myListActions(model: ReturnType<typeof useModel>, t: ExternalTitle): MenuAction[] {
+  return [
+    { label: "Details", icon: "info", run: () => ui.openSheet({ kind: "tmdb", item: t }) },
+    { label: "Remove from My List", icon: "bookmark", danger: true, run: () => void titleAction(model, t, "myList") },
+    { label: "Already seen", icon: "eye", run: () => void titleAction(model, t, "seen") },
+    { label: "Not for me", icon: "thumbsDown", run: () => void titleAction(model, t, "notForMe") },
+  ];
 }
 
 /** Counts for the sidebar. */

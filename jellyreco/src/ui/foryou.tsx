@@ -3,19 +3,19 @@
 // second: a category. My List / Not for me / Already seen are saved in your account (shared with
 // the iPhone).
 
-import { useEffect, useState } from "react";
+import { type MouseEvent as RMouseEvent, useEffect, useState } from "react";
 import { type ExternalPick, kindOf } from "../core/discovery";
 import type { AppModel } from "../core/model";
 import { ALL, currentSourceId, sourcesOf } from "../core/reco";
 import { AccountStorage, setNotForMe } from "../core/storage";
-import { type ExternalTitle, metaLine, resized, titleId } from "../core/titles";
+import { type ExternalTitle, isMovie, metaLine, resized, titleId } from "../core/titles";
 import { Tmdb } from "../core/tmdb";
 import type { Item } from "../core/types";
 import { Chip, Cover, Dropdown, Empty, Field, MatchBubble, PageHeader, Shelf } from "./components";
 import { ageBucket } from "../core/age";
 import { relativeTime } from "./fmt";
 import { Icon } from "./icons";
-import { ui, useModel, useNavigate } from "./state";
+import { type MenuAction, ui, useModel, useNavigate } from "./state";
 
 /** The library For You uses right now (saved choice, else the one named Anime). */
 export function useSourceId(model: AppModel) {
@@ -234,10 +234,16 @@ export function ExternalAgeBubble({ t }: { t: ExternalTitle }) {
 }
 
 /** A poster for a title you don't have (opens its details). */
-export function TitleCard({ t, match, onClick, width = 140, highlighted, notOnServer }: { t: ExternalTitle; match?: number; onClick?: () => void; width?: number; highlighted?: boolean; notOnServer?: boolean }) {
+export function TitleCard({ t, match, onClick, width = 140, highlighted, notOnServer, actions }: { t: ExternalTitle; match?: number; onClick?: () => void; width?: number; highlighted?: boolean; notOnServer?: boolean; actions?: MenuAction[] }) {
   const open = onClick ?? (() => ui.openSheet({ kind: "tmdb", item: t }));
+  // Right-click (or the … button) opens the card's own actions, as long-press does on the iPhone.
+  const menu = actions?.length ? (e: RMouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    ui.showMenu({ x: e.clientX, y: e.clientY, item: { Id: titleId(t), Name: t.title, Type: isMovie(t) ? "Movie" : "Series" }, actions });
+  } : undefined;
   return (
-    <div className={`card ${highlighted ? "highlighted" : ""}`} style={{ width, ["--ar" as string]: "2 / 3" }}>
+    <div className={`card ${highlighted ? "highlighted" : ""}`} style={{ width, ["--ar" as string]: "2 / 3" }} onContextMenu={menu}>
       <button className="card-cover" onClick={open} title={t.title}>
         <Cover url={resized(t.posterURL, "w342")} width={width} height={Math.round(width * 1.5)} radius={14} icon="film" />
         {/* As on the iPhone: age bubble top left, match % bottom left, and a My List title you don't
@@ -245,6 +251,7 @@ export function TitleCard({ t, match, onClick, width = 140, highlighted, notOnSe
         <div className="card-badges"><ExternalAgeBubble t={t} /></div>
         {match !== undefined && <div className="card-match"><MatchBubble value={match} /></div>}
         {notOnServer && <div className="card-badge-tr glass-icon" title="Not on your server yet"><Icon name="cloudDown" size={16} strokeWidth={2.1} /></div>}
+        {menu && <span className="card-more" role="button" aria-label="More" onClick={menu}><Icon name="more" size={18} /></span>}
       </button>
       <div className="card-title">{t.title}</div>
       {t.year && <div className="card-sub">{t.year}</div>}

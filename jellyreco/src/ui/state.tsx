@@ -45,7 +45,9 @@ export type Sheet =
   | { kind: "confirm"; title: string; text: string; danger?: boolean; confirmLabel?: string; run: () => void | Promise<void> }
   | { kind: "prompt"; title: string; label: string; initial?: string; confirmLabel?: string; run: (value: string) => void | Promise<void> };
 
-export interface MenuRequest { x: number; y: number; item: Item; context?: "resume" | "playlist" | "queue"; playlistId?: string }
+/** A menu entry for something that isn't a server item (a For You pick). */
+export interface MenuAction { label: string; icon?: string; danger?: boolean; run: () => void }
+export interface MenuRequest { x: number; y: number; item: Item; context?: "resume" | "playlist" | "queue"; playlistId?: string; actions?: MenuAction[] }
 
 class UIStore {
   version = 0;

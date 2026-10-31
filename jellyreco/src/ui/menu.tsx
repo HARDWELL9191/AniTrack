@@ -150,7 +150,7 @@ export function ItemMenu() {
     if (r.right > window.innerWidth - 8) el.style.left = `${Math.max(8, window.innerWidth - r.width - 8)}px`;
   });
   if (!m) return null;
-  const items = itemMenuItems(model, m.item, m.context, m.playlistId);
+  const items: DropItem<Action>[] = m.actions ? m.actions.map((a) => ({ value: a.run, label: a.label, icon: a.icon, danger: a.danger })) : itemMenuItems(model, m.item, m.context, m.playlistId);
   return (
     <div ref={ref} className="menu context-menu" style={{ left: m.x, top: m.y }} role="menu">
       <div className="menu-title">{m.item.Name}</div>

@@ -10,6 +10,7 @@ import { Icon } from "./icons";
 import { ui, useModel, useNavigate } from "./state";
 import { TitleCard, useForYou } from "./foryou";
 import { entryId, titleId } from "../core/titles";
+import { myListActions } from "./lists";
 
 export function HomePage({ refreshKey }: { refreshKey: number }) {
   const model = useModel();
@@ -117,7 +118,7 @@ function MyListShelf({ refreshKey }: { refreshKey: number }) {
         if (!x.e.external) return null;
         // A pick you've since added to the server: that title, with the green cloud (as on the iPhone).
         const owned = c && model.reco.ready ? model.discovery.ownedItem(c, x.e.external) : undefined;
-        return owned ? <ItemCard key={entryId(x.e)} item={owned} nowOnServer /> : <TitleCard key={entryId(x.e)} t={x.e.external} width={model.settings.libraryCardSize} notOnServer />;
+        return owned ? <ItemCard key={entryId(x.e)} item={owned} nowOnServer /> : <TitleCard key={entryId(x.e)} t={x.e.external} width={model.settings.libraryCardSize} notOnServer actions={myListActions(model, x.e.external)} />;
       })}
     </Shelf>
   );
