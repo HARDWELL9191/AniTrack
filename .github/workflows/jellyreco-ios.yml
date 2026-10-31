@@ -1,4 +1,4 @@
-name: Build JellyReco
+name: JellyReco iOS
 
 on:
   push:
