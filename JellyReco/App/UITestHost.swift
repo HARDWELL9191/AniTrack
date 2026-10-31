@@ -26,7 +26,7 @@ struct UITestHost: View {
     """
 
     static let episodeJSON = """
-    {"Id":"e1","Name":"Romio and Hasuki","Type":"Episode","SeriesName":"Boarding School Juliet","IndexNumber":4,"ParentIndexNumber":1}
+    {"Id":"e1","Name":"Romio and Hasuki","Type":"Episode","SeriesName":"Boarding School Juliet","IndexNumber":4,"ParentIndexNumber":1,"OfficialRating":"TV-14"}
     """
 
     var body: some View {
@@ -42,6 +42,8 @@ struct UITestHost: View {
                 NavigationStack { AdminDashboardView() }
             } else if ready, mode == "settings" {
                 SettingsView()
+            } else if ready, mode == "start" {
+                SignInFlow()
             } else if ready, mode == "longpress" {
                 // Your Next Up card: text starting at the card's left edge, where the lifted
                 // preview's rounded corner cut the "S".

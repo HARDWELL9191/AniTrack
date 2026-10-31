@@ -94,13 +94,20 @@ struct MyListView: View {
             if let owned = ownedItem(for: ext) {
                 NavigationLink(value: ItemLink(item: owned)) {
                     PosterCard(item: owned, width: 104)
-                        .overlay(alignment: .topLeading) { GlassLabel(text: "New on server").padding(5) }
+                        // "Now on your server": bottom right of the cover (top left is the age bubble,
+                        // top right the watched mark, bottom left the match %).
+                        .overlay(alignment: .topTrailing) {
+                            GlassIcon(symbol: "checkmark.icloud.fill", tint: .green.opacity(0.55))
+                                .padding(.top, 104 * 1.5 - 27).padding(.trailing, 5)
+                                .accessibilityLabel("New on server")
+                        }
                 }
                 .buttonStyle(PressStyle())
             } else {
                 Button { detail = ext } label: {
                     ExternalPosterCard(title: ext, width: 104)
-                        .overlay(alignment: .topLeading) { GlassIcon(symbol: "icloud.and.arrow.down").padding(5) }
+                        // Top right, so it never covers the age bubble (top left).
+                        .overlay(alignment: .topTrailing) { GlassIcon(symbol: "icloud.and.arrow.down").padding(5) }
                 }
                 .buttonStyle(PressStyle())
                 .cardContextMenu {

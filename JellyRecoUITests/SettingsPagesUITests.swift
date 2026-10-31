@@ -146,10 +146,21 @@ final class SettingsPagesUITests: XCTestCase {
         let label = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'S1E4'")).firstMatch
         XCTAssertTrue(label.waitForExistence(timeout: 30), "card")
         shot(app, "longpress-0-card")
+        // Jellyfin's TV-14 shows as AniReco's 13+ bubble on server covers.
+        let age = app.staticTexts["13+"].firstMatch
+        print("RESULT server age bubble: \(age.exists ? age.label : "missing")")
+        XCTAssertTrue(age.exists, "age bubble on the poster")
         label.press(forDuration: 1.2)
         let menu = app.buttons["Mark as watched"]
         XCTAssertTrue(menu.waitForExistence(timeout: 5), "long-press menu")
         shot(app, "longpress-1-menu")
         print("RESULT long press menu shown: \(menu.exists)")
+    }
+
+    /// The start (sign-in) screen with the new icon and the icon's purple-blue gradient.
+    func testStartScreenBranding() {
+        let app = launch("start")
+        XCTAssertTrue(app.staticTexts["JellyReco"].waitForExistence(timeout: 30), "start screen")
+        shot(app, "start-screen")
     }
 }

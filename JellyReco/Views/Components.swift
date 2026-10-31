@@ -5,6 +5,9 @@ enum Theme {
     static let pink = Color(red: 0.98, green: 0.45, blue: 0.62)
     /// Match % glass tint (AniReco's darker pink).
     static let pinkGlass = Color(red: 0.86, green: 0.33, blue: 0.50)
+    /// The app icon's gradient: purple #8E3EA8 → blue #0083B0.
+    static let brandPurple = Color(red: 0x8E / 255, green: 0x3E / 255, blue: 0xA8 / 255)
+    static let brandBlue = Color(red: 0x00 / 255, green: 0x83 / 255, blue: 0xB0 / 255)
 }
 
 // MARK: - Navigation
@@ -243,9 +246,14 @@ struct PosterCard: View {
                 }
                 .overlay(alignment: .topTrailing) { indicator(data).padding(5) }
                 .overlay(alignment: .topLeading) {
-                    if settings.showFavoriteIndicator && (data?.isFavorite ?? false) {
-                        GlassIcon(symbol: "heart.fill", tint: Theme.pinkGlass.opacity(0.6)).padding(5)
+                    HStack(spacing: 4) {
+                        // The age bubble (AniReco's PG / 13+ / 17+ / 18+) from Jellyfin's rating.
+                        if let age = item.officialRating.flatMap(TMDBCertification.bucket) { GlassLabel(text: age) }
+                        if settings.showFavoriteIndicator && (data?.isFavorite ?? false) {
+                            GlassIcon(symbol: "heart.fill", tint: Theme.pinkGlass.opacity(0.6))
+                        }
                     }
+                    .padding(5)
                 }
                 .overlay(alignment: .bottom) { progressBar(data) }
                 .zoomSource(id: item.id, in: zoom)

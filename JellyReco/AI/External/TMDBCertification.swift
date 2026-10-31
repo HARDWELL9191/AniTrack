@@ -43,6 +43,13 @@ enum TMDBCertification {
             "NC-17": "18+", "R18": "18+", "R18+": "18+", "X": "18+", "X18+": "18+", "18A": "18+", "R-18": "18+",
         ]
         if let label = named[c] { return label }
+        // Jellyfin stores many ratings with a country in front ("DE-16", "GB-15", "AU-M").
+        if let dash = c.firstIndex(of: "-"), c.distance(from: c.startIndex, to: dash) == 2,
+           c.prefix(2).allSatisfy(\.isLetter), !["TV", "PG", "NC"].contains(String(c.prefix(2))) {
+            let rest = String(c[c.index(after: dash)...])
+            if let label = named[rest] { return label }
+            return bucket(rest)
+        }
         // Everything else by its age number ("12", "FSK 16", "K-15", "R-13", "19"…).
         guard let range = c.range(of: #"\d+"#, options: .regularExpression), let age = Int(c[range]) else { return nil }
         switch age {

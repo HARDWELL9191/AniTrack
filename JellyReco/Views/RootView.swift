@@ -62,7 +62,7 @@ struct LockView: View {
             Rectangle().fill(.ultraThinMaterial).ignoresSafeArea()
             VStack(spacing: 18) {
                 Image("Logo").resizable().scaledToFit().frame(width: 84, height: 84)
-                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: 19, style: .continuous))
                 Text("JellyReco is locked").font(.title3.bold())
                 Button {
                     Task { await unlock() }
@@ -114,13 +114,13 @@ struct SignInFlow: View {
             ScrollView {
                 VStack(spacing: 28) {
                     VStack(spacing: 12) {
+                        // The app icon, shaped like it is on the Home Screen.
                         Image("Logo")
                             .resizable()
                             .scaledToFit()
-                            .frame(width: 104, height: 104)
-                            .clipShape(Circle())
-                            .padding(10)
-                            .glassEffect(.regular.tint(Theme.accent.opacity(0.25)), in: .circle)
+                            .frame(width: 112, height: 112)
+                            .clipShape(RoundedRectangle(cornerRadius: 25, style: .continuous))
+                            .shadow(color: Theme.brandPurple.opacity(0.45), radius: 18, y: 8)
                         Text("JellyReco").font(.largeTitle.bold())
                         Text("Your Jellyfin library, every format, with picks made for you.")
                             .multilineTextAlignment(.center)
@@ -168,7 +168,7 @@ struct SignInFlow: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .background {
-                LinearGradient(colors: [Theme.accent.opacity(0.35), Theme.pink.opacity(0.25), Color(.systemBackground)],
+                LinearGradient(colors: [Theme.brandPurple.opacity(0.45), Theme.brandBlue.opacity(0.30), Color(.systemBackground)],
                                startPoint: .topLeading, endPoint: .bottom)
                     .ignoresSafeArea()
                     .onTapGesture { focused = false }
