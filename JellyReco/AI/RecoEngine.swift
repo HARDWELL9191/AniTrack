@@ -184,10 +184,11 @@ final class RecoEngine {
     func ensureProfile() async {
         if profileReady && !byId.isEmpty { return }
         Task { await self.ensureBuilt() }
-        for _ in 0..<240 {   // up to 60 s
+        for n in 0..<240 {   // up to 60 s
             try? await Task.sleep(nanoseconds: 250_000_000)
             if profileReady && !byId.isEmpty { return }
             if lastError != nil && !isBuilding { return }
+            if n >= 4 && !isBuilding && buildTask == nil { return }   // the build ended without a library
         }
     }
 

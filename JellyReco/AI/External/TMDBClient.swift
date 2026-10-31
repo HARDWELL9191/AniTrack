@@ -87,6 +87,10 @@ actor TMDBClient {
 
     /// Checks the key (used by Settings).
     func validate() async throws {
+        #if DEBUG
+        // UI tests only (never in the shipped app): a stand-in for a real key.
+        if ProcessInfo.processInfo.environment["JELLYRECO_UITEST"] != nil, key.hasPrefix("uitestvalidkey") { return }
+        #endif
         _ = try await get("/configuration")
     }
 

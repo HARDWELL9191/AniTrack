@@ -45,6 +45,10 @@ final class DiscoveryEngine {
     @ObservationIgnored private var tasks: [String: Task<Void, Never>] = [:]
 
     func attach(model: AppModel) { self.model = model }
+    #if DEBUG
+    /// UI test only: the old broken state (engine not connected to the app).
+    func detachForTesting() { model = nil }
+    #endif
 
     func reset() {
         for t in tasks.values { t.cancel() }

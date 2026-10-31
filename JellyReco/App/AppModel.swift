@@ -62,6 +62,21 @@ final class AppModel {
     }
     @ObservationIgnored private var storage: DisplayPreferencesDto?
 
+    /// The engines read your settings and library through this model. Connected once, here,
+    /// so no sign-in route (password, Quick Connect, saved account, account switch) can leave
+    /// For You unable to see your TMDB key.
+    init() {
+        reco.attach(model: self)
+        discovery.attach(model: self)
+        // Installed here (not after the server answers) so a saved key always starts For You.
+        settings.onTMDBKeyChange = { [weak self] in
+            guard let self else { return }
+            let key = self.settings.tmdbKey
+            Task { await self.saveStorage { custom in custom["tmdbkey"] = key } }
+            self.discovery.keyChanged()
+        }
+    }
+
     var isAdmin: Bool { user?.policy?.isAdministrator ?? false }
     /// Read-only access for the AI engines (GET requests only).
     var reader: LibraryReader? { client.map(LibraryReader.init) }
@@ -282,12 +297,6 @@ final class AppModel {
             }
         }
         settings.onChange = { [weak self] in self?.scheduleSettingsSync() }
-        settings.onTMDBKeyChange = { [weak self] in
-            guard let self else { return }
-            let key = self.settings.tmdbKey
-            Task { await self.saveStorage { custom in custom["tmdbkey"] = key } }
-            self.discovery.keyChanged()
-        }
     }
 
     @ObservationIgnored private var settingsSyncTask: Task<Void, Never>?

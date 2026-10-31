@@ -1,8 +1,6 @@
 import XCTest
 
-/// Reproduces "nothing happens when tapping Save and find picks": types a key with the
-/// keyboard up and taps the button like a finger would. A fake key must produce TMDB's
-/// rejection message (proof the button ran); nothing at all = the tap was lost.
+/// The TMDB key flow on the real For You screen, tapped like a finger with the keyboard up.
 final class TMDBKeyCardUITests: XCTestCase {
     override func setUp() { continueAfterFailure = true }
 
@@ -13,35 +11,47 @@ final class TMDBKeyCardUITests: XCTestCase {
         add(a)
     }
 
-    private func run(_ mode: String) {
-        let app = XCUIApplication()
+    private func enterKey(_ app: XCUIApplication, _ key: String, mode: String) {
         app.launchEnvironment["JELLYRECO_UITEST"] = mode
         app.launch()
         let field = app.secureTextFields.firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 30), "key field")
         field.tap()
-        field.typeText("0123456789abcdef0123456789abcdef")
+        field.typeText(key)
         shot(app, "\(mode)-1-typed")
-        print("KEYBOARD \(mode): \(app.keyboards.firstMatch.exists ? "up" : "not shown")")
-
         let save = app.buttons["Save and find picks"]
         XCTAssertTrue(save.waitForExistence(timeout: 5), "save button")
         save.tap()
-        shot(app, "\(mode)-2-just-tapped")
-        let error = app.staticTexts["tmdb-error"]
-        let ran = error.waitForExistence(timeout: 25)
-        shot(app, "\(mode)-3-after")
-        print("RESULT \(mode) first tap: \(ran ? "button ran -> \(error.label)" : "NOTHING HAPPENED")")
-        print("STATE \(mode): \(app.staticTexts["tmdb-state"].label)")
-        if !ran {
-            save.tap()
-            let ran2 = error.waitForExistence(timeout: 25)
-            shot(app, "\(mode)-4-second-tap")
-            print("RESULT \(mode) second tap: \(ran2 ? "button ran -> \(error.label)" : "NOTHING HAPPENED")")
-        }
-        app.terminate()
     }
 
-    func testOldBuild() { run("tmdb-old") }
-    func testNewBuild() { run("tmdb-new") }
+    /// A fake key: TMDB's rejection must appear (the button really runs).
+    func testFakeKeyShowsTMDBError() {
+        let app = XCUIApplication()
+        enterKey(app, "0123456789abcdef0123456789abcdef", mode: "foryou")
+        let error = app.staticTexts["tmdb-error"]
+        let shown = error.waitForExistence(timeout: 25)
+        shot(app, "fake-key-after")
+        print("RESULT fake key: \(shown ? "error shown -> \(error.label)" : "NOTHING HAPPENED")")
+        XCTAssertTrue(shown)
+    }
+
+    /// A valid key: the card must go away and For You must start working.
+    func testValidKeyStartsForYou() {
+        let app = XCUIApplication()
+        enterKey(app, "uitestvalidkey0000000000000000000", mode: "foryou")
+        let gone = app.secureTextFields.firstMatch.waitForNonExistence(timeout: 10)
+        shot(app, "valid-key-after")
+        let state = app.staticTexts["tmdb-state"].label
+        print("RESULT valid key: card \(gone ? "replaced by For You" : "STILL SHOWN (nothing happened)"); \(state)")
+        XCTAssertTrue(gone)
+    }
+
+    /// The old bug: For You's engine not connected (saved-account sign-in) = your symptom.
+    func testOldBugReproduces() {
+        let app = XCUIApplication()
+        enterKey(app, "uitestvalidkey0000000000000000000", mode: "foryou-unattached")
+        let gone = app.secureTextFields.firstMatch.waitForNonExistence(timeout: 10)
+        shot(app, "old-bug-after")
+        print("RESULT old bug: card \(gone ? "replaced" : "STILL SHOWN, no error (= reported symptom)"); \(app.staticTexts["tmdb-state"].label)")
+    }
 }

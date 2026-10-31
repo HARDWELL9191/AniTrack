@@ -6,7 +6,6 @@ import UIKit
 /// A prominent button that is real Liquid Glass: refractive glass tinted with the accent colour
 /// (the same recipe AniReco uses for its accent glass), white label, presses like glass.
 struct TintedGlassButtonStyle: ButtonStyle {
-    nonisolated(unsafe) static var interactiveForTesting = false
     var tint: Color = Theme.accent
 
     func makeBody(configuration: Configuration) -> some View {
@@ -28,11 +27,8 @@ struct TintedGlassButtonStyle: ButtonStyle {
                 .padding(.vertical, vertical)
                 .padding(.horizontal, horizontal)
                 .contentShape(Capsule())
-                // Not .interactive(): interactive glass inside a button style can take the tap
-                // away from the button. (The UI test can switch it back on to compare.)
-                .glassEffect(TintedGlassButtonStyle.interactiveForTesting
-                             ? .regular.tint(tint.opacity(isEnabled ? 0.65 : 0.25)).interactive()
-                             : .regular.tint(tint.opacity(isEnabled ? 0.65 : 0.25)), in: .capsule)
+                // Not .interactive(): a button style shouldn't add its own touch handling.
+                .glassEffect(.regular.tint(tint.opacity(isEnabled ? 0.65 : 0.25)), in: .capsule)
                 .opacity(isEnabled ? 1 : 0.55)
                 .scaleEffect(configuration.isPressed ? 0.97 : 1)
                 .animation(.snappy(duration: 0.15), value: configuration.isPressed)
