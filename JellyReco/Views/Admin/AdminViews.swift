@@ -44,7 +44,9 @@ struct AdminDashboardView: View {
             Section("Maintenance") {
                 NavigationLink { ScheduledTasksView() } label: { Label("Scheduled tasks", systemImage: "clock.arrow.2.circlepath") }
                 NavigationLink { AdminLibrariesView() } label: { Label("Libraries", systemImage: "books.vertical.fill") }
+                NavigationLink { LiveTVSetupView() } label: { Label("Live TV", systemImage: "antenna.radiowaves.left.and.right") }
                 NavigationLink { ServerLogsView() } label: { Label("Server logs", systemImage: "doc.text.magnifyingglass") }
+                NavigationLink { BackupsView() } label: { Label("Backups", systemImage: "archivebox.fill") }
                 NavigationLink { PlaybackTestView() } label: { Label("Playback test", systemImage: "checkmark.seal.fill") }
             }
 
@@ -531,101 +533,81 @@ struct NewUserSheet: View {
     }
 }
 
+/// One user, in jellyfin-web's tabs: Profile, Access, Parental control, Password.
+/// The policy is edited as the server's own JSON, so every key (including ones this app
+/// doesn't show) is sent back unchanged — Jellyfin replaces the whole policy on save.
 struct UserAdminDetail: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State var user: UserDto
     let reload: () async -> Void
-    @State private var policy = UserPolicy()
-    @State private var libraries: [VirtualFolderInfo] = []
-    @State private var ratings: [ParentalRating] = []
+
+    enum Tab: String, CaseIterable { case profile = "Profile", access = "Access", parental = "Parental control", password = "Password" }
+    struct Named: Hashable { let id: String; let name: String }
+    struct RatingGroup: Hashable { var label: String; let score: Int; let sub: Int? }
+
+    @State private var tab: Tab = .profile
+    @State private var raw: [String: Any] = [:]
+    @State private var policy: [String: Any] = [:]
+    @State private var originalPolicy: Data?
+    @State private var name = ""
+    @State private var views: [Named] = []
+    @State private var channels: [Named] = []
+    @State private var devices: [Named] = []
+    @State private var authProviders: [Named] = []
+    @State private var resetProviders: [Named] = []
+    @State private var ratings: [RatingGroup] = []
+    @State private var loaded = false
+    @State private var saving = false
+    @State private var message: String?
     @State private var confirmDelete = false
-    @State private var resetPassword = false
-    @State private var dirty = false
+    @State private var confirmReset = false
+    @State private var pw = ""
+    @State private var pw2 = ""
+
+    private static let unrated: [(String, String)] = [
+        ("Book", "Books"), ("ChannelContent", "Channels"), ("LiveTvChannel", "Live TV"), ("Movie", "Movies"),
+        ("Music", "Music"), ("Trailer", "Trailers"), ("Series", "Shows"),
+    ]
+    private static let days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Everyday", "Weekday", "Weekend"]
 
     var body: some View {
         Form {
-            Section("Role") {
-                Toggle("Administrator", isOn: bind(\.isAdministrator))
-                Toggle("Disabled", isOn: bind(\.isDisabled))
-                Toggle("Hidden from login screen", isOn: bind(\.isHidden))
-            }
-            Section("Playback") {
-                Toggle("Allow media playback", isOn: bind(\.enableMediaPlayback))
-                Toggle("Allow video transcoding", isOn: bind(\.enableVideoPlaybackTranscoding))
-                Toggle("Allow audio transcoding", isOn: bind(\.enableAudioPlaybackTranscoding))
-                Toggle("Allow remuxing", isOn: bind(\.enablePlaybackRemuxing))
-                Toggle("Force transcoding for remote sources", isOn: bind(\.forceRemoteSourceTranscoding))
-                Picker("Remote bitrate limit", selection: Binding(get: { policy.remoteClientBitrateLimit ?? 0 },
-                                                                 set: { policy.remoteClientBitrateLimit = $0; dirty = true })) {
-                    Text("No limit").tag(0)
-                    ForEach([1, 2, 4, 8, 10, 15, 20, 40, 60, 80, 120], id: \.self) { Text("\($0) Mbps").tag($0 * 1_000_000) }
+            Section {
+                Picker("Section", selection: $tab) {
+                    ForEach(Tab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                 }
-                Stepper("Max sessions: \((policy.maxActiveSessions ?? 0) == 0 ? "unlimited" : "\(policy.maxActiveSessions!)")",
-                        value: Binding(get: { policy.maxActiveSessions ?? 0 }, set: { policy.maxActiveSessions = $0; dirty = true }), in: 0...20)
+                .pickerStyle(.menu)
             }
-            Section("Features") {
-                Toggle("Remote access", isOn: bind(\.enableRemoteAccess))
-                Toggle("Live TV", isOn: bind(\.enableLiveTvAccess))
-                Toggle("Manage Live TV recordings", isOn: bind(\.enableLiveTvManagement))
-                Toggle("Download media", isOn: bind(\.enableContentDownloading))
-                Toggle("Delete media", isOn: bind(\.enableContentDeletion))
-                Toggle("Manage collections", isOn: bind(\.enableCollectionManagement))
-                Toggle("Manage subtitles", isOn: bind(\.enableSubtitleManagement))
-                Toggle("Manage lyrics", isOn: bind(\.enableLyricManagement))
-                Toggle("Remote control other users", isOn: bind(\.enableRemoteControlOfOtherUsers))
-                Toggle("Shared device control", isOn: bind(\.enableSharedDeviceControl))
-                Toggle("Public sharing", isOn: bind(\.enablePublicSharing))
-            }
-            Section("Library access") {
-                Toggle("All libraries", isOn: bind(\.enableAllFolders))
-                if policy.enableAllFolders != true {
-                    ForEach(libraries) { lib in
-                        Toggle(lib.name ?? "", isOn: Binding(
-                            get: { (policy.enabledFolders ?? []).contains(lib.itemId ?? "") },
-                            set: { on in
-                                var set = Set(policy.enabledFolders ?? [])
-                                if on { set.insert(lib.itemId ?? "") } else { set.remove(lib.itemId ?? "") }
-                                policy.enabledFolders = Array(set)
-                                dirty = true
-                            }))
-                    }
-                }
-            }
-            Section("Parental control") {
-                Picker("Maximum rating", selection: Binding(get: { policy.maxParentalRating ?? -1 },
-                                                           set: { policy.maxParentalRating = $0 < 0 ? nil : $0; dirty = true })) {
-                    Text("No limit").tag(-1)
-                    ForEach(ratings.filter { $0.value != nil }, id: \.name) { r in Text(r.name ?? "").tag(r.value ?? 0) }
-                }
-                Toggle("Block unrated items", isOn: Binding(
-                    get: { !(policy.blockUnratedItems ?? []).isEmpty },
-                    set: { policy.blockUnratedItems = $0 ? ["Movie", "Series", "Book", "Trailer", "LiveTvChannel", "LiveTvProgram", "Music", "ChannelContent"] : []; dirty = true }))
-            }
-            Section("Sign-in") {
-                Stepper("Lock after \(policy.loginAttemptsBeforeLockout ?? -1 <= 0 ? "default" : "\(policy.loginAttemptsBeforeLockout!)") failed attempts",
-                        value: Binding(get: { policy.loginAttemptsBeforeLockout ?? -1 }, set: { policy.loginAttemptsBeforeLockout = $0; dirty = true }), in: -1...20)
-                Button("Set password…", systemImage: "key.fill") { resetPassword = true }
-            }
-            if user.id != model.user?.id {
+            if flag("IsDisabled").wrappedValue {
                 Section {
-                    Button("Delete user", role: .destructive) { confirmDelete = true }
+                    Label("This user is currently disabled. Turn off \"Disable this user\" to let them sign in again.", systemImage: "exclamationmark.triangle.fill")
+                        .font(.footnote).foregroundStyle(.orange)
+                }
+            }
+            if let message { Section { Text(message).font(.footnote).foregroundStyle(.secondary) } }
+            if !loaded {
+                Section { HStack { Spacer(); ProgressView(); Spacer() } }
+            } else {
+                switch tab {
+                case .profile: profile
+                case .access: access
+                case .parental: parental
+                case .password: password
                 }
             }
         }
         .navigationTitle(user.name ?? "User")
+        .keyboardDoneBar()
         .toolbar {
+            if dirty {
+                ToolbarItem(placement: .cancellationAction) { Button("Discard") { discard() } }
+            }
             ToolbarItem(placement: .confirmationAction) {
-                Button("Save") { Task { await save() } }.disabled(!dirty)
+                Button("Save") { Keyboard.dismiss(); Task { await save() } }.disabled(!dirty || saving)
             }
         }
-        .task {
-            guard let client = model.client else { return }
-            if let fresh = try? await client.get("/Users/\(user.id)", as: UserDto.self) { user = fresh }
-            policy = user.policy ?? UserPolicy()
-            libraries = (try? await client.get("/Library/VirtualFolders", as: [VirtualFolderInfo].self)) ?? []
-            ratings = (try? await client.get("/Localization/ParentalRatings", as: [ParentalRating].self)) ?? []
-        }
+        .task { await load() }
         .confirmationDialog("Delete \(user.name ?? "this user")?", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Delete", role: .destructive) {
                 Task {
@@ -636,24 +618,376 @@ struct UserAdminDetail: View {
                     } catch { model.report(error) }
                 }
             }
-        }
-        .sheet(isPresented: $resetPassword) { ChangePasswordSheet(userId: user.id, isOwn: user.id == model.user?.id) }
+        } message: { Text("Their watch history and settings are deleted too.") }
+        .confirmationDialog("Reset this user's password?", isPresented: $confirmReset, titleVisibility: .visible) {
+            Button("Reset", role: .destructive) { Task { await setPassword(reset: true) } }
+        } message: { Text("They can then sign in without a password until they set one.") }
     }
 
-    private func bind(_ path: WritableKeyPath<UserPolicy, Bool?>) -> Binding<Bool> {
-        Binding(get: { policy[keyPath: path] ?? false }, set: { policy[keyPath: path] = $0; dirty = true })
+    // MARK: Tabs
+
+    @ViewBuilder private var profile: some View {
+        Section("Profile") {
+            LabeledContent("Name") {
+                TextField("Name", text: $name).multilineTextAlignment(.trailing).submitLabel(.done)
+            }
+            if authProviders.count > 1 {
+                picker("Authentication provider", "AuthenticationProviderId", authProviders, help: "Checks this user's password.")
+            }
+            if resetProviders.count > 1 {
+                picker("Password reset provider", "PasswordResetProviderId", resetProviders, help: "Used when this user asks to reset their password.")
+            }
+            toggle("Allow remote connections to this server", "EnableRemoteAccess", "Off blocks this user's connections from outside your network.")
+            toggle("Allow this user to manage the server", "IsAdministrator")
+            toggle("Allow this user to manage collections", "EnableCollectionManagement")
+            toggle("Allow this user to edit subtitles", "EnableSubtitleManagement")
+            if has("EnableLyricManagement") { toggle("Allow this user to edit lyrics", "EnableLyricManagement") }
+        }
+        Section("Feature access") {
+            toggle("Allow Live TV access", "EnableLiveTvAccess")
+            toggle("Allow Live TV recording management", "EnableLiveTvManagement")
+        }
+        Section("Playback") {
+            toggle("Allow media playback", "EnableMediaPlayback")
+            toggle("Allow audio playback that requires transcoding", "EnableAudioPlaybackTranscoding")
+            toggle("Allow video playback that requires transcoding", "EnableVideoPlaybackTranscoding")
+            toggle("Allow video playback that requires conversion without re-encoding", "EnablePlaybackRemuxing",
+                   "Turning transcoding off may make some files fail to play on some apps.")
+            toggle("Force transcoding of remote media sources such as Live TV", "ForceRemoteSourceTranscoding")
+            number("Internet streaming bitrate limit (Mbps)", "RemoteClientBitrateLimit", min: 0, scale: 1_000_000,
+                   help: "Overrides the server's limit (Server settings → Streaming). 0 = no limit.")
+            VStack(alignment: .leading, spacing: 4) {
+                Picker("SyncPlay access", selection: text("SyncPlayAccess", default: "CreateAndJoinGroups")) {
+                    Text("Allow creating and joining groups").tag("CreateAndJoinGroups")
+                    Text("Allow joining groups").tag("JoinGroups")
+                    Text("No access").tag("None")
+                }
+                .pickerStyle(.menu)
+                Text("Watching together in sync with other devices.").font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        Section("Allow media deletion from") {
+            toggle("All libraries", "EnableContentDeletion")
+            if !flag("EnableContentDeletion").wrappedValue {
+                ForEach(views, id: \.self) { v in Toggle(v.name, isOn: member("EnableContentDeletionFromFolders", v.id)) }
+            }
+        }
+        Section("Remote control") {
+            toggle("Allow remote control of other users", "EnableRemoteControlOfOtherUsers")
+            toggle("Allow remote control of shared devices", "EnableSharedDeviceControl", "DLNA devices count as shared until a user starts controlling them.")
+        }
+        Section("Other") {
+            toggle("Allow media downloading", "EnableContentDownloading", "Save media on their devices (not the same as sync). Book libraries need this.")
+            toggle("Disable this user", "IsDisabled", "The server refuses their connections and ends the open ones.")
+            toggle("Hide this user from login screens", "IsHidden", "For private or admin accounts: they sign in by typing their name and password.")
+            number("Failed login tries before the user is locked out", "LoginAttemptsBeforeLockout", min: -1,
+                   help: "0 = the default (3 tries, 5 for administrators); -1 = never lock out.")
+            number("Maximum simultaneous sessions", "MaxActiveSessions", min: 0, help: "0 = no limit.")
+        }
+        if user.id != model.user?.id {
+            Section {
+                Button(role: .destructive) { confirmDelete = true } label: { Label("Delete user", systemImage: "trash").foregroundStyle(.red) }
+            }
+        }
+    }
+
+    @ViewBuilder private var access: some View {
+        Section {
+            toggle("Enable access to all libraries", "EnableAllFolders")
+            if !flag("EnableAllFolders").wrappedValue {
+                ForEach(views, id: \.self) { v in Toggle(v.name, isOn: member("EnabledFolders", v.id)) }
+            }
+        } header: { Text("Library access") } footer: {
+            Text("The libraries this user can see. Administrators can edit every folder with the metadata manager.")
+        }
+        if !channels.isEmpty {
+            Section("Channel access") {
+                toggle("Enable access to all channels", "EnableAllChannels")
+                if !flag("EnableAllChannels").wrappedValue {
+                    ForEach(channels, id: \.self) { c in Toggle(c.name, isOn: member("EnabledChannels", c.id)) }
+                }
+            }
+        }
+        if !flag("IsAdministrator").wrappedValue {
+            Section {
+                toggle("Enable access from all devices", "EnableAllDevices")
+                if !flag("EnableAllDevices").wrappedValue {
+                    ForEach(devices, id: \.self) { d in Toggle(d.name, isOn: member("EnabledDevices", d.id)) }
+                }
+            } header: { Text("Device access") } footer: {
+                Text("Only for devices that can be told apart; doesn't block browsers. With a list, new devices need approval here first.")
+            }
+        }
+    }
+
+    @ViewBuilder private var parental: some View {
+        Section {
+            Picker("Highest allowed rating", selection: ratingSelection) {
+                Text("No limit").tag(-1)
+                ForEach(ratings.indices, id: \.self) { i in Text(ratings[i].label).tag(i) }
+            }
+            .pickerStyle(.menu)
+        } header: { Text("Maximum allowed parental rating") } footer: { Text("Titles rated higher are hidden from this user.") }
+        Section("Block items with no or unrecognized rating") {
+            ForEach(Self.unrated, id: \.0) { t in Toggle(t.1, isOn: member("BlockUnratedItems", t.0)) }
+        }
+        Section {
+            TagsEditor(label: "Tags", placeholder: "Add a tag", numeric: false, values: strings("AllowedTags"))
+        } header: { Text("Allow items with tags") } footer: { Text("Only show media with at least one of these tags. Empty = no limit.") }
+        Section {
+            TagsEditor(label: "Tags", placeholder: "Add a tag", numeric: false, values: strings("BlockedTags"))
+        } header: { Text("Block items with tags") } footer: { Text("Hide media with at least one of these tags.") }
+        if !flag("IsAdministrator").wrappedValue {
+            Section {
+                ForEach(schedules.indices, id: \.self) { i in scheduleRow(i) }
+                Button {
+                    setSchedules(schedules + [["DayOfWeek": "Sunday", "StartHour": 0.0, "EndHour": 24.0]])
+                } label: { Label("Add", systemImage: "plus") }
+            } header: { Text("Access schedule") } footer: {
+                Text("Limit sign-ins to certain hours. With no schedule, the user can sign in any time.")
+            }
+        }
+    }
+
+    @ViewBuilder private var password: some View {
+        Section("Password") {
+            SecureField("New password", text: $pw).textContentType(.newPassword)
+            SecureField("Confirm new password", text: $pw2).textContentType(.newPassword)
+            if !pw2.isEmpty && pw != pw2 {
+                Text("The passwords don't match.").font(.footnote).foregroundStyle(.red)
+            }
+        }
+        Section {
+            Button("Save password") { Task { await setPassword(reset: false) } }
+                .disabled(pw.isEmpty || pw != pw2 || saving)
+            Button("Reset password", role: .destructive) { confirmReset = true }
+        }
+    }
+
+    // MARK: Rows
+
+    private func toggle(_ label: String, _ key: String, _ detail: String? = nil) -> some View {
+        Toggle(isOn: flag(key)) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label)
+                if let detail { Text(detail).font(.caption).foregroundStyle(.secondary) }
+            }
+        }
+    }
+
+    private func number(_ label: String, _ key: String, min: Double, scale: Double = 1, help: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            LabeledContent(label) {
+                TextField("0", text: Binding(get: {
+                    let v = ((policy[realKey(key)] as? NSNumber)?.doubleValue ?? 0) / scale
+                    return v == v.rounded() ? String(Int(v)) : String(format: "%g", v)
+                }, set: { t in
+                    guard let v = Double(t.replacingOccurrences(of: ",", with: ".")) ?? (t.isEmpty ? 0 : nil) else { return }
+                    put(key, Int((Swift.max(min, v) * scale).rounded()))
+                }))
+                .keyboardType(.numbersAndPunctuation).multilineTextAlignment(.trailing).frame(maxWidth: 90)
+            }
+            Text(help).font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private func picker(_ label: String, _ key: String, _ options: [Named], help: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Picker(label, selection: text(key)) {
+                ForEach(options, id: \.self) { Text($0.name).tag($0.id) }
+            }
+            .pickerStyle(.menu)
+            Text(help).font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private func scheduleRow(_ i: Int) -> some View {
+        let sc = schedules[i]
+        let start = (sc["StartHour"] as? NSNumber)?.doubleValue ?? 0
+        let end = (sc["EndHour"] as? NSNumber)?.doubleValue ?? 24
+        func update(_ k: String, _ v: Any) {
+            var list = schedules
+            guard list.indices.contains(i) else { return }
+            list[i][k] = v
+            setSchedules(list)
+        }
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Picker("Day", selection: Binding(get: { sc["DayOfWeek"] as? String ?? "Sunday" }, set: { update("DayOfWeek", $0) })) {
+                    ForEach(Self.days, id: \.self) { Text(Self.dayLabel($0)).tag($0) }
+                }
+                .pickerStyle(.menu).labelsHidden()
+                Spacer()
+                Button(role: .destructive) {
+                    var list = schedules
+                    list.remove(at: i)
+                    setSchedules(list)
+                } label: { Image(systemName: "trash").foregroundStyle(.red) }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("Remove")
+            }
+            HStack {
+                Picker("From", selection: Binding(get: { start }, set: { update("StartHour", $0) })) {
+                    ForEach((0..<48).map { Double($0) / 2 }.filter { $0 < end }, id: \.self) { Text(Self.hourLabel($0)).tag($0) }
+                }
+                .pickerStyle(.menu).labelsHidden()
+                Text("to").foregroundStyle(.secondary)
+                Picker("To", selection: Binding(get: { end }, set: { update("EndHour", $0) })) {
+                    ForEach((1...48).map { Double($0) / 2 }.filter { $0 > start }, id: \.self) { Text($0 == 24 ? "24:00" : Self.hourLabel($0)).tag($0) }
+                }
+                .pickerStyle(.menu).labelsHidden()
+            }
+        }
+    }
+
+    private static func dayLabel(_ d: String) -> String {
+        d == "Everyday" ? "Every day" : d == "Weekday" ? "Weekdays" : d == "Weekend" ? "Weekends" : d
+    }
+    private static func hourLabel(_ h: Double) -> String {
+        String(format: "%02d:%@", Int(h) % 24, h.truncatingRemainder(dividingBy: 1) != 0 ? "30" : "00")
+    }
+
+    // MARK: Policy values
+
+    private func realKey(_ key: String) -> String {
+        policy.keys.first { $0.caseInsensitiveCompare(key) == .orderedSame } ?? key
+    }
+    private func has(_ key: String) -> Bool { policy[realKey(key)] != nil }
+    private func put(_ key: String, _ value: Any) { policy[realKey(key)] = value }
+
+    private func flag(_ key: String) -> Binding<Bool> {
+        Binding(get: { (policy[realKey(key)] as? Bool) ?? false }, set: { put(key, $0) })
+    }
+    private func text(_ key: String, default def: String = "") -> Binding<String> {
+        Binding(get: { (policy[realKey(key)] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? def }, set: { put(key, $0) })
+    }
+    private func list(_ key: String) -> [String] { ((policy[realKey(key)] as? [Any]) ?? []).compactMap { $0 as? String } }
+    private func strings(_ key: String) -> Binding<[String]> {
+        Binding(get: { list(key) }, set: { put(key, $0) })
+    }
+    private func member(_ key: String, _ id: String) -> Binding<Bool> {
+        Binding(get: { list(key).contains(id) }, set: { on in
+            var l = list(key).filter { $0 != id }
+            if on { l.append(id) }
+            put(key, l)
+        })
+    }
+
+    private var schedules: [[String: Any]] { (policy[realKey("AccessSchedules")] as? [[String: Any]]) ?? [] }
+    private func setSchedules(_ v: [[String: Any]]) { put("AccessSchedules", v) }
+
+    /// jellyfin-web groups ratings with the same score ("PG-13/TV-14") and picks the highest the user may see.
+    private var ratingSelection: Binding<Int> {
+        Binding(get: {
+            guard let max = (policy[realKey("MaxParentalRating")] as? NSNumber)?.intValue else { return -1 }
+            let sub = (policy[realKey("MaxParentalSubRating")] as? NSNumber)?.intValue
+            if let i = ratings.firstIndex(where: { $0.score == max && $0.sub == sub }) { return i }
+            return ratings.lastIndex(where: { $0.score <= max }) ?? -1
+        }, set: { i in
+            if ratings.indices.contains(i) {
+                put("MaxParentalRating", ratings[i].score)
+                put("MaxParentalSubRating", ratings[i].sub.map { $0 as Any } ?? NSNull())
+            } else {
+                put("MaxParentalRating", NSNull())
+                put("MaxParentalSubRating", NSNull())
+            }
+        })
+    }
+
+    private var dirty: Bool {
+        guard loaded else { return false }
+        return Self.json(policy) != originalPolicy || name != (user.name ?? "")
+    }
+    private static func json(_ o: [String: Any]) -> Data? { try? JSONSerialization.data(withJSONObject: o, options: [.sortedKeys]) }
+
+    // MARK: Server
+
+    private func load() async {
+        guard let client = model.client else { return }
+        func object(_ path: String, _ query: [String: Any?] = [:]) async -> Any? {
+            guard let d = try? await client.send("GET", path, query: query) else { return nil }
+            return try? JSONSerialization.jsonObject(with: d)
+        }
+        func named(_ any: Any?, label: (([String: Any]) -> String)? = nil) -> [Named] {
+            let list = (any as? [[String: Any]]) ?? ((any as? [String: Any]).flatMap { LibraryAdminDetail.value($0, "Items") as? [[String: Any]] } ?? [])
+            return list.compactMap { e in
+                guard let id = LibraryAdminDetail.string(e, "Id") else { return nil }
+                return Named(id: id, name: label?(e) ?? LibraryAdminDetail.string(e, "Name") ?? id)
+            }
+        }
+        if let u = await object("/Users/\(user.id)") as? [String: Any] {
+            raw = u
+            if let fresh = try? await client.get("/Users/\(user.id)", as: UserDto.self) { user = fresh }
+            policy = (LibraryAdminDetail.value(u, "Policy") as? [String: Any]) ?? [:]
+            originalPolicy = Self.json(policy)
+            name = LibraryAdminDetail.string(u, "Name") ?? ""
+        }
+        views = named(await object("/Library/MediaFolders", ["isHidden": false]))
+        channels = named(await object("/Channels"))
+        devices = named(await object("/Devices")) { d in
+            let n = LibraryAdminDetail.string(d, "CustomName").flatMap { $0.isEmpty ? nil : $0 } ?? LibraryAdminDetail.string(d, "Name") ?? ""
+            return "\(n) (\(LibraryAdminDetail.string(d, "AppName") ?? ""))"
+        }
+        authProviders = named(await object("/Auth/Providers"))
+        resetProviders = named(await object("/Auth/PasswordResetProviders"))
+        var groups: [RatingGroup] = []
+        for r in (await object("/Localization/ParentalRatings") as? [[String: Any]]) ?? [] {
+            let scoreObj = LibraryAdminDetail.value(r, "RatingScore") as? [String: Any]
+            guard let score = (scoreObj.flatMap { LibraryAdminDetail.value($0, "score") } as? NSNumber)?.intValue
+                    ?? (LibraryAdminDetail.value(r, "Value") as? NSNumber)?.intValue else { continue }
+            let sub = (scoreObj.flatMap { LibraryAdminDetail.value($0, "subScore") } as? NSNumber)?.intValue
+            let label = LibraryAdminDetail.string(r, "Name") ?? "\(score)"
+            if let last = groups.last, last.score == score, last.sub == sub {
+                groups[groups.count - 1].label += "/\(label)"
+            } else {
+                groups.append(RatingGroup(label: label, score: score, sub: sub))
+            }
+        }
+        ratings = groups
+        loaded = true
+    }
+
+    private func discard() {
+        if let originalPolicy, let p = try? JSONSerialization.jsonObject(with: originalPolicy) as? [String: Any] { policy = p }
+        name = user.name ?? ""
     }
 
     private func save() async {
         guard let client = model.client else { return }
-        var body = policy
-        body.authenticationProviderId = body.authenticationProviderId ?? "Jellyfin.Server.Implementations.Users.DefaultAuthenticationProvider"
-        body.passwordResetProviderId = body.passwordResetProviderId ?? "Jellyfin.Server.Implementations.Users.DefaultPasswordResetProvider"
+        saving = true
+        defer { saving = false }
+        message = nil
         do {
-            try await client.postVoid("/Users/\(user.id)/Policy", json: body)
-            dirty = false
+            if name != (user.name ?? ""), !raw.isEmpty {
+                var u = raw
+                u[raw.keys.first { $0.caseInsensitiveCompare("Name") == .orderedSame } ?? "Name"] = name
+                try await client.send("POST", "/Users/\(user.id)", body: try JSONSerialization.data(withJSONObject: u))
+            }
+            var body = policy
+            if (body[realKey("AuthenticationProviderId")] as? String ?? "").isEmpty {
+                body[realKey("AuthenticationProviderId")] = "Jellyfin.Server.Implementations.Users.DefaultAuthenticationProvider"
+            }
+            if (body[realKey("PasswordResetProviderId")] as? String ?? "").isEmpty {
+                body[realKey("PasswordResetProviderId")] = "Jellyfin.Server.Implementations.Users.DefaultPasswordResetProvider"
+            }
+            try await client.send("POST", "/Users/\(user.id)/Policy", body: try JSONSerialization.data(withJSONObject: body))
+            await load()
             await reload()
-        } catch { model.report(error) }
+            message = "Saved to the server."
+        } catch { message = error.localizedDescription }
+    }
+
+    private func setPassword(reset: Bool) async {
+        guard let client = model.client else { return }
+        saving = true
+        defer { saving = false }
+        do {
+            let body: [String: Any] = reset ? ["ResetPassword": true] : ["NewPw": pw]
+            try await client.send("POST", "/Users/Password", query: ["userId": user.id], body: try JSONSerialization.data(withJSONObject: body))
+            pw = ""
+            pw2 = ""
+            message = reset ? "Password reset." : "Password changed."
+        } catch { message = error.localizedDescription }
     }
 }
 
@@ -935,6 +1269,7 @@ struct PluginsView: View {
     var body: some View {
         List {
             ForEach(plugins) { p in
+                NavigationLink { PluginSettingsView(plugin: p) } label: {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack {
                         Text(p.name ?? "").font(.headline)
@@ -944,6 +1279,7 @@ struct PluginsView: View {
                     }
                     Text("Version \(p.version ?? "?")").font(.caption).foregroundStyle(.secondary)
                     if let d = p.description, !d.isEmpty { Text(d).font(.caption2).foregroundStyle(.secondary).lineLimit(3) }
+                }
                 }
                 .swipeActions {
                     if p.status == "Active" {

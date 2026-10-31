@@ -8,9 +8,10 @@ struct LibraryAdminDetail: View {
     let folder: VirtualFolderInfo
     let reload: () async -> Void
 
-    @State private var editor = ConfigEditor()
+    @State private var options = LibraryOptionsModel()
     @State private var locations: [String] = []
     @State private var newPath = ""
+    @State private var browsing = false
     @State private var renaming = false
     @State private var newName = ""
     @State private var confirmDelete = false
@@ -20,7 +21,7 @@ struct LibraryAdminDetail: View {
         Form {
             Section {
                 ForEach(locations, id: \.self) { path in
-                    Text(path).font(.callout.monospaced())
+                    Label(path, systemImage: "folder.fill").font(.callout.monospaced())
                         .swipeActions {
                             Button(role: .destructive) { Task { await removePath(path) } } label: { Label("Remove", systemImage: "trash") }
                         }
@@ -29,40 +30,45 @@ struct LibraryAdminDetail: View {
                     TextField("/path/on/server", text: $newPath)
                         .textInputAutocapitalization(.never).autocorrectionDisabled().font(.callout.monospaced())
                         .submitLabel(.done)
-                    Button("Add") { Task { await addPath() } }
+                    Button { browsing = true } label: { Image(systemName: "folder.badge.plus") }
+                        .buttonStyle(.borderless).foregroundStyle(.primary)
+                        .accessibilityLabel("Browse the server")
+                    Button("Add") { Task { await addPath(newPath) } }
                         .disabled(newPath.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             } header: { Text("Folders") } footer: { Text("Swipe a folder to remove it. Paths are on the server.") }
 
             Section {
-                Button { Task { await scan() } } label: { Label("Scan library", systemImage: "arrow.triangle.2.circlepath") }
+                Button { Task { await scan() } } label: { Label("Scan library files", systemImage: "arrow.triangle.2.circlepath") }
                 Button { newName = folder.name ?? ""; renaming = true } label: { Label("Rename", systemImage: "pencil") }
                 Button(role: .destructive) { confirmDelete = true } label: {
                     Label("Remove library", systemImage: "trash").foregroundStyle(.red)
                 }
-            }
+            } header: { Text("Manage") }
             if let message { Section { Text(message).font(.footnote).foregroundStyle(.secondary) } }
-            if let error = editor.error { Section { Text(error).font(.footnote).foregroundStyle(.red) } }
 
-            let fields = AllServerSettingsView.fields(for: .system, in: editor.values[.system] ?? [:])
-            if !fields.isEmpty {
-                Section {
-                    ForEach(fields) { ConfigFieldRow(field: $0, editor: editor) }
-                } header: { Text("Library options") } footer: {
-                    Text("Every option of this library, as stored on the server.")
-                }
-            }
-            if let note = editor.savedNote {
+            LibraryOptionsSections(model: options, contentType: folder.collectionType)
+
+            if let note = options.savedNote {
                 Section { Label(note, systemImage: "checkmark.circle.fill").foregroundStyle(.green) }
             }
         }
         .navigationTitle(folder.name ?? "Library")
         .keyboardDoneBar()
         .toolbar {
-            ToolbarItem(placement: .confirmationAction) {
-                Button("Save") { Keyboard.dismiss(); Task { await editor.save(client: model.client); await reload() } }
-                    .disabled(editor.dirty.isEmpty || editor.saving)
+            if options.dirty {
+                ToolbarItem(placement: .cancellationAction) { Button("Discard") { options.discard() } }
             }
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Save") {
+                    Keyboard.dismiss()
+                    Task { await options.save(client: model.client, libraryId: folder.itemId ?? ""); await reload() }
+                }
+                .disabled(!options.dirty || options.saving)
+            }
+        }
+        .sheet(isPresented: $browsing) {
+            ServerPathPicker(files: false) { picked in Task { await addPath(picked) } }
         }
         .alert("Rename library", isPresented: $renaming) {
             TextField("Name", text: $newName)
@@ -82,23 +88,24 @@ struct LibraryAdminDetail: View {
         guard let client = model.client,
               let data = try? await client.send("GET", "/Library/VirtualFolders"),
               let list = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
-              let mine = list.first(where: { Self.string($0, "ItemId") == folder.itemId }) else { return }
-        if let locs = Self.value(mine, "Locations") as? [String] { locations = locs }
-        editor.inject(Self.value(mine, "LibraryOptions") as? [String: Any] ?? [:])
-        let id = folder.itemId ?? ""
-        editor.customSave = { options in
-            let body = try JSONSerialization.data(withJSONObject: ["Id": id, "LibraryOptions": options])
-            try await client.send("POST", "/Library/VirtualFolders/LibraryOptions", body: body)
+              let mine = list.first(where: { Self.string($0, "ItemId") == folder.itemId }) else {
+            await options.load(client: model.client, contentType: folder.collectionType, isNew: false, initial: [:])
+            return
         }
+        if let locs = Self.value(mine, "Locations") as? [String] { locations = locs }
+        await options.load(client: client, contentType: folder.collectionType, isNew: false,
+                           initial: Self.value(mine, "LibraryOptions") as? [String: Any] ?? [:])
     }
 
-    private func addPath() async {
-        let path = newPath.trimmingCharacters(in: .whitespaces)
+    private func addPath(_ raw: String) async {
+        let path = raw.trimmingCharacters(in: .whitespaces)
+        guard !path.isEmpty, !locations.contains(path) else { return }
         do {
             let body = try JSONSerialization.data(withJSONObject: ["Name": folder.name ?? "", "PathInfo": ["Path": path]])
             try await model.client?.send("POST", "/Library/VirtualFolders/Paths", query: ["refreshLibrary": true], body: body)
             locations.append(path)
             newPath = ""
+            message = "Folder added."
             await reload()
         } catch { message = error.localizedDescription }
     }
@@ -152,29 +159,49 @@ struct AddLibrarySheet: View {
     let reload: () async -> Void
     @State private var name = ""
     @State private var type = "movies"
-    @State private var paths = ""
+    @State private var paths: [String] = []
+    @State private var typedPath = ""
+    @State private var browsing = false
+    @State private var options = LibraryOptionsModel()
     @State private var error: String?
     @State private var working = false
 
-    private let types: [(String, String)] = [
+    /// jellyfin-web's content types, in its order.
+    static let types: [(String, String)] = [
         ("movies", "Movies"), ("tvshows", "Shows"), ("music", "Music"), ("musicvideos", "Music videos"),
-        ("homevideos", "Home videos and photos"), ("books", "Books"), ("boxsets", "Collections"), ("mixed", "Mixed movies and shows"),
+        ("homevideos", "Home videos and photos"), ("boxsets", "Collections"), ("books", "Books"), ("mixed", "Mixed movies and shows"),
     ]
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("Display name", text: $name).submitLabel(.done)
                     Picker("Content type", selection: $type) {
-                        ForEach(types.indices, id: \.self) { i in Text(types[i].1).tag(types[i].0) }
+                        ForEach(Self.types.indices, id: \.self) { i in Text(Self.types[i].1).tag(Self.types[i].0) }
                     }
+                    .pickerStyle(.menu)
+                    TextField("Display name", text: $name).submitLabel(.done)
                 }
                 Section {
-                    TextField("One folder per line", text: $paths, axis: .vertical)
-                        .lineLimit(2...6).font(.callout.monospaced())
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
-                } header: { Text("Folders on the server") }
+                    ForEach(paths, id: \.self) { p in
+                        Label(p, systemImage: "folder.fill").font(.callout.monospaced())
+                            .swipeActions {
+                                Button(role: .destructive) { paths.removeAll { $0 == p } } label: { Label("Remove", systemImage: "trash") }
+                            }
+                    }
+                    HStack {
+                        TextField("/path/on/server", text: $typedPath)
+                            .textInputAutocapitalization(.never).autocorrectionDisabled().font(.callout.monospaced())
+                            .submitLabel(.done).onSubmit(addTyped)
+                        Button { browsing = true } label: { Image(systemName: "folder.badge.plus") }
+                            .buttonStyle(.borderless).foregroundStyle(.primary)
+                            .accessibilityLabel("Browse the server")
+                        Button("Add", action: addTyped).disabled(typedPath.trimmingCharacters(in: .whitespaces).isEmpty)
+                    }
+                } header: { Text("Folders") } footer: { Text("Folders on the server. Swipe one to remove it.") }
+
+                LibraryOptionsSections(model: options, contentType: type)
+
                 if let error { Section { Text(error).foregroundStyle(.red).font(.footnote) } }
             }
             .navigationTitle("Add library")
@@ -183,22 +210,36 @@ struct AddLibrarySheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Add") { Task { await add() } }
-                        .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || working)
+                    Button("Create") { Task { await add() } }
+                        .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || paths.isEmpty || working || !options.ready)
                 }
             }
+            .sheet(isPresented: $browsing) {
+                ServerPathPicker(files: false) { picked in if !paths.contains(picked) { paths.append(picked) } }
+            }
+            // A new library starts with jellyfin-web's defaults; the editor fills in the providers for the type.
+            .task(id: type) {
+                await options.load(client: model.client, contentType: type, isNew: true, initial: LibraryOptionsModel.newLibraryDefaults)
+            }
         }
+    }
+
+    private func addTyped() {
+        let p = typedPath.trimmingCharacters(in: .whitespaces)
+        guard !p.isEmpty else { return }
+        if !paths.contains(p) { paths.append(p) }
+        typedPath = ""
     }
 
     private func add() async {
         working = true
         defer { working = false }
-        let list = paths.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-        var query: [String: Any?] = ["name": name, "refreshLibrary": true]
+        var query: [String: Any?] = ["name": name.trimmingCharacters(in: .whitespaces), "refreshLibrary": true]
         if type != "mixed" { query["collectionType"] = type }
-        if !list.isEmpty { query["paths"] = list.joined(separator: ",") }
+        var libraryOptions = options.options
+        libraryOptions["PathInfos"] = paths.map { ["Path": $0] }
         do {
-            let body = try JSONSerialization.data(withJSONObject: ["LibraryOptions": ["PathInfos": list.map { ["Path": $0] }]])
+            let body = try JSONSerialization.data(withJSONObject: ["LibraryOptions": libraryOptions])
             try await model.client?.send("POST", "/Library/VirtualFolders", query: query, body: body)
             await reload()
             dismiss()

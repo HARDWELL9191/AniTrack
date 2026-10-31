@@ -871,7 +871,8 @@ struct ConfigFieldRow: View {
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                         .font(.callout.monospaced()).submitLabel(.done)
                     Button { browsing = true } label: { Image(systemName: "folder") }
-                        .buttonStyle(.glass)
+                        .buttonStyle(.glass).foregroundStyle(.primary)
+                        .accessibilityLabel("Browse the server")
                 }
             }
         case .note(let warn):
@@ -1071,7 +1072,7 @@ struct SplashImageEditor: View {
                 PhotosPicker(selection: $item, matching: .images) {
                     Label("Upload custom image", systemImage: "photo")
                 }
-                .buttonStyle(.glass)
+                .buttonStyle(.glass).foregroundStyle(.primary)
                 .disabled(busy)
                 Button(role: .destructive) {
                     Task { await delete() }
