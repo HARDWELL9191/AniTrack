@@ -57,63 +57,115 @@ struct ChaptersStrip: View {
 }
 
 /// The season's episodes in a row above the timeline.
+/// Episodes, as a panel that opens on the right of the screen: a vertical list (thumbnail, number,
+/// title, length, progress, watched), the playing episode marked and scrolled into view, and a
+/// season menu for the other seasons of the show.
 struct EpisodesStrip: View {
     @Environment(AppModel.self) private var model
     let controller: PlaybackController
     let close: () -> Void
     @State private var episodes: [BaseItem] = []
+    @State private var seasons: [BaseItem] = []
+    @State private var seasonId: String?
+    @State private var loading = true
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: 12) {
-                    ForEach(episodes) { ep in
-                        let current = ep.id == controller.item.id
-                        Button {
-                            guard !current else { return }
-                            close()
-                            Task { await controller.switchTo(ep) }
-                        } label: {
-                            VStack(alignment: .leading, spacing: 5) {
-                                RemoteImage(url: model.client?.landscapeURL(ep, width: 400))
-                                    .frame(width: 176, height: 99)
-                                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                                    .overlay(alignment: .bottom) {
-                                        if let p = model.userData(for: ep)?.playedPercentage, p > 0, p < 100 {
-                                            ProgressBar(value: p / 100).padding(6)
-                                        }
-                                    }
-                                    .overlay {
-                                        if current {
-                                            RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(.white, lineWidth: 2)
-                                        }
-                                    }
-                                    .overlay(alignment: .topTrailing) {
-                                        if model.isPlayed(ep) {
-                                            Image(systemName: "checkmark.circle.fill").padding(6).foregroundStyle(.white)
-                                        }
-                                    }
-                                Text("\(ep.episodeLabel ?? "") \(ep.displayName)").font(.caption.weight(.semibold)).lineLimit(1)
-                                if let rt = ep.runtimeSeconds {
-                                    Text(Fmt.runtime(rt)).font(.caption2).foregroundStyle(.white.opacity(0.7))
-                                }
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Episodes").font(.headline)
+                    if let name = controller.item.seriesName { Text(name).font(.caption).foregroundStyle(.white.opacity(0.7)).lineLimit(1) }
+                }
+                Spacer(minLength: 4)
+                if seasons.count > 1 {
+                    Menu {
+                        ForEach(seasons) { s in
+                            Button { seasonId = s.id } label: {
+                                if s.id == seasonId { Label(s.displayName, systemImage: "checkmark") } else { Text(s.displayName) }
                             }
-                            .frame(width: 176, alignment: .leading)
                         }
-                        .buttonStyle(.plain)
-                        .id(ep.id)
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(seasons.first { $0.id == seasonId }?.displayName ?? "Season").lineLimit(1)
+                            Image(systemName: "chevron.down").font(.caption2.weight(.bold))
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 12).frame(height: 30)
+                        .glassEffect(.regular.interactive(), in: .capsule)
                     }
                 }
-                .padding(.horizontal, 4)
+                Button(action: close) { Image(systemName: "xmark").font(.caption.weight(.bold)).frame(width: 30, height: 30) }
+                    .buttonStyle(.plain)
+                    .glassEffect(.regular.interactive(), in: .circle)
+                    .accessibilityLabel("Close episodes")
             }
-            .scrollClipDisabled()
-            .onChange(of: episodes) { _, _ in proxy.scrollTo(controller.item.id, anchor: .center) }
+            ScrollViewReader { proxy in
+                ScrollView(.vertical, showsIndicators: false) {
+                    LazyVStack(spacing: 8) {
+                        ForEach(episodes) { ep in row(ep).id(ep.id) }
+                    }
+                    .padding(.vertical, 2)
+                }
+                .overlay { if loading && episodes.isEmpty { ProgressView().tint(.white) } }
+                .onChange(of: episodes) { _, _ in proxy.scrollTo(controller.item.id, anchor: .center) }
+            }
         }
-        .frame(height: 140)
+        .padding(14)
+        .frame(maxWidth: 360)
+        .frame(maxHeight: .infinity)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
         .task {
-            guard let client = model.client, let sid = controller.item.seriesId else { return }
-            episodes = (try? await client.episodes(seriesId: sid, seasonId: controller.item.seasonId)) ?? []
+            guard let client = model.client, let sid = controller.item.seriesId else { loading = false; return }
+            seasonId = controller.item.seasonId
+            seasons = ((try? await client.seasons(seriesId: sid)) ?? []).filter { $0.locationType != "Virtual" }
         }
+        .task(id: seasonId) {
+            guard let client = model.client, let sid = controller.item.seriesId else { return }
+            loading = true
+            let list = (try? await client.episodes(seriesId: sid, seasonId: seasonId)) ?? []
+            episodes = list.filter { $0.locationType != "Virtual" }
+            loading = false
+        }
+    }
+
+    private func row(_ ep: BaseItem) -> some View {
+        let current = ep.id == controller.item.id
+        return Button {
+            guard !current else { return }
+            close()
+            Task { await controller.switchTo(ep) }
+        } label: {
+            HStack(spacing: 10) {
+                RemoteImage(url: model.client?.landscapeURL(ep, width: 300))
+                    .frame(width: 112, height: 63)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay(alignment: .bottom) {
+                        if let p = model.userData(for: ep)?.playedPercentage, p > 0, p < 100 {
+                            ProgressBar(value: p / 100).padding(5)
+                        }
+                    }
+                    .overlay(alignment: .topTrailing) {
+                        if model.isPlayed(ep) {
+                            Image(systemName: "checkmark.circle.fill").font(.caption).padding(4).foregroundStyle(.white)
+                        }
+                    }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(ep.indexNumber.map { "Episode \($0)" } ?? (ep.episodeLabel ?? ""))
+                        .font(.caption2.weight(.semibold)).foregroundStyle(current ? .white : .white.opacity(0.65))
+                    Text(ep.displayName).font(.subheadline.weight(.semibold)).lineLimit(2).multilineTextAlignment(.leading)
+                    if let rt = ep.runtimeSeconds {
+                        Text(current ? "Now playing" : Fmt.runtime(rt)).font(.caption2).foregroundStyle(.white.opacity(0.65))
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(6)
+            .background {
+                if current { RoundedRectangle(cornerRadius: 14, style: .continuous).fill(.white.opacity(0.16)) }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
 

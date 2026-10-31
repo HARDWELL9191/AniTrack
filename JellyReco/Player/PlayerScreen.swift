@@ -180,6 +180,14 @@ private struct PlayerContent: View {
             }
 
             if !locked { cornerCards }
+            // Episodes open as a panel on the right of the screen (a vertical list).
+            if panel == .episodes && !locked {
+                EpisodesStrip(controller: controller) { withAnimation(.snappy) { panel = nil } }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+                    .padding(.trailing, 16)
+                    .padding(.vertical, 16)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
             if showInfo && !locked {
                 InfoCard(controller: controller) { withAnimation(.snappy) { showInfo = false } }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
@@ -217,7 +225,7 @@ private struct PlayerContent: View {
             VStack(spacing: 0) {
                 topBar
                 Spacer()
-                if let panel { panelView(panel).padding(.bottom, 12) }
+                if let panel, panel != .episodes { panelView(panel).padding(.bottom, 12) }
                 bottomBar
             }
             .padding(.horizontal, 24)
