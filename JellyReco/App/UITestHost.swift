@@ -9,7 +9,8 @@ struct UITestHost: View {
     @State private var ready = false
 
     var body: some View {
-        Group {
+        ZStack {
+            Color.clear
             if ready {
                 ForYouView()
                     .overlay(alignment: .bottom) {
