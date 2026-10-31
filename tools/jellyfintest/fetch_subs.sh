@@ -5,13 +5,32 @@ set -uo pipefail
 media="$1"; out="$2"; mkdir -p "$out"
 J=http://localhost:8096
 H='MediaBrowser Client="ci", Device="ci", DeviceId="ci-1", Version="1.0"'
-for i in $(seq 1 90); do curl -fs $J/System/Info/Public >/dev/null && break; sleep 2; done
-curl -fs $J/System/Info/Public | tee "$out/server.json"; echo
-curl -fs -X POST $J/Startup/Configuration -H "Content-Type: application/json" -d '{"UICulture":"en-US","MetadataCountryCode":"US","PreferredMetadataLanguage":"en"}'
-curl -fs $J/Startup/User >/dev/null
-curl -fs -X POST $J/Startup/User -H "Content-Type: application/json" -d '{"Name":"ci","Password":"ci"}'
-curl -fs -X POST $J/Startup/Complete
-TOKEN=$(curl -fs -X POST $J/Users/AuthenticateByName -H "Authorization: $H" -H "Content-Type: application/json" -d '{"Username":"ci","Pw":"ci"}' | python3 -c "import json,sys; print(json.load(sys.stdin)['AccessToken'])")
+req() { # method url [json] -> prints "HTTP code" and body on failure, body to stdout file
+  local m="$1" u="$2" d="${3:-}" code
+  if [ -n "$d" ]; then code=$(curl -s -o /tmp/resp -w "%{http_code}" -X "$m" "$u" -H "Authorization: $H" -H "Content-Type: application/json" -d "$d")
+  else code=$(curl -s -o /tmp/resp -w "%{http_code}" -X "$m" "$u" -H "Authorization: $H"); fi
+  echo "  $m ${u#$J} -> $code" >&2
+  [ "${code:0:1}" = "2" ] || { head -c 400 /tmp/resp >&2; echo >&2; }
+  cat /tmp/resp
+}
+# The server answers /System/Info/Public before the setup wizard is ready: wait for the wizard.
+for i in $(seq 1 120); do
+  c=$(curl -s -o /dev/null -w "%{http_code}" $J/Startup/Configuration -H "Authorization: $H")
+  [ "$c" = "200" ] && break; sleep 2
+done
+echo "wizard ready (HTTP $c)"
+curl -s $J/System/Info/Public | tee "$out/server.json"; echo
+req POST $J/Startup/Configuration '{"UICulture":"en-US","MetadataCountryCode":"US","PreferredMetadataLanguage":"en"}' >/dev/null
+req GET $J/Startup/User >/dev/null
+req POST $J/Startup/User '{"Name":"ci","Password":"ci"}' >/dev/null
+req POST $J/Startup/RemoteAccess '{"EnableRemoteAccess":true,"EnableAutomaticPortMapping":false}' >/dev/null
+req POST $J/Startup/Complete >/dev/null
+for i in $(seq 1 30); do
+  TOKEN=$(req POST $J/Users/AuthenticateByName '{"Username":"ci","Pw":"ci"}' | python3 -c "import json,sys
+try: print(json.load(sys.stdin)['AccessToken'])
+except Exception: print('')")
+  [ -n "$TOKEN" ] && break; sleep 2
+done
 A="Authorization: $H, Token=\"$TOKEN\""
 echo "token ok: ${#TOKEN} chars"
 curl -fs -X POST "$J/Library/VirtualFolders?name=Test&collectionType=movies&paths=/media&refreshLibrary=true" -H "$A" -H "Content-Type: application/json" -d '{"LibraryOptions":{}}'

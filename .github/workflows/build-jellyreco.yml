@@ -173,6 +173,7 @@ jobs:
         run: |
           mkdir -p media/zlib && cp samples/render/render_pgs_zlib.mkv "media/zlib/Zlib Test (2020).mkv"
           docker run -d --name jf -p 8096:8096 -v "$PWD/media:/media" jellyfin/jellyfin:latest
+          docker exec jf /jellyfin/jellyfin --version 2>/dev/null || true
           tools/jellyfintest/fetch_subs.sh media out 2>&1 | tee out.log
           sudo apt-get install -y -qq ffmpeg >/dev/null
           for f in out/*.pgssub out/*.sup; do
@@ -272,8 +273,9 @@ jobs:
           ./rendertest --fonts "$PWD/fonts" "Helvetica" samples/render/*.mkv samples/render/*.ts 2>&1 | tee -a rendertest.log || true
           # ffmpeg's demuxer (reads zlib-compressed tracks that mpv's own MKV reader skips)
           # The app's fix: the skipped track fetched from Jellyfin and added over HTTP as its own subtitle.
-          SUB=$(ls jfsubs/*.pgssub 2>/dev/null | head -1)
-          if [ -n "$SUB" ]; then
+          subs=(jfsubs/*.pgssub)
+          SUB="${subs[0]:-}"
+          if [ -n "$SUB" ] && [ -f "$SUB" ]; then
             (cd "$(dirname "$SUB")" && python3 -m http.server 8765 >/dev/null 2>&1 &) ; sleep 2
             RENDERTEST_SUBURL="http://127.0.0.1:8765/$(basename "$SUB" | sed 's/ /%20/g')" ./rendertest --fonts "$PWD/fonts" "Helvetica" samples/render/render_pgs_zlib.mkv 2>&1 | tee -a rendertest.log || true
           else
