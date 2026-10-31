@@ -310,7 +310,7 @@ private struct PlayerContent: View {
     }
 
     private var bottomBar: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 5) {   // 15 pt from the buttons to the bar, as on Apple TV
             HStack(alignment: .bottom, spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
                     if controller.item.kind == .episode {
@@ -644,15 +644,17 @@ private struct AppleTimeline: View {
         let position = scrubbing ?? controller.currentSeconds
         let buffered = controller.player.bufferStatus.bufferedEnd.map { controller.seconds($0) } ?? position
         let active = scrubbing != nil
-        HStack(spacing: 12) {
+        // Apple TV's seek bar: no glass, just the times either side of the bar (measured: 12 pt
+        // times, 9 pt from the bar, a 7.5 pt bar).
+        HStack(spacing: 9) {
             Text(Fmt.clock(position)).monospacedDigit()
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.45))
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.white.opacity(0.6))
             GeometryReader { geo in
                 let w = geo.size.width
                 ZStack(alignment: .leading) {
-                    Capsule().fill(.white.opacity(0.38))
-                    Capsule().fill(.white.opacity(0.5)).frame(width: w * min(1, max(0, buffered / duration)))
+                    Capsule().fill(.white.opacity(0.35))
+                    Capsule().fill(.white.opacity(0.48)).frame(width: w * min(1, max(0, buffered / duration)))
                     Capsule().fill(.white).frame(width: w * min(1, max(0, position / duration)))
                     if model.settings.showChaptersOnSlider {
                         ForEach(Array(controller.chapters.enumerated()), id: \.offset) { _, ch in
@@ -690,12 +692,9 @@ private struct AppleTimeline: View {
             .frame(height: 28)
             .animation(.snappy(duration: 0.15), value: active)
             Text("−\(Fmt.clock(max(0, duration - position)))").monospacedDigit()
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.45))
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.white.opacity(0.6))
         }
-        .padding(.horizontal, 16)
-        .frame(height: 44)
-        .glassEffect(.regular, in: .capsule)
     }
 }
 
