@@ -1171,3 +1171,10 @@ html.platform-linux .mono { font-family: "JetBrains Mono", "Cascadia Mono", "Dej
 .shelf { content-visibility: visible; contain: none; }
 .shelf-row { padding-bottom: 18px; scrollbar-width: none; }
 .shelf-row::-webkit-scrollbar { display: none; height: 0; }
+
+/* App icon picker (Settings → Display) */
+.icon-pick { display: flex; gap: 10px; }
+.icon-pick button { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px 10px 6px; border: 0; border-radius: 16px; background: transparent; color: var(--muted); font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; transition: background-color 0.15s; }
+.icon-pick button:hover { background: var(--press); }
+.icon-pick button.on { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--text); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 70%, transparent); }
+.icon-pick img { width: 56px; height: 56px; filter: drop-shadow(0 3px 8px rgba(0, 0, 0, 0.3)); }

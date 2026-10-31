@@ -196,6 +196,15 @@ fn tune_webkit(w: &tauri::WebviewWindow) {
     });
 }
 
+/// The window's icon (taskbar, Alt+Tab): the dark (default) or light app icon from Settings.
+/// The installed shortcut / AppImage keeps the dark icon; on Linux under Wayland the dock shows that one.
+#[tauri::command]
+fn set_app_icon(window: tauri::WebviewWindow, variant: String) -> Result<(), String> {
+    let bytes: &[u8] = if variant == "light" { include_bytes!("../icons/window-light.png") } else { include_bytes!("../icons/window-dark.png") };
+    let image = tauri::image::Image::from_bytes(bytes).map_err(|e| e.to_string())?;
+    window.set_icon(image).map_err(|e| e.to_string())
+}
+
 /// The video file the app was started with, once (the page asks when it's ready).
 #[tauri::command]
 fn launch_file() -> Option<String> {
@@ -289,7 +298,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             mpv_info, mpv_start, mpv_command, mpv_set, mpv_get, mpv_destroy, ai_status, ai_cached, ai_vectors, accounts_load,
-            accounts_save, power_saver, device_name, platform, launch_file, write_text_file, read_file_base64
+            accounts_save, power_saver, device_name, platform, launch_file, set_app_icon, write_text_file, read_file_base64
         ])
         .run(tauri::generate_context!())
         .expect("error while running JellyReco");

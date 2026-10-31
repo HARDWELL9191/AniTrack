@@ -10,6 +10,8 @@ import { getEngine } from "../core/engine";
 import { ALL_HOME_SECTIONS, BITRATES, DEFAULT_SETTINGS, DEFAULT_SUB_STYLE, type HomeSection, type SegmentAction, type Settings } from "../core/settings";
 import type { Culture, UserConfiguration } from "../core/types";
 import { Range, Cover, Field, Group, PageHeader, Segmented, Toggle, useAction, useLoad } from "./components";
+import darkIcon from "../assets/app-icon-dark.png";
+import lightIcon from "../assets/app-icon-light.png";
 import { Icon } from "./icons";
 import { ui, useModel } from "./state";
 
@@ -131,6 +133,17 @@ function DisplaySettings() {
   return (
     <Group title="Display">
       <div className="toggle-row"><span>Theme</span><Segmented value={s.theme} options={[{ value: "system", label: "System" }, { value: "dark", label: "Dark" }, { value: "light", label: "Light" }]} onChange={(v) => set("theme", v)} /></div>
+      <div className="toggle-row">
+        <span className="toggle-text"><span>App icon</span><small className="muted">In the app and on the taskbar while it's open</small></span>
+        <div className="icon-pick" role="radiogroup" aria-label="App icon">
+          {(["dark", "light"] as const).map((v) => (
+            <button key={v} role="radio" aria-checked={s.appIcon === v} className={s.appIcon === v ? "on" : ""} onClick={() => set("appIcon", v)}>
+              <img src={v === "dark" ? darkIcon : lightIcon} alt="" />
+              <span>{v === "dark" ? "Dark" : "Light"}</span>
+            </button>
+          ))}
+        </div>
+      </div>
       <Toggle label="Backdrops on details pages" checked={s.showBackdrops} onChange={(v) => set("showBackdrops", v)} />
       <Toggle label="Blur unwatched episode thumbnails" detail="No spoilers in episode stills" checked={s.blurUnwatched} onChange={(v) => set("blurUnwatched", v)} />
       <Toggle label="Show ratings on cards" checked={s.showRatings} onChange={(v) => set("showRatings", v)} />

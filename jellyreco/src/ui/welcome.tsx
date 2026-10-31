@@ -5,7 +5,8 @@ import { useEffect, useRef, useState } from "react";
 import type { Jellyfin } from "../core/api";
 import type { SavedServer } from "../core/model";
 import type { User } from "../core/types";
-import appIcon from "../assets/app-icon.png";
+import darkIcon from "../assets/app-icon-dark.png";
+import lightIcon from "../assets/app-icon-light.png";
 import { Cover, Field, Spinner } from "./components";
 import { Icon } from "./icons";
 import { useModel } from "./state";
@@ -42,7 +43,7 @@ export function WelcomePage() {
   return (
     <div className="welcome">
       <div className="welcome-card panel">
-        <img className="welcome-logo" src={appIcon} alt="" />
+        <img className="welcome-logo" src={model.settings.appIcon === "light" ? lightIcon : darkIcon} alt="" />
         <h1>JellyReco</h1>
         {step.kind === "servers" && <Servers onAdd={() => setStep({ kind: "address" })} onOpen={(s) => openServer(s.url)} busy={busy} />}
         {step.kind === "address" && <Address onConnect={openServer} busy={busy} back={model.servers.length ? () => setStep({ kind: "servers" }) : undefined} />}

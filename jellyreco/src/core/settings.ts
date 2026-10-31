@@ -28,6 +28,8 @@ export interface SubtitleStyle {
 export interface Settings {
   // Appearance
   theme: Theme;
+  /** The app's icon on this computer's taskbar and in the app: the dark or the light design. */
+  appIcon: "dark" | "light";
   showBackdrops: boolean;
   blurUnwatched: boolean;
   homeSections: HomeSection[];
@@ -114,6 +116,7 @@ export const DEFAULT_SUB_STYLE: SubtitleStyle = {
 
 export const DEFAULT_SETTINGS: Settings = {
   theme: "system",
+  appIcon: "dark",
   showBackdrops: true,
   blurUnwatched: false,
   homeSections: ["resume", "nextUp", "forYouRow", "watchLater", "libraries", "latest", "favorites"],

@@ -3,7 +3,9 @@
 
 import { Component, type ReactNode, useEffect, useState } from "react";
 import type { Tab } from "../core/model";
-import appIcon from "../assets/app-icon.png";
+import { invoke, isTauri } from "@tauri-apps/api/core";
+import darkIcon from "../assets/app-icon-dark.png";
+import lightIcon from "../assets/app-icon-light.png";
 import { DashboardRoot, DashboardPage } from "./dashboard";
 import { DetailPage } from "./detail";
 import { FavoritesPage } from "./favorites";
@@ -48,6 +50,10 @@ export function App() {
   const model = useModel();
   const state = useUI();
   const player = usePlayer();
+  // The window's icon (taskbar, Alt+Tab) follows the chosen app icon.
+  useEffect(() => {
+    if (isTauri()) void invoke("set_app_icon", { variant: model.settings.appIcon }).catch(() => {});
+  }, [model.settings.appIcon]);
   const [refresh, setRefresh] = useState(0);
 
   // F5 / Ctrl+R refreshes the page you're on. Alt+← and the mouse back button go back.
@@ -95,7 +101,7 @@ export function App() {
     <>
       <div className={`shell ${videoOn ? "behind-video" : ""}`} aria-hidden={videoOn}>
         <nav className="sidebar">
-          <div className="brand"><img src={appIcon} alt="" /> JellyReco</div>
+          <div className="brand"><img src={model.settings.appIcon === "light" ? lightIcon : darkIcon} alt="" /> JellyReco</div>
           {MAIN_TABS.map((t) => (
             <button key={t.id} className={`nav-item ${model.tab === t.id ? "on" : ""}`} onClick={() => select(t.id)}>
               <Icon name={t.icon} size={20} /> {t.label}
