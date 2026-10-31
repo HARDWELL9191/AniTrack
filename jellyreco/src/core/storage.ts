@@ -102,7 +102,7 @@ export class AccountStorage {
   // The iPhone keeps at most 1000 My List entries and 500 titles per list.
   private saveMyList() { const json = JSON.stringify(this.myList.slice(0, 1000).map(encodeEntry)); return this.save((c) => { c.mylist = json; if (c.wishlist && c.wishlist !== "[]") c.wishlist = "[]"; }); }
   private saveTitles(list: ExternalListName) {
-    const json = JSON.stringify((list === "notforme" ? this.notForMe : this.seenElsewhere).slice(0, 500).map(slim));
+    const json = JSON.stringify((list === "notforme" ? this.notForMe : this.seenElsewhere).slice(0, 1500).map(slim)); // same limit as the iPhone (was 500)
     return this.save((c) => { c[list] = json; });
   }
 
