@@ -7,6 +7,8 @@
 #    plugin (any Vulkan GPU: AMD, Intel, Nvidia), and the bge-small model with fixed shapes.
 # Writes FFMPEG_BIN (for the playback check) to $GITHUB_ENV when that's set.
 set -euo pipefail
+# A failure shows up as an annotation on the run, with the line and the command.
+trap 'echo "::error title=prepare_deps_linux.sh::line $LINENO: $BASH_COMMAND (exit $?)"' ERR
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 APP="$(cd "$HERE/.." && pwd)"
@@ -64,7 +66,8 @@ for pc in "$WORK/ffmpeg/lib/pkgconfig/"*.pc; do
 done
 echo "$PREFIX/lib" | $SUDO tee /etc/ld.so.conf.d/jellyreco-mpv.conf > /dev/null
 $SUDO ldconfig
-"$PREFIX/bin/ffmpeg" -hide_banner -version | head -1
+"$PREFIX/bin/ffmpeg" -hide_banner -version > "$WORK/ffmpeg-version.txt"
+sed -n 1p "$WORK/ffmpeg-version.txt"
 echo "::endgroup::"
 
 echo "::group::libmpv $MPV_TAG"

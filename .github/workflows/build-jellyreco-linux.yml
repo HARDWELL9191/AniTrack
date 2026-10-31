@@ -56,14 +56,14 @@ jobs:
         run: npm ci
 
       - name: Playback engine (FFmpeg 8 + libmpv 0.41) and on-device AI files
-        run: ./tools/prepare_deps_linux.sh
+        run: ./tools/ci_run.sh "Dependencies" ./tools/prepare_deps_linux.sh
 
       - name: Build the AppImage
-        run: npx tauri build --bundles appimage
+        run: ./tools/ci_run.sh "AppImage build" npx tauri build --bundles appimage
 
       - name: Tests
         working-directory: jellyreco/src-tauri
-        run: cargo test --release --lib
+        run: ../tools/ci_run.sh "Tests" cargo test --release --lib
 
       - name: Collect the AppImage
         run: |
@@ -84,18 +84,18 @@ jobs:
       - name: Playback check (the AppImage's libmpv, all formats with audio and subtitle tracks)
         working-directory: jellyreco/src-tauri
         run: |
-          python3 -I ../tools/make_test_media.py "$FFMPEG_BIN" "$RUNNER_TEMP/media"
-          cargo build --release --example mpv_check
-          LD_LIBRARY_PATH="$APPDIR/usr/lib" python3 -I ../tools/mpv_check.py target/release/examples/mpv_check "$APPDIR/usr/lib/libmpv.so.2" "$RUNNER_TEMP/media" "$RUNNER_TEMP/mpv-report.json"
+          ../tools/ci_run.sh "Test media" python3 -I ../tools/make_test_media.py "$FFMPEG_BIN" "$RUNNER_TEMP/media"
+          ../tools/ci_run.sh "mpv_check build" cargo build --release --example mpv_check
+          LD_LIBRARY_PATH="$APPDIR/usr/lib" ../tools/ci_run.sh "Playback check" python3 -I ../tools/mpv_check.py target/release/examples/mpv_check "$APPDIR/usr/lib/libmpv.so.2" "$RUNNER_TEMP/media" "$RUNNER_TEMP/mpv-report.json"
 
       - name: AI check (real model; this runner has no GPU, so it runs on the CPU)
         working-directory: jellyreco/src-tauri
         run: |
-          cargo build --release --example embed_check
+          ../tools/ci_run.sh "embed_check build" cargo build --release --example embed_check
           ai=$(find "$APPDIR" -type d -name ai -path "*JellyReco*" | head -1)
           [ -n "$ai" ] || ai=$(find "$APPDIR" -type d -name ai | head -1)
           echo "AI files in the AppImage: $ai"
-          python3 -I ../tools/ai_check.py target/release/examples/embed_check "$ai" "$RUNNER_TEMP/ai-check"
+          ../tools/ci_run.sh "AI check" python3 -I ../tools/ai_check.py target/release/examples/embed_check "$ai" "$RUNNER_TEMP/ai-check"
 
       # The app itself starts on a plain X server (software OpenGL) and shows its window.
       - name: Start-up check
