@@ -1,9 +1,10 @@
 // Building blocks shared by every screen (AniReco's cards, shelves, menus and sheets).
 
-import { type CSSProperties, type InputHTMLAttributes, type ReactNode, useEffect, useLayoutEffect, useRef, useState, type MouseEvent as RMouseEvent } from "react";
+import { type CSSProperties, type InputHTMLAttributes, type ReactNode, useEffect, useLayoutEffect, useRef, useState, type MouseEvent as RMouseEvent, type PointerEvent as RPointerEvent } from "react";
 import type { Jellyfin } from "../core/api";
 import type { Item } from "../core/types";
 import { itemSubtitle, itemTitle, playedPercent } from "./fmt";
+import { ageBucket } from "../core/age";
 import { Icon } from "./icons";
 import { routeFor, ui, useModel, useNavigate } from "./state";
 
@@ -132,7 +133,7 @@ export function WatchedBadge({ item }: { item: Item }) {
   const ud = item.UserData;
   if (!ud) return null;
   if (ud.Played) return <div className="card-status played"><Icon name="check" size={15} strokeWidth={2.6} /></div>;
-  if (ud.UnplayedItemCount && (item.Type === "Series" || item.Type === "Season" || item.Type === "BoxSet")) return <div className="card-status count">{ud.UnplayedItemCount}</div>;
+  if (ud.UnplayedItemCount && (item.Type === "Series" || item.Type === "Season")) return <div className="card-status count">{ud.UnplayedItemCount}</div>;
   return null;
 }
 
@@ -142,9 +143,24 @@ export function ProgressLine({ percent }: { percent: number }) {
 }
 
 /** A cover card. Click opens it, the play button plays it, right-click opens the menu. */
-export function ItemCard({ item, width, shape, onClick, subtitle, showPlay = true, context, playlistId, badge }: {
+/** The age bubble (PG / 13+ / 17+ / 18+), black glass, as on the iPhone. */
+export function AgeBubble({ rating }: { rating?: string | null }) {
+  const label = ageBucket(rating);
+  return label ? <span className="bubble bubble-age">{label}</span> : null;
+}
+
+/** The match % bubble, pink glass, as on the iPhone. */
+export function MatchBubble({ value }: { value: number }) {
+  return <span className="bubble bubble-match">{value}%</span>;
+}
+
+/** A cover card. Bubbles sit where the iPhone puts them: on posters the age rating (and favorite
+ *  heart) top left, watched / unwatched count top right, match % bottom left; on landscape stills
+ *  (Continue watching, Next up) the match % top left and no age rating. `nowOnServer` adds My
+ *  List's green cloud (a pick you've since added to the server) bottom right. */
+export function ItemCard({ item, width, shape, onClick, subtitle, showPlay = true, context, playlistId, match, nowOnServer }: {
   item: Item; width?: number; shape?: Shape; onClick?: () => void; subtitle?: string | null; showPlay?: boolean;
-  context?: "resume" | "playlist" | "queue"; playlistId?: string; badge?: ReactNode;
+  context?: "resume" | "playlist" | "queue"; playlistId?: string; match?: number; nowOnServer?: boolean;
 }) {
   const model = useModel();
   const navigate = useNavigate();
@@ -161,8 +177,16 @@ export function ItemCard({ item, width, shape, onClick, subtitle, showPlay = tru
       <button className="card-cover" onClick={onClick ?? (() => navigate(routeFor(item)))} title={itemTitle(item)} aria-label={itemTitle(item)}>
         <Cover url={cardImage(api, item, s, w)} width={w} height={h} radius={s === "square" && (item.Type === "Person" || item.Type === "MusicArtist") ? w / 2 : 12} icon={typeIcon[item.Type]} style={blur ? { filter: "blur(10px)" } : undefined} />
         <WatchedBadge item={item} />
-        {item.UserData?.IsFavorite && <div className="card-fav"><Icon name="heartFill" size={13} /></div>}
-        {badge && <div className="card-age">{badge}</div>}
+        {s === "landscape"
+          ? match !== undefined && <div className="card-badges"><MatchBubble value={match} /></div>
+          : (ageBucket(item.OfficialRating) || (item.UserData?.IsFavorite)) && (
+            <div className="card-badges">
+              <AgeBubble rating={item.OfficialRating} />
+              {item.UserData?.IsFavorite && <span className="glass-icon pink"><Icon name="heartFill" size={12} /></span>}
+            </div>
+          )}
+        {s !== "landscape" && match !== undefined && <div className="card-match"><MatchBubble value={match} /></div>}
+        {nowOnServer && <div className="card-badge-br glass-icon green" title="New on your server"><Icon name="cloudCheckFill" size={16} /></div>}
         <ProgressLine percent={percent} />
         {showPlay && playable && (
           <span className="card-play" role="button" aria-label="Play" onClick={(e) => { e.stopPropagation(); void model.player?.playItem(item, { resume: true }); }}>
@@ -216,28 +240,71 @@ export function Range(props: InputHTMLAttributes<HTMLInputElement>) {
 
 // MARK: Shelves and grids
 
-/** A horizontal shelf of cards with arrow buttons (and the mouse wheel). */
+/** A horizontal shelf of cards: a Liquid Glass scrollbar under the row (drag it, or click the
+ *  track to page), arrow buttons, and the trackpad / Shift+wheel. */
 export function Shelf({ title, action, children, icon, subtitle }: { title: ReactNode; action?: { label: string; run: () => void }; children: ReactNode; icon?: string; subtitle?: ReactNode }) {
   const scroller = useRef<HTMLDivElement>(null);
-  const [edges, setEdges] = useState({ start: true, end: false });
+  const track = useRef<HTMLDivElement>(null);
+  const thumb = useRef<HTMLDivElement>(null);
+  const [edges, setEdges] = useState({ start: true, end: false, overflow: false });
+  const frame = useRef(0);
+  // The thumb moves with a transform set straight on the element (once per frame), so scrolling
+  // never re-renders the shelf; React only hears about the ends (arrow buttons) and overflow.
   const update = () => {
     const el = scroller.current;
     if (!el) return;
+    const max = el.scrollWidth - el.clientWidth;
     const start = el.scrollLeft < 4;
-    const end = el.scrollLeft + el.clientWidth >= el.scrollWidth - 4;
-    setEdges((e) => (e.start === start && e.end === end ? e : { start, end }));
+    const end = el.scrollLeft >= max - 4;
+    const overflow = max > 4;
+    setEdges((e) => (e.start === start && e.end === end && e.overflow === overflow ? e : { start, end, overflow }));
+    const t = thumb.current, tr = track.current;
+    if (t && tr && overflow) {
+      const w = Math.max(44, (el.clientWidth / el.scrollWidth) * tr.clientWidth);
+      t.style.width = `${w}px`;
+      t.style.transform = `translateX(${(el.scrollLeft / max) * (tr.clientWidth - w)}px)`;
+    }
   };
+  const schedule = () => { if (!frame.current) frame.current = requestAnimationFrame(() => { frame.current = 0; update(); }); };
   useLayoutEffect(update);
   useEffect(() => {
     const el = scroller.current;
     if (!el) return;
-    const ro = new ResizeObserver(update);
+    const ro = new ResizeObserver(schedule);
     ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
+    if (el.firstElementChild) ro.observe(el.firstElementChild);
+    return () => { ro.disconnect(); cancelAnimationFrame(frame.current); frame.current = 0; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const move = (dir: number) => {
     const el = scroller.current;
     if (el) el.scrollBy({ left: dir * el.clientWidth * 0.85, behavior: "smooth" });
+  };
+  // Dragging the thumb: the row follows the pointer 1:1 (no smooth scrolling or snapping meanwhile).
+  const drag = (e: RPointerEvent<HTMLDivElement>) => {
+    const el = scroller.current, tr = track.current, t = thumb.current;
+    if (!el || !tr || !t || e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX, startLeft = el.scrollLeft;
+    const ratio = (el.scrollWidth - el.clientWidth) / Math.max(1, tr.clientWidth - t.offsetWidth);
+    t.setPointerCapture(e.pointerId);
+    el.classList.add("dragging");
+    const onMove = (ev: PointerEvent) => { el.scrollLeft = startLeft + (ev.clientX - startX) * ratio; };
+    const onUp = () => {
+      el.classList.remove("dragging");
+      t.removeEventListener("pointermove", onMove);
+      t.removeEventListener("pointerup", onUp);
+      t.removeEventListener("pointercancel", onUp);
+    };
+    t.addEventListener("pointermove", onMove);
+    t.addEventListener("pointerup", onUp);
+    t.addEventListener("pointercancel", onUp);
+  };
+  // Clicking the track (beside the thumb) pages that way, like a Mac scrollbar.
+  const page = (e: RPointerEvent<HTMLDivElement>) => {
+    const t = thumb.current;
+    if (!t || e.target !== e.currentTarget) return;
+    move(e.clientX < t.getBoundingClientRect().left ? -1 : 1);
   };
   return (
     <section className="shelf">
@@ -246,11 +313,16 @@ export function Shelf({ title, action, children, icon, subtitle }: { title: Reac
         {subtitle && <span className="muted small">{subtitle}</span>}
         <div className="shelf-actions">
           {action && <button className="link-button" onClick={action.run}>{action.label}</button>}
-          <button className="round-button" disabled={edges.start} onClick={() => move(-1)} aria-label="Back"><Icon name="chevronLeft" size={16} /></button>
-          <button className="round-button" disabled={edges.end} onClick={() => move(1)} aria-label="Next"><Icon name="chevronRight" size={16} /></button>
+          {edges.overflow && <>
+            <button className="round-button" disabled={edges.start} onClick={() => move(-1)} aria-label="Back"><Icon name="chevronLeft" size={16} /></button>
+            <button className="round-button" disabled={edges.end} onClick={() => move(1)} aria-label="Next"><Icon name="chevronRight" size={16} /></button>
+          </>}
         </div>
       </header>
-      <div className="shelf-row" ref={scroller} onScroll={update}>{children}</div>
+      <div className="shelf-row" ref={scroller} onScroll={schedule}>{children}</div>
+      <div className={`shelf-scrollbar ${edges.overflow ? "" : "off"}`} ref={track} onPointerDown={page} aria-hidden="true">
+        <div className="shelf-thumb" ref={thumb} onPointerDown={drag} />
+      </div>
     </section>
   );
 }

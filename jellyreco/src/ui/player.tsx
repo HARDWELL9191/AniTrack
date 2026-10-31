@@ -59,7 +59,8 @@ export function PlayerOverlay() {
   const poke = () => {
     setVisible(true);
     if (hideTimer.current) clearTimeout(hideTimer.current);
-    hideTimer.current = setTimeout(() => { if (!panelRef.current) setVisible(false); }, 3200);
+    // The controls fade 2.2 s after the pointer stops (a second sooner than before).
+    hideTimer.current = setTimeout(() => { if (!panelRef.current) setVisible(false); }, 2200);
   };
   const panelRef = useRef<Panel>(null);
   panelRef.current = panel;
@@ -68,14 +69,39 @@ export function PlayerOverlay() {
 
   const show = (icon: string, text?: string) => setFlash({ icon, text, key: Date.now() });
 
+  // Full screen follows what the window really is, not what was last asked for: the window manager
+  // can apply a change late or not at all (Linux), and the button then showed the wrong state and
+  // asked for the state the window already had, so leaving full screen did nothing.
   async function setFull(on: boolean) {
     try {
       const w = windowApi?.getCurrentWindow();
       if (!w) return;
       await w.setFullscreen(on);
-      setFullscreen(on);
+      for (let i = 0; i < 8; i++) {
+        await new Promise((r) => setTimeout(r, 60));
+        if ((await w.isFullscreen()) === on) break;
+        if (i === 3) await w.setFullscreen(on); // asked again once if it hasn't happened yet
+      }
+      setFullscreen(await w.isFullscreen());
     } catch { /* browser preview */ }
   }
+  const fullRef = useRef(false);
+  fullRef.current = fullscreen;
+  async function toggleFull() {
+    const w = windowApi?.getCurrentWindow();
+    const now = w ? await w.isFullscreen().catch(() => fullRef.current) : fullRef.current;
+    await setFull(!now);
+  }
+  // The window left / entered full screen some other way (the window manager, a keyboard shortcut).
+  useEffect(() => {
+    const w = windowApi?.getCurrentWindow();
+    if (!w) return;
+    let off: (() => void) | undefined;
+    let alive = true;
+    void w.onResized(() => { void w.isFullscreen().then((f) => { if (alive && f !== fullRef.current) setFullscreen(f); }).catch(() => {}); })
+      .then((u) => { if (alive) off = u; else u(); });
+    return () => { alive = false; off?.(); };
+  }, []);
 
   async function togglePip() {
     const w = windowApi?.getCurrentWindow();
@@ -138,7 +164,7 @@ export function PlayerOverlay() {
       else if (k === "ArrowUp") { handled(); void p.setVolume(st.volume + 5); show("speakerFill", `${Math.round(Math.min(st.volume + 5, s.volumeBoostMax))}%`); }
       else if (k === "ArrowDown") { handled(); void p.setVolume(st.volume - 5); show("speakerLowFill", `${Math.round(Math.max(st.volume - 5, 0))}%`); }
       else if (k === "m") { handled(); void p.toggleMute(); show(st.muted ? "speakerFill" : "speakerMuteFill"); }
-      else if (k === "f" || k === "F11") { handled(); void setFull(!fullscreen); }
+      else if (k === "f" || k === "F11") { handled(); void toggleFull(); }
       else if (k === "Escape") {
         handled();
         if (panel) setPanel(null);
@@ -217,7 +243,7 @@ export function PlayerOverlay() {
 
   return (
     <div className={`player ${visible || panel ? "controls-on" : "controls-off"}`} onMouseMove={poke}
-      onDoubleClick={(e) => { if (model.settings.doubleClickFullscreen && (e.target as HTMLElement).classList.contains("player-surface")) void setFull(!fullscreen); }}
+      onDoubleClick={(e) => { if (model.settings.doubleClickFullscreen && (e.target as HTMLElement).classList.contains("player-surface")) void toggleFull(); }}
       onWheel={(e) => { if (model.settings.wheelVolume && !panel && (e.target as HTMLElement).classList.contains("player-surface")) { void p.setVolume(st.volume + (e.deltaY < 0 ? 5 : -5)); poke(); } }}
       data-tauri-drag-region={pip ? "" : undefined}>
       <div className="player-surface" onClick={() => { if (panel) setPanel(null); else { void p.togglePause(); show(st.paused ? "playFill" : "pauseFill"); } }} />
@@ -299,7 +325,7 @@ export function PlayerOverlay() {
                 {st.speed === 1 ? <Icon name="gauge" size={21} /> : <span className="tabular">{st.speed}×</span>}
               </button>
               <PanelButton icon="ellipsis" label="More" on={panel === "settings"} onClick={(e) => openPanel("settings", e)} />
-              <button className="pd-button" onClick={() => void setFull(!fullscreen)} title={fullscreen ? "Exit full screen (F)" : "Full screen (F)"} aria-label="Full screen"><Icon name={fullscreen ? "shrink" : "expand"} size={20} /></button>
+              <button className="pd-button" onClick={() => void toggleFull()} title={fullscreen ? "Exit full screen (F)" : "Full screen (F)"} aria-label="Full screen"><Icon name={fullscreen ? "shrink" : "expand"} size={20} /></button>
             </div>
           </div>
         </div>

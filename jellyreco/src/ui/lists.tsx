@@ -52,6 +52,9 @@ export function MyListPage({ back }: { back?: () => void }) {
             {shown.map((e) => {
               const item = e.serverId ? serverItems?.get(e.serverId) : undefined;
               if (item) return <ItemCard key={entryId(e)} item={item} width={undefined} />;
+              // A pick you've since added to the server: that server title, with the green cloud (iPhone).
+              const owned = e.external && c && model.reco.ready ? model.discovery.ownedItem(c, e.external) : undefined;
+              if (owned) return <ItemCard key={entryId(e)} item={owned} width={undefined} nowOnServer />;
               if (e.external) return <TitleCard key={entryId(e)} t={e.external} width={model.settings.libraryCardSize} notOnServer />;
               return <MissingCard key={entryId(e)} entry={e} />;
             })}

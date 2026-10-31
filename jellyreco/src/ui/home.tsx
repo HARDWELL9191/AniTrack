@@ -108,10 +108,17 @@ function MyListShelf({ refreshKey }: { refreshKey: number }) {
     return entries.slice(0, 40).map((e) => (e.serverId ? { e, item: r.Items.find((i) => i.Id === e.serverId) } : { e, item: undefined }))
       .filter((x) => (x.e.external ? true : x.item && !x.item.UserData?.Played));
   }, [key, refreshKey]);
+  const c = model.discoveryContext();
   if (!data?.length) return null;
   return (
     <Shelf title="My List" icon="bookmark" action={{ label: "See all", run: () => { model.tab = "myList"; model.notify(); } }}>
-      {data.map((x) => (x.item ? <ItemCard key={entryId(x.e)} item={x.item} /> : x.e.external ? <TitleCard key={entryId(x.e)} t={x.e.external} width={model.settings.libraryCardSize} notOnServer /> : null))}
+      {data.map((x) => {
+        if (x.item) return <ItemCard key={entryId(x.e)} item={x.item} />;
+        if (!x.e.external) return null;
+        // A pick you've since added to the server: that title, with the green cloud (as on the iPhone).
+        const owned = c && model.reco.ready ? model.discovery.ownedItem(c, x.e.external) : undefined;
+        return owned ? <ItemCard key={entryId(x.e)} item={owned} nowOnServer /> : <TitleCard key={entryId(x.e)} t={x.e.external} width={model.settings.libraryCardSize} notOnServer />;
+      })}
     </Shelf>
   );
 }

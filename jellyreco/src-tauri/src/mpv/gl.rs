@@ -21,6 +21,22 @@ thread_local! {
 /// mpv has a new frame waiting (set on mpv's thread, taken on the next display refresh).
 static PENDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// The app's window, to switch the WebView between see-through (video playing) and opaque.
+static WINDOW: OnceLock<tauri::WebviewWindow> = OnceLock::new();
+
+/// See-through only while mpv draws under the page. An opaque WebView (the rest of the time) lets
+/// WebKit skip blending the page with what's beneath it on every repaint.
+fn see_through(on: bool) {
+    if let Some(w) = WINDOW.get() {
+        let color = if on { tauri::window::Color(0, 0, 0, 0) } else { tauri::window::Color(0, 0, 0, 255) };
+        if let Err(e) = w.set_background_color(Some(color)) {
+            if debug() {
+                eprintln!("[video] WebView background: {e}");
+            }
+        }
+    }
+}
+
 /// Puts a GL area under the WebView (once, at start-up, on the main thread).
 pub fn install(window: &tauri::WebviewWindow) -> Result<(), String> {
     let win = window.gtk_window().map_err(|e| e.to_string())?;
@@ -34,13 +50,24 @@ pub fn install(window: &tauri::WebviewWindow) -> Result<(), String> {
         glib::Propagation::Stop
     });
     area.connect_resize(|area, _, _| area.queue_render());
+    // The overlay's base is an empty box, and the GL area and the WebView both sit on it filling
+    // the window (GL area beneath). That way the GL area can be hidden while no video plays: a GL
+    // area in the window makes GTK composite the whole window through OpenGL on every repaint
+    // (and on X11 read the picture back from the GPU), which slowed down the app even with no video.
     let overlay = gtk::Overlay::new();
+    let base = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    base.set_hexpand(true);
+    base.set_vexpand(true);
     win.remove(&vbox);
-    overlay.add(&area);
+    overlay.add(&base);
+    overlay.add_overlay(&area);
     overlay.add_overlay(&vbox);
     win.add(&overlay);
     overlay.show_all();
+    area.hide();
     AREA.with(|a| *a.borrow_mut() = Some(area));
+    let _ = WINDOW.set(window.clone());
+    see_through(false);
     Ok(())
 }
 
@@ -74,6 +101,10 @@ fn attach_here(api: Arc<Api>, handle: ffi::Handle) -> Result<(), String> {
         return Err("This libmpv has no render API.".into());
     };
     let area = AREA.with(|a| a.borrow().clone()).ok_or("The video surface isn't ready.")?;
+    // Shown (and so given its GL context) only while a video is open.
+    area.show();
+    area.realize();
+    see_through(true);
     area.make_current();
     if let Some(e) = area.error() {
         return Err(format!("OpenGL isn't available: {e}"));
@@ -131,19 +162,20 @@ pub fn detach() {
             }
             area.queue_render();
         }
+    });
+    on_main(|| {
+        if let Some(area) = AREA.with(|a| a.borrow().clone()) {
+            area.hide();
+        }
+        see_through(false);
     })
 }
 
 /// mpv has a new frame (called on one of mpv's threads): redraw on the main thread.
+/// The GL area's tick callback picks it up on the next display refresh (one redraw per refresh at
+/// most, however often mpv calls).
 unsafe extern "C" fn on_update(_: *mut c_void) {
     PENDING.store(true, std::sync::atomic::Ordering::Release);
-    glib::MainContext::default().invoke(|| {
-        AREA.with(|a| {
-            if let Some(area) = a.borrow().as_ref() {
-                area.queue_render();
-            }
-        })
-    });
 }
 
 const GL_COLOR_BUFFER_BIT: u32 = 0x4000;
@@ -171,15 +203,24 @@ fn draw(area: &gtk::GLArea) {
         }
         let mut fbo = OpenGlFbo { fbo: fbo_id, w, h, internal_format: 0 };
         let mut flip: c_int = 1;
+        // Never wait for the frame's display time here: this runs on GTK's main thread, which also
+        // delivers the mouse, window changes (full screen, maximize) and the page's own updates.
+        // Waiting (mpv's default, up to video-timing-offset per frame) held all of that up while a
+        // video played. The frame is drawn at the display refresh it's due on instead.
+        let mut block: c_int = 0;
         let mut params = [
             RenderParam { kind: ffi::RENDER_PARAM_OPENGL_FBO, data: &mut fbo as *mut _ as *mut c_void },
             RenderParam { kind: ffi::RENDER_PARAM_FLIP_Y, data: &mut flip as *mut _ as *mut c_void },
+            RenderParam { kind: ffi::RENDER_PARAM_BLOCK_FOR_TARGET_TIME, data: &mut block as *mut _ as *mut c_void },
             RenderParam { kind: ffi::RENDER_PARAM_INVALID, data: std::ptr::null_mut() },
         ];
         // SAFETY: valid context and parameters; mpv draws into the bound framebuffer.
         unsafe {
             update(*ctx as ffi::RenderContext);
             render(*ctx as ffi::RenderContext, params.as_mut_ptr());
+            if let Some(swap) = api.render_context_report_swap {
+                swap(*ctx as ffi::RenderContext);
+            }
         }
         true
     });

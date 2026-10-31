@@ -1,0 +1,326 @@
+name: JellyRec PC
+
+# Windows on Arm (.exe installer) and Linux x86_64 (AppImage) from the same commit, in one run:
+# both platforms always ship together, with the same version number (1.0.<run number>), and the
+# "JellyRec PC (latest build)" release holds both files.
+
+on:
+  push:
+    branches: [jellyreco]
+    paths:
+      - "jellyreco/**"
+      - ".github/workflows/jellyrec-pc.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: jellyrec-pc-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  # My List / Not for me / Already seen are shared with the iPhone app: the iPhone's own Swift model
+  # types (from the jellyfin branch) must decode what this app writes, and the reverse.
+  sync-check:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: jellyreco
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: iPhone app's list types
+        run: |
+          git fetch --depth 1 origin jellyfin
+          mkdir -p "$RUNNER_TEMP/ios" "$RUNNER_TEMP/sync"
+          git show FETCH_HEAD:JellyReco/AI/External/ExternalTitle.swift > "$RUNNER_TEMP/ios/ExternalTitle.swift"
+          git show FETCH_HEAD:JellyReco/App/MyList.swift > "$RUNNER_TEMP/ios/MyList.swift"
+          # Files ExternalTitle.swift uses that are Foundation-only, compiled in as they are.
+          for f in JellyReco/AI/External/TMDBCertification.swift; do
+            git cat-file -e "FETCH_HEAD:$f" 2>/dev/null && git show "FETCH_HEAD:$f" > "$RUNNER_TEMP/ios/$(basename "$f")"
+          done
+          swift --version || { echo "::error::No Swift on this runner"; exit 1; }
+      - name: Windows writes, iPhone reads, iPhone writes, Windows reads
+        run: |
+          node tools/sync_check/gen.ts write "$RUNNER_TEMP/sync"
+          swiftc -O tools/sync_check/stubs.swift "$RUNNER_TEMP"/ios/*.swift tools/sync_check/main.swift -o "$RUNNER_TEMP/sync-check"
+          "$RUNNER_TEMP/sync-check" "$RUNNER_TEMP/sync"
+          node tools/sync_check/gen.ts read "$RUNNER_TEMP/sync"
+          echo "::notice::My List, Not for me and Already seen round-trip between the Windows and iPhone apps"
+
+  windows:
+    # Windows 11 on Arm (Snapdragon-class), so the app, libmpv and the checks all run natively on ARM64.
+    runs-on: windows-11-arm
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: jellyreco
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: jellyreco/package-lock.json
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      - name: Rust (aarch64-pc-windows-msvc)
+        run: |
+          if (-not (Get-Command rustup -ErrorAction SilentlyContinue)) {
+            Invoke-WebRequest https://static.rust-lang.org/rustup/dist/aarch64-pc-windows-msvc/rustup-init.exe -OutFile rustup-init.exe
+            ./rustup-init.exe -y --profile minimal --default-toolchain stable
+            "$env:USERPROFILE\.cargo\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+            $env:PATH = "$env:USERPROFILE\.cargo\bin;$env:PATH"
+          }
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add aarch64-pc-windows-msvc
+          rustc -vV
+          node -v
+
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            jellyreco/src-tauri/target
+          key: cargo-jellyreco-arm64-${{ hashFiles('jellyreco/src-tauri/Cargo.lock') }}
+          restore-keys: cargo-jellyreco-arm64-
+
+      - name: Install packages
+        run: npm ci
+
+      - name: Playback engine (libmpv ARM64) and on-device AI files
+        run: ./tools/prepare_deps.ps1
+
+      - name: Version (1.0.<build number>, the same for both platforms)
+        run: |
+          $v = "1.0.${{ github.run_number }}"
+          "VITE_APP_VERSION=$v" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "{`"version`": `"$v`"}" | Out-File -Encoding ascii src-tauri/version.json
+
+      - name: Build the installer
+        run: npx tauri build --target aarch64-pc-windows-msvc --bundles nsis --config src-tauri/version.json
+
+      # Same target and profile as the installer build, so these reuse what it compiled.
+      - name: Tests
+        working-directory: jellyreco/src-tauri
+        run: cargo test --release --lib --target aarch64-pc-windows-msvc
+
+      # Every container / video codec / audio codec / subtitle format in the test set must play to the
+      # end through the exact libmpv-2.dll the installer ships, with every audio and subtitle track found.
+      - name: Playback check (libmpv, all formats with audio and subtitle tracks)
+        working-directory: jellyreco/src-tauri
+        run: |
+          if (-not $env:FFMPEG_EXE) { throw "no ffmpeg.exe for the test media" }
+          python -I ../tools/make_test_media.py $env:FFMPEG_EXE "$env:RUNNER_TEMP/media"
+          if ($LASTEXITCODE -ne 0) { throw "making test media failed" }
+          cargo build --release --example mpv_check --target aarch64-pc-windows-msvc
+          if ($LASTEXITCODE -ne 0) { throw "mpv_check build failed" }
+          python -I ../tools/mpv_check.py target/aarch64-pc-windows-msvc/release/examples/mpv_check.exe resources/mpv/libmpv-2.dll "$env:RUNNER_TEMP/media" "$env:RUNNER_TEMP/mpv-report.json"
+          if ($LASTEXITCODE -ne 0) { throw "playback check failed" }
+
+      - name: AI check (real model, this runner has no NPU so it runs on the CPU)
+        working-directory: jellyreco/src-tauri
+        run: |
+          cargo build --release --example embed_check --target aarch64-pc-windows-msvc
+          python -I ../tools/ai_check.py target/aarch64-pc-windows-msvc/release/examples/embed_check.exe resources/ai "$env:RUNNER_TEMP/ai-check"
+          if ($LASTEXITCODE -ne 0) { throw "AI check failed" }
+
+      - name: Collect the .exe
+        run: |
+          $setup = Get-ChildItem src-tauri/target/aarch64-pc-windows-msvc/release/bundle/nsis -Filter *.exe | Select-Object -First 1
+          if (-not $setup) { throw "No installer was produced" }
+          New-Item -ItemType Directory -Force out | Out-Null
+          Copy-Item $setup.FullName out/JellyReco-Setup-arm64.exe
+          Get-ChildItem out | Format-Table Name, Length
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: JellyReco-Windows-ARM64
+          path: jellyreco/out/JellyReco-Setup-arm64.exe
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v7
+        if: ${{ always() }}
+        with:
+          name: JellyReco-playback-report
+          path: ${{ runner.temp }}/mpv-report.json
+          if-no-files-found: ignore
+
+  linux:
+    # Ubuntu 24.04 x86_64: the AppImage runs on distributions from 2024 on (glibc 2.39+), e.g.
+    # Ubuntu 24.04+, Fedora 40+, Debian 13, Arch, openSUSE Tumbleweed, Linux Mint 22+.
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
+        working-directory: jellyreco
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+      # Link libmpv so the AppImage bundler copies it and everything it needs.
+      JELLYRECO_LINK_MPV: "1"
+      # The AppImage tools run without FUSE on the runner.
+      APPIMAGE_EXTRACT_AND_RUN: "1"
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: jellyreco/package-lock.json
+
+      - name: Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustc -vV
+          node -v
+
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            jellyreco/src-tauri/target
+          key: cargo-jellyreco-linux-x64-${{ hashFiles('jellyreco/src-tauri/Cargo.lock') }}
+          restore-keys: cargo-jellyreco-linux-x64-
+
+      - name: Install packages
+        run: npm ci
+
+      - name: Playback engine (FFmpeg 8 + libmpv 0.41) and on-device AI files
+        run: ./tools/ci_run.sh "Dependencies" ./tools/prepare_deps_linux.sh
+
+      - name: Version (1.0.<build number>, the same for both platforms)
+        run: |
+          v="1.0.${{ github.run_number }}"
+          echo "VITE_APP_VERSION=$v" >> "$GITHUB_ENV"
+          printf '{"version": "%s"}' "$v" > src-tauri/version.json
+
+      - name: Build the AppImage
+        run: ./tools/ci_run.sh "AppImage build" npx tauri build --bundles appimage --config src-tauri/version.json
+
+      - name: Tests
+        working-directory: jellyreco/src-tauri
+        run: ../tools/ci_run.sh "Tests" cargo test --release --lib
+
+      - name: Collect the AppImage
+        run: |
+          app=$(ls src-tauri/target/release/bundle/appimage/*.AppImage | head -1)
+          [ -n "$app" ] || { echo "::error::No AppImage was produced"; exit 1; }
+          mkdir -p out
+          cp "$app" out/JellyReco-x86_64.AppImage
+          chmod +x out/JellyReco-x86_64.AppImage
+          ls -la out
+          # What's inside: the libmpv the app plays with must be in the AppImage itself.
+          (cd "$RUNNER_TEMP" && "$GITHUB_WORKSPACE/jellyreco/out/JellyReco-x86_64.AppImage" --appimage-extract > /dev/null)
+          echo "APPDIR=$RUNNER_TEMP/squashfs-root" >> "$GITHUB_ENV"
+          ls "$RUNNER_TEMP/squashfs-root/usr/lib" | grep -E "libmpv|libav|libplacebo|libass|libsw" || { echo "::error::libmpv isn't in the AppImage"; exit 1; }
+          find "$RUNNER_TEMP/squashfs-root" -path "*ai/*" -maxdepth 4 | head -20
+          # Graphics libraries must come from the system (its GPU driver), not the AppImage: a bundled
+          # libGL / libEGL / libgbm / Mesa would make WebKit and mpv fall back to software rendering.
+          bundled=$(ls "$RUNNER_TEMP/squashfs-root/usr/lib" | grep -E "^(libGL|libGLX|libEGL|libgbm|libdrm|libglapi|libGLdispatch|libvulkan)\.so|^dri$|mesa" || true)
+          if [ -n "$bundled" ]; then echo "::error::The AppImage bundles graphics libraries (GPU acceleration would break): $bundled"; exit 1; fi
+          echo "::notice::No GPU driver libraries bundled: the system's driver is used (GPU acceleration)"
+
+      # Every container / video codec / audio codec / subtitle format in the test set must play to the
+      # end through the libmpv inside the AppImage, with every audio and subtitle track found.
+      - name: Playback check (the AppImage's libmpv, all formats with audio and subtitle tracks)
+        working-directory: jellyreco/src-tauri
+        run: |
+          ../tools/ci_run.sh "Test media" python3 -I ../tools/make_test_media.py "$FFMPEG_BIN" "$RUNNER_TEMP/media"
+          ../tools/ci_run.sh "mpv_check build" cargo build --release --example mpv_check
+          LD_LIBRARY_PATH="$APPDIR/usr/lib" ../tools/ci_run.sh "Playback check" python3 -I ../tools/mpv_check.py target/release/examples/mpv_check "$APPDIR/usr/lib/libmpv.so.2" "$RUNNER_TEMP/media" "$RUNNER_TEMP/mpv-report.json"
+
+      - name: AI check (real model; this runner has no GPU, so it runs on the CPU)
+        working-directory: jellyreco/src-tauri
+        run: |
+          ../tools/ci_run.sh "embed_check build" cargo build --release --example embed_check
+          ai=$(find "$APPDIR" -type d -name ai -path "*JellyReco*" | head -1)
+          [ -n "$ai" ] || ai=$(find "$APPDIR" -type d -name ai | head -1)
+          echo "AI files in the AppImage: $ai"
+          ../tools/ci_run.sh "AI check" python3 -I ../tools/ai_check.py target/release/examples/embed_check "$ai" "$RUNNER_TEMP/ai-check"
+
+      # The app itself starts on a plain X server (software OpenGL) and shows its window.
+      # The app itself, in a non-English locale (Slovenian: decimal commas, which libmpv refuses
+      # unless the app resets number formatting), started with a video file: it must open mpv's
+      # renderer under the page and draw frames, and the window must draw.
+      - name: Start-up and playback check (Slovenian locale)
+        run: |
+          sudo locale-gen sl_SI.UTF-8 > /dev/null
+          # (LP_NUM_THREADS=0: Mesa's software renderer on the runner races between GL contexts when threaded.)
+          export DISPLAY=:99 LIBGL_ALWAYS_SOFTWARE=1 LP_NUM_THREADS=0 LANG=sl_SI.UTF-8 LC_ALL=sl_SI.UTF-8 JELLYRECO_DEBUG_VIDEO=1
+          Xvfb :99 -screen 0 1360x880x24 > /dev/null 2>&1 &
+          sleep 2
+          ./out/JellyReco-x86_64.AppImage "$RUNNER_TEMP/media/hevc10_eac3_ass.mkv" > "$RUNNER_TEMP/app.log" 2>&1 &
+          pid=$!
+          sleep 25
+          import -window root "$RUNNER_TEMP/startup.png" || true
+          if ! kill -0 $pid 2>/dev/null; then tail -60 "$RUNNER_TEMP/app.log"; echo "::error::The app exited during start-up"; exit 1; fi
+          kill $pid || true
+          grep "\[video\]" "$RUNNER_TEMP/app.log" | head -5 || true
+          grep -E "VO: \[libmpv\]|first video frame" "$RUNNER_TEMP/app.log" | head -3 || true
+          { grep -q "VO: \[libmpv\]" "$RUNNER_TEMP/app.log" && grep -q "first video frame after restart shown" "$RUNNER_TEMP/app.log" && grep -q "\[video\] frame 4" "$RUNNER_TEMP/app.log"; } || { tail -60 "$RUNNER_TEMP/app.log"; echo "::error::mpv didn't draw video in the app (Slovenian locale)"; exit 1; }
+          echo "::notice::The app plays video under the page with a Slovenian locale"
+          python3 - "$RUNNER_TEMP/startup.png" <<'EOF'
+          import subprocess, sys
+          # A blank (all one color) screenshot means the window never drew.
+          out = subprocess.run(["convert", sys.argv[1], "-format", "%[fx:standard_deviation]", "info:"], capture_output=True, text=True).stdout.strip()
+          print("screenshot variation:", out)
+          if not out or float(out) < 0.01:
+              print("::error::The window looks blank"); sys.exit(1)
+          EOF
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: JellyReco-Linux-x86_64
+          path: jellyreco/out/JellyReco-x86_64.AppImage
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v7
+        if: ${{ always() }}
+        with:
+          name: JellyReco-Linux-checks
+          path: |
+            ${{ runner.temp }}/mpv-report.json
+            ${{ runner.temp }}/startup.png
+            ${{ runner.temp }}/app.log
+          if-no-files-found: ignore
+
+  # Both builds passed: one release with both files, so the two platforms never drift apart.
+  publish:
+    needs: [sync-check, windows, linux]
+    if: github.ref == 'refs/heads/jellyreco'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: JellyReco-Windows-ARM64
+          path: out
+      - uses: actions/download-artifact@v8
+        with:
+          name: JellyReco-Linux-x86_64
+          path: out
+      - name: Publish "JellyRec PC (latest build)" with both files
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          ls -la out
+          chmod +x out/JellyReco-x86_64.AppImage
+          NOTES="Version 1.0.${{ github.run_number }} · $(date -u '+%Y-%m-%d %H:%M UTC') · ${GITHUB_SHA::7}
+          Windows on Arm: JellyReco-Setup-arm64.exe · Linux x86_64: JellyReco-x86_64.AppImage"
+          gh release delete jellyrec-pc-latest --yes --cleanup-tag -R "$GITHUB_REPOSITORY" 2>/dev/null || true
+          gh release create jellyrec-pc-latest out/JellyReco-Setup-arm64.exe out/JellyReco-x86_64.AppImage -R "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" --title "JellyRec PC 1.0.${{ github.run_number }} (latest build)" --notes "$NOTES" --prerelease

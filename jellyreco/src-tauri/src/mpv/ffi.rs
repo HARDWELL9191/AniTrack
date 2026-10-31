@@ -99,11 +99,14 @@ pub const RENDER_PARAM_OPENGL_FBO: c_int = 3;
 pub const RENDER_PARAM_FLIP_Y: c_int = 4;
 pub const RENDER_PARAM_X11_DISPLAY: c_int = 8;
 pub const RENDER_PARAM_WL_DISPLAY: c_int = 9;
+/// 0: mpv_render_context_render returns right away instead of waiting for the frame's display time.
+pub const RENDER_PARAM_BLOCK_FOR_TARGET_TIME: c_int = 12;
 type FnRenderCreate = unsafe extern "C" fn(*mut RenderContext, Handle, *mut RenderParam) -> c_int;
 type FnRenderSetUpdate = unsafe extern "C" fn(RenderContext, Option<unsafe extern "C" fn(*mut c_void)>, *mut c_void);
 type FnRenderUpdate = unsafe extern "C" fn(RenderContext) -> u64;
 type FnRenderRender = unsafe extern "C" fn(RenderContext, *mut RenderParam) -> c_int;
 type FnRenderFree = unsafe extern "C" fn(RenderContext);
+type FnRenderReportSwap = unsafe extern "C" fn(RenderContext);
 
 /// The libmpv functions the player uses.
 pub struct Api {
@@ -127,6 +130,7 @@ pub struct Api {
     pub render_context_update: Option<FnRenderUpdate>,
     pub render_context_render: Option<FnRenderRender>,
     pub render_context_free: Option<FnRenderFree>,
+    pub render_context_report_swap: Option<FnRenderReportSwap>,
 }
 
 // The function pointers are plain C entry points; libmpv itself is thread-safe.
@@ -163,6 +167,7 @@ impl Api {
                 render_context_update: lib.get(b"mpv_render_context_update\0").ok().map(|f| *f),
                 render_context_render: lib.get(b"mpv_render_context_render\0").ok().map(|f| *f),
                 render_context_free: lib.get(b"mpv_render_context_free\0").ok().map(|f| *f),
+                render_context_report_swap: lib.get(b"mpv_render_context_report_swap\0").ok().map(|f| *f),
                 _lib: lib,
             })
         }

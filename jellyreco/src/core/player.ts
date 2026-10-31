@@ -771,10 +771,10 @@ export class PlayerController {
     const st = this.state;
     this.clearUpNext();
     if (st.index < st.queue.length - 1) {
-      await this.reportStop();
+      void this.reportStop(); // reads what it reports right away; the next item needn't wait for the server
       await this.load(st.index + 1, { startSeconds: 0 });
     } else if (st.repeat === "all" && st.queue.length) {
-      await this.reportStop();
+      void this.reportStop();
       await this.load(0, { startSeconds: 0 });
     }
   }
@@ -782,13 +782,13 @@ export class PlayerController {
   async previous() {
     const st = this.state;
     if (st.position > 5 || st.index === 0) return this.seek(0);
-    await this.reportStop();
+    void this.reportStop();
     await this.load(st.index - 1, { startSeconds: 0 });
   }
 
   async jumpTo(index: number) {
     if (index < 0 || index >= this.state.queue.length) return;
-    await this.reportStop();
+    void this.reportStop();
     await this.load(index, { startSeconds: 0 });
   }
 

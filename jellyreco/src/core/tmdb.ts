@@ -4,6 +4,7 @@
 // Accepts the long "API Read Access Token" (Bearer header) or the short "API key" (api_key).
 
 import { type ExternalTitle, IMAGE_BASE, titleId, titleKey } from "./titles";
+import { deviceRegion, pickCertification } from "./age";
 
 type FetchFn = (url: string, init?: RequestInit) => Promise<Response>;
 let fetchImpl: FetchFn = (url, init) => fetch(url, init);
@@ -171,7 +172,7 @@ export class Tmdb {
     if (hit) return hit;
     const tv = t.source === "tmdbTV";
     let json: Record<string, unknown>;
-    try { json = await this.get<Record<string, unknown>>(`/${tv ? "tv" : "movie"}/${t.sourceId}`, { append_to_response: "keywords,external_ids" }); } catch { return t; }
+    try { json = await this.get<Record<string, unknown>>(`/${tv ? "tv" : "movie"}/${t.sourceId}`, { append_to_response: tv ? "keywords,external_ids,content_ratings" : "keywords,external_ids,release_dates" }); } catch { return t; }
     const d = { ...t };
     const kw = json.keywords as { keywords?: { name: string }[]; results?: { name: string }[] } | undefined;
     d.tags = (kw?.keywords ?? kw?.results ?? []).map((k) => k.name).filter(Boolean);
@@ -184,6 +185,9 @@ export class Tmdb {
     if (typeof json.runtime === "number") d.runtime = json.runtime;
     if (typeof json.status === "string") d.status = json.status;
     if (Array.isArray(json.genres)) d.genres = (json.genres as { name: string }[]).map((g) => g.name).filter(Boolean);
+    // The age bubble (as on the iPhone): the certification for this device's country, else the US / UK.
+    const cert = pickCertification(json, tv, deviceRegion());
+    if (cert) { d.ageRating = cert[0]; d.ageRatingCountry = cert[1]; }
     if (this.detailCache.size > 3000) this.detailCache.clear();
     this.detailCache.set(key, d);
     return d;

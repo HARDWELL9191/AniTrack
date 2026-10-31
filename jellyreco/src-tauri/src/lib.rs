@@ -44,19 +44,28 @@ async fn mpv_start(app: tauri::AppHandle, window: tauri::WebviewWindow, options:
     tauri::async_runtime::spawn_blocking(move || engine.start(app, wid, options, observe)).await.map_err(|e| e.to_string())?
 }
 
+// Commands, properties and reads run on a worker thread, never on the main thread. A plain
+// (non-async) Tauri command runs on the main thread, and on Linux that's also the thread mpv draws
+// video on (gl.rs): mpv forbids calling it from its render thread, because a command that needs the
+// video output (loadfile for the next / previous episode, seeking, track changes) then waits for a
+// frame that thread can't draw until the command returns. mpv breaks that with timeouts, which is
+// what made the player on Linux slow to react and skip or stall on next / previous.
 #[tauri::command]
-fn mpv_command(args: Vec<String>, state: tauri::State<'_, AppState>) -> Result<(), String> {
-    state.mpv.command(&args)
+async fn mpv_command(args: Vec<String>, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let engine = state.mpv.clone();
+    tauri::async_runtime::spawn_blocking(move || engine.command(&args)).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-fn mpv_set(name: String, value: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
-    state.mpv.set(&name, &value)
+async fn mpv_set(name: String, value: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let engine = state.mpv.clone();
+    tauri::async_runtime::spawn_blocking(move || engine.set(&name, &value)).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-fn mpv_get(name: String, state: tauri::State<'_, AppState>) -> Result<Option<String>, String> {
-    state.mpv.get(&name)
+async fn mpv_get(name: String, state: tauri::State<'_, AppState>) -> Result<Option<String>, String> {
+    let engine = state.mpv.clone();
+    tauri::async_runtime::spawn_blocking(move || engine.get(&name)).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -149,10 +158,8 @@ fn linux_environment() {
 #[cfg(target_os = "linux")]
 fn tune_webkit(w: &tauri::WebviewWindow) {
     use std::ffi::{c_char, c_int, c_void, CStr};
-    if std::env::var_os("JELLYRECO_WEBKIT_60HZ").is_some() {
-        return;
-    }
-    let _ = w.with_webview(|wv| {
+    let keep_60 = std::env::var_os("JELLYRECO_WEBKIT_60HZ").is_some();
+    let _ = w.with_webview(move |wv| {
         use gtk::glib::object::ObjectType;
         let view = wv.inner().as_ptr() as *mut c_void;
         type GetSettings = unsafe extern "C" fn(*mut c_void) -> *mut c_void;
@@ -162,6 +169,8 @@ fn tune_webkit(w: &tauri::WebviewWindow) {
         type Ident = unsafe extern "C" fn(*mut c_void) -> *const c_char;
         type SetEnabled = unsafe extern "C" fn(*mut c_void, *mut c_void, c_int);
         type Unref = unsafe extern "C" fn(*mut c_void);
+        type SetPolicy = unsafe extern "C" fn(*mut c_void, c_int);
+        type GetPolicy = unsafe extern "C" fn(*mut c_void) -> c_int;
         // SAFETY: WebKitGTK's documented C API, on the main thread, with the app's own WebView.
         unsafe {
             let this = libloading::os::unix::Library::this();
@@ -177,6 +186,20 @@ fn tune_webkit(w: &tauri::WebviewWindow) {
                 return;
             };
             let settings = get_settings(view);
+            // The page is drawn and composited on the GPU (WEBKIT_HARDWARE_ACCELERATION_POLICY_ALWAYS),
+            // unless the person turned it off with WebKit's own environment variable.
+            if !settings.is_null() && std::env::var_os("WEBKIT_DISABLE_COMPOSITING_MODE").is_none() {
+                if let (Ok(set_policy), Ok(get_policy)) = (
+                    this.get::<SetPolicy>(b"webkit_settings_set_hardware_acceleration_policy\0"),
+                    this.get::<GetPolicy>(b"webkit_settings_get_hardware_acceleration_policy\0"),
+                ) {
+                    set_policy(settings, 1);
+                    eprintln!("[webkit] hardware acceleration policy: {}", ["on demand", "always", "never"].get(get_policy(settings) as usize).unwrap_or(&"?"));
+                }
+            }
+            if keep_60 {
+                return;
+            }
             let list = all();
             if settings.is_null() || list.is_null() {
                 return;

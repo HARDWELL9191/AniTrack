@@ -405,7 +405,7 @@ function Similar({ item }: { item: Item }) {
   if (!data?.length) return null;
   return (
     <Shelf title="More like this" icon="layers" subtitle="from your library">
-      {data.map((x) => <ItemCard key={x.item.Id} item={x.item} badge={<span className="bubble bubble-match">{x.match}%</span>} />)}
+      {data.map((x) => <ItemCard key={x.item.Id} item={x.item} match={x.match} />)}
     </Shelf>
   );
 }

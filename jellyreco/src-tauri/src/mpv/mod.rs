@@ -157,6 +157,9 @@ impl Engine {
         {
             set_opt("vo", "libmpv")?;
             set_opt("force-window", "no")?;
+            // Frames are drawn on GTK's main thread without waiting for their display time (gl.rs),
+            // so mpv shouldn't render them ahead of time either (mpv's advice for that setup).
+            let _ = set_opt("video-timing-offset", "0");
             // Zero-copy hardware decoding where the GL context allows it, else hardware decoding with a copy.
             // (A Windows-only choice like d3d11va synced from another PC counts as automatic.)
             if options.get("hwdec").is_some_and(|h| h == "auto-safe" || h.starts_with("d3d11")) {
@@ -267,6 +270,13 @@ impl Drop for Engine {
 
 fn event_loop(api: Arc<ffi::Api>, h: ffi::Handle, stop: Arc<AtomicBool>, app: AppHandle) {
     let mut names: HashMap<String, Option<String>> = HashMap::new();
+    // Positions change on every video frame. The page shows them ten times a second, so they're
+    // forwarded at most every 90 ms (each forward is work on the app's main thread, which on Linux
+    // also draws the video); the latest value is held back and sent with the next event, so a pause
+    // or seek never leaves the bar behind.
+    const RAPID: [&str; 2] = ["time-pos", "demuxer-cache-time"];
+    let mut last_sent: HashMap<&'static str, std::time::Instant> = HashMap::new();
+    let mut held: HashMap<&'static str, Option<String>> = HashMap::new();
     while !stop.load(Ordering::SeqCst) {
         // SAFETY: only this thread waits on the handle; the pointer is valid until the next call.
         let ev = unsafe { &*(api.wait_event)(h, 1.0) };
@@ -285,6 +295,15 @@ fn event_loop(api: Arc<ffi::Api>, h: ffi::Handle, stop: Arc<AtomicBool>, app: Ap
                     continue;
                 }
                 names.insert(name.clone(), value.clone());
+                if let Some(key) = RAPID.iter().copied().find(|k| *k == name) {
+                    let now = std::time::Instant::now();
+                    if last_sent.get(key).is_some_and(|t| now.duration_since(*t) < std::time::Duration::from_millis(90)) {
+                        held.insert(key, value);
+                        continue;
+                    }
+                    last_sent.insert(key, now);
+                    held.remove(key);
+                }
                 Event::Property { name, value }
             },
             ffi::EVENT_START_FILE => Event::StartFile,
@@ -325,6 +344,13 @@ fn event_loop(api: Arc<ffi::Api>, h: ffi::Handle, stop: Arc<AtomicBool>, app: Ap
             static DEBUG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
             if *DEBUG.get_or_init(|| std::env::var_os("JELLYRECO_DEBUG_VIDEO").is_some()) {
                 eprintln!("[mpv {level}] {prefix}: {text}");
+            }
+        }
+        // Anything else happening (pause, seek, a new file...) first sends the held-back positions.
+        if !matches!(&event, Event::Property { name, .. } if RAPID.contains(&name.as_str())) {
+            for (key, value) in held.drain() {
+                last_sent.insert(key, std::time::Instant::now());
+                let _ = app.emit("mpv", Event::Property { name: key.to_string(), value });
             }
         }
         let _ = app.emit("mpv", event);

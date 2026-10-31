@@ -65,43 +65,46 @@ export const titleInput = (t: ExternalTitle): EmbedInput => ({
 
 /** Everything on the server, indexed every way a TMDB title could match it. */
 export class OwnedIndex {
-  private movieIds = new Set<number>();
-  private tvIds = new Set<number>();
-  private imdb = new Set<string>();
-  private tvdb = new Set<number>();
-  private titles = new Map<string, (number | null)[]>();
+  private movieIds = new Map<number, Item>();
+  private tvIds = new Map<number, Item>();
+  private imdb = new Map<string, Item>();
+  private tvdb = new Map<number, Item>();
+  private titles = new Map<string, { year: number | null; item: Item }[]>();
 
   constructor(items: Item[], idMap: Record<string, number>) {
     for (const i of items) {
       const tmdbId = Number(provider(i, "Tmdb")) || idMap[i.Id];
-      if (tmdbId) (i.Type === "Series" ? this.tvIds : this.movieIds).add(tmdbId);
+      if (tmdbId) (i.Type === "Series" ? this.tvIds : this.movieIds).set(tmdbId, i);
       const im = provider(i, "Imdb");
-      if (im) this.imdb.add(im);
+      if (im) this.imdb.set(im, i);
       const tv = Number(provider(i, "Tvdb"));
-      if (tv) this.tvdb.add(tv);
+      if (tv) this.tvdb.set(tv, i);
       for (const name of [i.Name, i.OriginalTitle]) {
         if (!name) continue;
         const k = titleKey(name);
-        this.titles.set(k, [...(this.titles.get(k) ?? []), i.ProductionYear ?? null]);
+        this.titles.set(k, [...(this.titles.get(k) ?? []), { year: i.ProductionYear ?? null, item: i }]);
       }
     }
   }
 
-  contains(t: ExternalTitle): boolean {
-    if ((isMovie(t) ? this.movieIds : this.tvIds).has(t.sourceId)) return true;
-    if (t.imdbId && this.imdb.has(t.imdbId)) return true;
-    if (t.tvdbId && this.tvdb.has(t.tvdbId)) return true;
+  contains(t: ExternalTitle): boolean { return !!this.find(t); }
+
+  /** The library title that is this TMDB title (by TMDB / IMDb / TVDB id, else by name and year). */
+  find(t: ExternalTitle): Item | undefined {
+    const byId = (isMovie(t) ? this.movieIds : this.tvIds).get(t.sourceId) ?? (t.imdbId ? this.imdb.get(t.imdbId) : undefined) ?? (t.tvdbId ? this.tvdb.get(t.tvdbId) : undefined);
+    if (byId) return byId;
     for (const name of [t.title, t.originalTitle]) {
       if (!name) continue;
       const k = titleKey(name);
-      const years = this.titles.get(k);
-      if (k.length < 3 || !years) continue;
+      const found = this.titles.get(k);
+      if (k.length < 3 || !found) continue;
       // Same title within a year (or no year known) = the same work.
-      if (!t.year || years.some((y) => y === null || Math.abs(y - (t.year ?? 0)) <= 1)) return true;
+      const sameYear = !t.year ? found[0] : found.find((f) => f.year === null || Math.abs(f.year - (t.year ?? 0)) <= 1);
+      if (sameYear) return sameYear.item;
       // A series you have under the same name (later seasons are part of the same TMDB show).
-      if (!isMovie(t)) return true;
+      if (!isMovie(t)) return found[0].item;
     }
-    return false;
+    return undefined;
   }
 }
 
@@ -404,5 +407,14 @@ export class Discovery {
   }
 
   /** Is an outside title on your server now (you added it since)? */
-  ownedNow(c: DiscoveryContext, t: ExternalTitle) { return new OwnedIndex(c.reco.owned, this.idMap).contains(t); }
+  ownedNow(c: DiscoveryContext, t: ExternalTitle) { return !!this.ownedItem(c, t); }
+  /** The server title a pick turned into once it was added to the server (My List's green cloud). */
+  ownedItem(c: DiscoveryContext, t: ExternalTitle): Item | undefined {
+    const ids = Object.keys(this.idMap).length;
+    if (this.ownedIndexFor !== c.reco.owned || this.ownedIndexIds !== ids) { this.ownedIndex = new OwnedIndex(c.reco.owned, this.idMap); this.ownedIndexFor = c.reco.owned; this.ownedIndexIds = ids; }
+    return this.ownedIndex!.find(t);
+  }
+  private ownedIndex: OwnedIndex | null = null;
+  private ownedIndexFor: Item[] | null = null;
+  private ownedIndexIds = -1;
 }

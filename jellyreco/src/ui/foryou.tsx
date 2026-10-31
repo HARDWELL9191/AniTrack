@@ -11,7 +11,8 @@ import { AccountStorage, setNotForMe } from "../core/storage";
 import { type ExternalTitle, metaLine, resized, titleId } from "../core/titles";
 import { Tmdb } from "../core/tmdb";
 import type { Item } from "../core/types";
-import { Chip, Cover, Dropdown, Empty, Field, PageHeader, Shelf } from "./components";
+import { Chip, Cover, Dropdown, Empty, Field, MatchBubble, PageHeader, Shelf } from "./components";
+import { ageBucket } from "../core/age";
 import { relativeTime } from "./fmt";
 import { Icon } from "./icons";
 import { ui, useModel, useNavigate } from "./state";
@@ -216,6 +217,22 @@ function TmdbKeySetup() {
   );
 }
 
+/** The age bubble on a TMDB cover. Titles that came without full details (rows, "More like this",
+ *  saved picks) look theirs up once when they appear, and the bubble fades in (as on the iPhone). */
+export function ExternalAgeBubble({ t }: { t: ExternalTitle }) {
+  const model = useModel();
+  const id = titleId(t);
+  const [looked, setLooked] = useState<ExternalTitle | null>(null);
+  useEffect(() => {
+    if (t.ageRating || !model.tmdb.configured) return;
+    let alive = true;
+    void model.tmdb.details(t).then((d) => { if (alive) setLooked(d); }).catch(() => {});
+    return () => { alive = false; };
+  }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const label = ageBucket((looked && titleId(looked) === id ? looked : t).ageRating);
+  return label ? <span className="bubble bubble-age bubble-in">{label}</span> : null;
+}
+
 /** A poster for a title you don't have (opens its details). */
 export function TitleCard({ t, match, onClick, width = 140, highlighted, notOnServer }: { t: ExternalTitle; match?: number; onClick?: () => void; width?: number; highlighted?: boolean; notOnServer?: boolean }) {
   const open = onClick ?? (() => ui.openSheet({ kind: "tmdb", item: t }));
@@ -223,9 +240,11 @@ export function TitleCard({ t, match, onClick, width = 140, highlighted, notOnSe
     <div className={`card ${highlighted ? "highlighted" : ""}`} style={{ width, ["--ar" as string]: "2 / 3" }}>
       <button className="card-cover" onClick={open} title={t.title}>
         <Cover url={resized(t.posterURL, "w342")} width={width} height={Math.round(width * 1.5)} radius={14} icon="film" />
-        {match !== undefined && <div className="card-age"><span className="bubble bubble-match">{match}%</span></div>}
-        {/* As on the iPhone: a My List title you don't have yet gets the cloud-with-arrow badge. */}
-        {notOnServer && <div className="card-badge-left glass-icon" title="Not on your server yet"><Icon name="cloudDown" size={16} strokeWidth={2.1} /></div>}
+        {/* As on the iPhone: age bubble top left, match % bottom left, and a My List title you don't
+            have yet gets the cloud-with-arrow badge top right (so it never covers the age bubble). */}
+        <div className="card-badges"><ExternalAgeBubble t={t} /></div>
+        {match !== undefined && <div className="card-match"><MatchBubble value={match} /></div>}
+        {notOnServer && <div className="card-badge-tr glass-icon" title="Not on your server yet"><Icon name="cloudDown" size={16} strokeWidth={2.1} /></div>}
       </button>
       <div className="card-title">{t.title}</div>
       {t.year && <div className="card-sub">{t.year}</div>}

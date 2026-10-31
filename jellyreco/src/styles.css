@@ -1209,3 +1209,36 @@ html.platform-linux .mono { font-family: "JetBrains Mono", "Cascadia Mono", "Dej
    space beside it still plays / pauses). */
 .player .pd-title > .pd-title-text, .player .pd-title > .pd-logo { pointer-events: auto; cursor: default; }
 .player.controls-off .pd-title > .pd-title-text, .player.controls-off .pd-title > .pd-logo { pointer-events: none; }
+
+/* MARK: Shelf scrollbar (both platforms): a slim Liquid Glass track under each row with a glass
+   thumb you can drag; clicking the track pages the row. The row snaps to cards measured from its
+   padding (scroll-padding), so snapping never pushes the first card under the row's left edge. */
+.shelf-row { scroll-padding-inline: 10px; }
+.shelf-row.dragging { scroll-snap-type: none; scroll-behavior: auto; }
+.shelf-scrollbar { position: relative; height: 16px; margin: -12px 0 0; cursor: pointer; touch-action: none; }
+.shelf-scrollbar.off { display: none; }
+.shelf-scrollbar::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 6px; transform: translateY(-50%); border-radius: 999px;
+  background: color-mix(in srgb, var(--text) 7%, transparent); box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--text) 10%, transparent); transition: height 0.15s; }
+.shelf-thumb { position: absolute; left: 0; top: 50%; height: 6px; margin-top: -3px; min-width: 44px; border-radius: 999px; cursor: grab; will-change: transform;
+  background: color-mix(in srgb, var(--text) 38%, transparent);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.35), rgba(255, 255, 255, 0) 70%);
+  box-shadow: inset 0 0.5px 0 rgba(255, 255, 255, 0.55), inset 0 0 0 0.5px rgba(255, 255, 255, 0.22), 0 2px 8px rgba(0, 0, 0, 0.25);
+  transition: height 0.15s, margin-top 0.15s, background-color 0.15s; }
+.shelf-scrollbar:hover::before { height: 10px; }
+.shelf-scrollbar:hover .shelf-thumb { height: 10px; margin-top: -5px; background-color: color-mix(in srgb, var(--text) 55%, transparent); }
+.shelf-thumb:active { cursor: grabbing; background-color: color-mix(in srgb, var(--text) 66%, transparent); }
+
+/* MARK: Cover bubbles in the iPhone's places (both platforms)
+   Posters: age rating (+ favorite heart) top left, watched mark / unwatched count top right, match %
+   bottom left. Landscape stills: match % top left. My List: cloud-with-arrow (not on the server
+   yet) top right; green cloud with a check (since added to the server) bottom right. */
+.card-badges { position: absolute; top: 6px; left: 6px; display: flex; align-items: center; gap: 4px; pointer-events: none; }
+.card-match { position: absolute; bottom: 6px; left: 6px; pointer-events: none; }
+.card-badge-tr { position: absolute; top: 6px; right: 6px; pointer-events: none; }
+.card-badge-br { position: absolute; bottom: 6px; right: 6px; pointer-events: none; transition: opacity 0.15s; }
+.card-cover:hover .card-badge-br { opacity: 0; } /* the … button takes that corner on hover */
+.card-status { width: 24px; height: 24px; }
+.glass-icon.pink { background-color: rgba(219, 84, 128, 0.6); }
+.glass-icon.green { background-color: rgba(52, 199, 89, 0.55); }
+.bubble-in { animation: bubble-in 0.2s ease-out; }
+@keyframes bubble-in { from { opacity: 0; } to { opacity: 1; } }

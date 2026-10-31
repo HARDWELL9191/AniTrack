@@ -2,7 +2,7 @@
 // (mpv), subtitles, For You, devices & servers, and about. Everything except a few per-PC options
 // is saved to your Jellyfin account, so a new PC picks it up.
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Select } from "./select";
 import { getEmbedder, type EngineStatus } from "../core/ai";
 import { APP_VERSION } from "../core/api";
@@ -441,6 +441,7 @@ function About() {
   const model = useModel();
   const [engine, setEngine] = useState<string>("…");
   const [ai, setAi] = useState<string>("…");
+  const graphics = useMemo(graphicsInfo, []);
   useEffect(() => {
     void getEngine().info().then((i) => setEngine(i.available ? i.detail : `Not available: ${i.detail}`));
     void getEmbedder().status().then((s) => setAi(s.detail)).catch(() => setAi("Not available"));
@@ -453,9 +454,24 @@ function About() {
         <div className="kv-item"><span>Address</span><strong>{model.server?.url}</strong></div>
         <div className="kv-item"><span>Player engine</span><strong>{engine}</strong></div>
         <div className="kv-item"><span>On-device AI</span><strong>{ai}</strong></div>
+        <div className="kv-item"><span>Graphics</span><strong>{graphics}</strong></div>
         <div className="kv-item"><span>This device</span><strong>{model.deviceName}</strong></div>
       </div>
       <p className="muted small">An unofficial Jellyfin client. Playback by mpv and FFmpeg. Recommendations by AniReco's engine with BAAI bge-small-en-v1.5.</p>
     </Group>
   );
+}
+
+/** What draws the app's page: the GPU, or the CPU (software rendering, much slower). */
+function graphicsInfo(): string {
+  try {
+    const gl = document.createElement("canvas").getContext("webgl2") ?? document.createElement("canvas").getContext("webgl");
+    if (!gl) return "Software (no GPU acceleration)";
+    const ext = gl.getExtension("WEBGL_debug_renderer_info");
+    const name = String(ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER));
+    gl.getExtension("WEBGL_lose_context")?.loseContext();
+    return /llvmpipe|softpipe|swiftshader|software|swrast/i.test(name) ? `Software (no GPU acceleration) · ${name}` : `GPU accelerated · ${name}`;
+  } catch {
+    return "Unknown";
+  }
 }

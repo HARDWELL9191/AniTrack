@@ -8,7 +8,8 @@ import type {
 } from "./types";
 
 export const APP_NAME = "JellyReco";
-export const APP_VERSION = "1.0.0";
+/** "1.0.<build number>" in builds from the JellyRec PC workflow (both platforms share it). */
+export const APP_VERSION: string = import.meta.env.VITE_APP_VERSION || "1.0.0";
 
 type FetchFn = (url: string, init?: RequestInit) => Promise<Response>;
 let fetchImpl: FetchFn = (url, init) => fetch(url, init);
