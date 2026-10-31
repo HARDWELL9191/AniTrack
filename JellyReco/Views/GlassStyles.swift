@@ -143,6 +143,7 @@ struct MenuPickerRow<Value: Hashable, Options: View>: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .center, spacing: 12) {
                 Text(title)
+                    .fixedSize(horizontal: false, vertical: true)   // wrap, never "Hardware accel…"
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Picker(title, selection: $selection, content: options)
                     .labelsHidden()
