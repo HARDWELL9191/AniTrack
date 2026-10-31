@@ -140,17 +140,18 @@ struct MenuPickerRow<Value: Hashable, Options: View>: View {
     @ViewBuilder let options: () -> Options
 
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .center, spacing: 12) {
                 Text(title)
-                if let help { Text(help).font(.caption).foregroundStyle(.secondary) }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Picker(title, selection: $selection, content: options)
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .tint(Color.secondary)
+                    .layoutPriority(1)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            Picker(title, selection: $selection, content: options)
-                .labelsHidden()
-                .pickerStyle(.menu)
-                .tint(Color.secondary)
-                .layoutPriority(1)
+            // Help spans the whole row underneath, like Apple's footnotes.
+            if let help { Text(help).font(.caption).foregroundStyle(.secondary) }
         }
     }
 }

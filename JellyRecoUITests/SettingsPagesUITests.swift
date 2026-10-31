@@ -80,7 +80,9 @@ final class SettingsPagesUITests: XCTestCase {
         toTop(app)
         let picker = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Hardware acceleration' OR label CONTAINS 'Quicksync' OR value CONTAINS 'Quicksync'")).firstMatch
         XCTAssertTrue(picker.waitForExistence(timeout: 5), "acceleration dropdown")
-        let title = app.staticTexts["Hardware acceleration"].firstMatch
+        // The row's title (the section header has the same text): the one closest to the dropdown.
+        let titles = app.staticTexts.matching(identifier: "Hardware acceleration").allElementsBoundByIndex
+        let title = titles.min { abs($0.frame.midY - picker.frame.midY) < abs($1.frame.midY - picker.frame.midY) } ?? app.staticTexts["Hardware acceleration"].firstMatch
         print("RESULT dropdown label: \(picker.label) value: \(picker.value as? String ?? "") frame \(picker.frame) title frame \(title.frame)")
         // Apple's layout: the value sits on the title's line, on the right.
         XCTAssertTrue(title.exists && abs(picker.frame.midY - title.frame.midY) < 30 && picker.frame.minX > title.frame.minX,
