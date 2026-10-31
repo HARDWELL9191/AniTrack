@@ -34,6 +34,7 @@ struct LibraryAdminDetail: View {
                         .buttonStyle(.borderless).foregroundStyle(.primary)
                         .accessibilityLabel("Browse the server")
                     Button("Add") { Task { await addPath(newPath) } }
+                        .buttonStyle(.borderless)
                         .disabled(newPath.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             } header: { Text("Folders") } footer: { Text("Swipe a folder to remove it. Paths are on the server.") }
@@ -196,7 +197,7 @@ struct AddLibrarySheet: View {
                         Button { browsing = true } label: { Image(systemName: "folder.badge.plus") }
                             .buttonStyle(.borderless).foregroundStyle(.primary)
                             .accessibilityLabel("Browse the server")
-                        Button("Add", action: addTyped).disabled(typedPath.trimmingCharacters(in: .whitespaces).isEmpty)
+                        Button("Add", action: addTyped).buttonStyle(.borderless).disabled(typedPath.trimmingCharacters(in: .whitespaces).isEmpty)
                     }
                 } header: { Text("Folders") } footer: { Text("Folders on the server. Swipe one to remove it.") }
 

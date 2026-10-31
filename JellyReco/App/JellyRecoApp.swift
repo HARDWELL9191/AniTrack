@@ -14,6 +14,9 @@ struct JellyRecoApp: App {
         WindowGroup {
             if let mode = ProcessInfo.processInfo.environment["JELLYRECO_UITEST"] {
                 UITestHost(mode: mode).environment(model)
+                    .tint(Theme.accent)
+                    .toggleStyle(GreenSwitchToggleStyle())
+                    .preferredColorScheme(.dark)
             } else {
             RootView()
                 .environment(model)

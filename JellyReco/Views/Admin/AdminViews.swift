@@ -1,7 +1,59 @@
 import SwiftUI
 
-/// Server administration (admins only): everything Swiftfin's dashboard has, grouped by task.
+/// The server Dashboard (admins only), organised like jellyfin-web's and the desktop client's:
+/// Server, Libraries, Playback, Devices, Live TV, Plugins, Advanced — same names, same pages.
 struct AdminDashboardView: View {
+    var body: some View {
+        List {
+            Section("Server") {
+                NavigationLink { DashboardOverviewView() } label: { Label("Dashboard", systemImage: "gauge.with.dots.needle.67percent") }
+                page(ServerSettingsCatalog.general)
+                page(ServerSettingsCatalog.branding)
+                NavigationLink { UsersAdminView() } label: { Label("Users", systemImage: "person.3.fill") }
+            }
+            Section("Libraries") {
+                NavigationLink { AdminLibrariesView() } label: { Label("Libraries", systemImage: "books.vertical.fill") }
+                page(ServerSettingsCatalog.display)
+                page(ServerSettingsCatalog.metadata)
+                page(ServerSettingsCatalog.nfo)
+            }
+            Section("Playback") {
+                page(ServerSettingsCatalog.transcoding)
+                page(ServerSettingsCatalog.resume)
+                page(ServerSettingsCatalog.streaming)
+                page(ServerSettingsCatalog.trickplay)
+            }
+            Section("Devices") {
+                NavigationLink { DevicesView() } label: { Label("Devices", systemImage: "iphone.gen3") }
+                NavigationLink { ActivityLogView() } label: { Label("Activity", systemImage: "list.bullet.rectangle") }
+            }
+            Section("Live TV") {
+                NavigationLink { LiveTVSetupView() } label: { Label("Live TV", systemImage: "antenna.radiowaves.left.and.right") }
+                page(ServerSettingsCatalog.dvr)
+            }
+            Section("Plugins") {
+                NavigationLink { PluginsView() } label: { Label("My plugins", systemImage: "puzzlepiece.extension.fill") }
+                NavigationLink { PluginCatalogView() } label: { Label("Catalog", systemImage: "square.and.arrow.down.fill") }
+                NavigationLink { PluginRepositoriesView() } label: { Label("Repositories", systemImage: "link") }
+            }
+            Section("Advanced") {
+                page(ServerSettingsCatalog.networking)
+                NavigationLink { APIKeysView() } label: { Label("API keys", systemImage: "key.horizontal.fill") }
+                NavigationLink { BackupsView() } label: { Label("Backups", systemImage: "archivebox.fill") }
+                NavigationLink { ServerLogsView() } label: { Label("Logs", systemImage: "terminal.fill") }
+                NavigationLink { ScheduledTasksView() } label: { Label("Scheduled tasks", systemImage: "clock.arrow.2.circlepath") }
+            }
+        }
+        .navigationTitle("Dashboard")
+    }
+
+    private func page(_ p: ConfigPage) -> some View {
+        NavigationLink { ConfigPageView(page: p) } label: { Label(p.title, systemImage: p.symbol) }
+    }
+}
+
+/// jellyfin-web's Dashboard overview: the server, what's playing, and restart / shut down / scan.
+struct DashboardOverviewView: View {
     @Environment(AppModel.self) private var model
     @State private var info: SystemInfo?
     @State private var sessions: [SessionInfo] = []
@@ -14,7 +66,7 @@ struct AdminDashboardView: View {
 
     var body: some View {
         List {
-            Section {
+            Section("Server") {
                 if let info {
                     LabeledContent("Server", value: info.serverName ?? "")
                     LabeledContent("Version", value: info.version ?? "")
@@ -25,48 +77,20 @@ struct AdminDashboardView: View {
                         Label("Restart needed to apply changes", systemImage: "exclamationmark.arrow.circlepath").foregroundStyle(.orange)
                     }
                     if info.hasUpdateAvailable == true {
-                        Label("Server update available", systemImage: "arrow.down.circle").foregroundStyle(Theme.accent)
+                        Label("Server update available", systemImage: "arrow.down.circle")
                     }
                 } else {
                     ProgressView()
                 }
             }
-
             Section("Activity") {
                 NavigationLink { SessionsView() } label: {
                     LabeledContent { Text("\(sessions.filter { $0.nowPlayingItem != nil }.count) playing") } label: {
                         Label("Active sessions", systemImage: "play.tv.fill")
                     }
                 }
-                NavigationLink { ActivityLogView() } label: { Label("Activity log", systemImage: "list.bullet.rectangle") }
             }
-
-            Section("Maintenance") {
-                NavigationLink { ScheduledTasksView() } label: { Label("Scheduled tasks", systemImage: "clock.arrow.2.circlepath") }
-                NavigationLink { AdminLibrariesView() } label: { Label("Libraries", systemImage: "books.vertical.fill") }
-                NavigationLink { LiveTVSetupView() } label: { Label("Live TV", systemImage: "antenna.radiowaves.left.and.right") }
-                NavigationLink { ServerLogsView() } label: { Label("Server logs", systemImage: "doc.text.magnifyingglass") }
-                NavigationLink { BackupsView() } label: { Label("Backups", systemImage: "archivebox.fill") }
-                NavigationLink { PlaybackTestView() } label: { Label("Playback test", systemImage: "checkmark.seal.fill") }
-            }
-
-            Section("Access") {
-                NavigationLink { UsersAdminView() } label: { Label("Users", systemImage: "person.3.fill") }
-                NavigationLink { DevicesView() } label: { Label("Devices", systemImage: "iphone.gen3") }
-                NavigationLink { APIKeysView() } label: { Label("API keys", systemImage: "key.horizontal.fill") }
-                NavigationLink { PluginsView() } label: { Label("Plugins", systemImage: "puzzlepiece.extension.fill") }
-                NavigationLink { PluginCatalogView() } label: { Label("Plugin catalog", systemImage: "square.grid.2x2.fill") }
-                NavigationLink { PluginRepositoriesView() } label: { Label("Plugin repositories", systemImage: "shippingbox.fill") }
-            }
-
-            Section("Settings") {
-                NavigationLink { ServerSettingsHub() } label: { Label("Server settings", systemImage: "gearshape.2.fill") }
-                ForEach(ServerSettingsCatalog.pages.prefix(4)) { page in
-                    NavigationLink { ConfigPageView(page: page) } label: { Label(page.title, systemImage: page.symbol) }
-                }
-            }
-
-            Section("Server") {
+            Section {
                 Button { confirm = .scan } label: { Label("Scan all libraries", systemImage: "arrow.triangle.2.circlepath") }
                 Button { confirm = .restart } label: { Label("Restart server", systemImage: "restart") }
                 Button(role: .destructive) { confirm = .shutdown } label: {
@@ -1107,7 +1131,7 @@ struct ServerLogsView: View {
                 }
             }
         }
-        .navigationTitle("Server logs")
+        .navigationTitle("Logs")
         .task {
             files = ((try? await model.client?.get("/System/Logs", as: [LogFile].self)) ?? [])
                 .sorted { ($0.dateModified ?? .distantPast) > ($1.dateModified ?? .distantPast) }
@@ -1293,13 +1317,7 @@ struct PluginsView: View {
                 }
             }
         }
-        .navigationTitle("Plugins")
-        .toolbar {
-            Menu {
-                NavigationLink { PluginCatalogView() } label: { Label("Catalog", systemImage: "square.grid.2x2") }
-                NavigationLink { PluginRepositoriesView() } label: { Label("Repositories", systemImage: "shippingbox") }
-            } label: { Image(systemName: "ellipsis.circle") }
-        }
+        .navigationTitle("My plugins")
         .task { await load() }
         .refreshable { await load() }
     }

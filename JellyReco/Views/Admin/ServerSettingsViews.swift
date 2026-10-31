@@ -122,6 +122,12 @@ final class ConfigEditor {
         value(store, key) != nil
     }
 
+    /// Values without a server (UI tests and previews).
+    func preload(_ stores: [ConfigStore: [String: Any]]) {
+        for (store, v) in stores { values[store] = v; original[store] = v }
+        dirty = []
+    }
+
     func discard() {
         for (store, v) in original { values[store] = v }
         dirty = []
@@ -451,7 +457,7 @@ private let resolutions = s([("MatchSource", "Match source"), ("P2160", "2160p")
         ]),
     ])
 
-    static let nfo = ConfigPage(title: "NFO Settings", symbol: "doc.text.fill",
+    static let nfo = ConfigPage(title: "NFO settings", symbol: "doc.text.fill",
                                 intro: "Changes apply to content added from now on. To turn NFO files on or off, edit a library and find Metadata savers.",
                                 context: [.users], sections: [
         S("NFO", [
@@ -696,29 +702,11 @@ private let resolutions = s([("MatchSource", "Match source"), ("P2160", "2160p")
 
 // MARK: - Views
 
-struct ServerSettingsHub: View {
-    var body: some View {
-        List {
-            Section {
-                ForEach(ServerSettingsCatalog.pages) { page in
-                    NavigationLink { ConfigPageView(page: page) } label: { Label(page.title, systemImage: page.symbol) }
-                }
-            } footer: {
-                Text("Jellyfin's dashboard settings, option for option, saved straight to your server.")
-            }
-            Section {
-                NavigationLink { AllServerSettingsView() } label: { Label("All settings", systemImage: "list.bullet.rectangle") }
-            } footer: {
-                Text("Every value in the server's configuration, including ones the dashboard doesn't show.")
-            }
-        }
-        .navigationTitle("Server settings")
-    }
-}
-
 struct ConfigPageView: View {
     @Environment(AppModel.self) private var model
     let page: ConfigPage
+    /// Server values to show instead of loading them (UI tests).
+    var preview: [ConfigStore: [String: Any]]? = nil
     @State private var editor = ConfigEditor()
 
     var body: some View {
@@ -761,6 +749,10 @@ struct ConfigPageView: View {
         }
         .overlay { if editor.loading && editor.values.isEmpty { ProgressView() } }
         .task {
+            if let preview {
+                editor.preload(preview)
+                return
+            }
             await editor.load(page.stores, client: model.client)
             await ServerSettingsCatalog.loadContext(page.context, into: editor, client: model.client)
         }
@@ -778,15 +770,32 @@ struct ConfigFieldRow: View {
     @State private var browsing = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            control
-            if let footer = field.footer, !isNote {
-                Text(footer).font(.caption).foregroundStyle(.secondary)
+        switch field.kind {
+        case .switches(let source):
+            // jellyfin-web's checkbox list: one switch per row.
+            ForEach(Array(source(editor).filter { $0.show?(editor) ?? true }.enumerated()), id: \.offset) { _, sw in
+                Toggle(sw.label, isOn: editor.switchBinding(field.store, listKey: field.key, sw))
             }
-        }
-        .sheet(isPresented: $browsing) {
-            ServerPathPicker(files: isFilePath) { picked in
-                editor.set(field.store, field.key, picked)
+        case .toggle:
+            Toggle(isOn: editor.bool(field.store, field.key)) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(field.label)
+                    if let footer = field.footer { Text(footer).font(.caption).foregroundStyle(.secondary) }
+                }
+            }
+        case .publishedURIs:
+            PublishedURIsEditor(editor: editor, store: field.store, key: field.key)
+        default:
+            VStack(alignment: .leading, spacing: 4) {
+                control
+                if let footer = field.footer, !isNote {
+                    Text(footer).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            .sheet(isPresented: $browsing) {
+                ServerPathPicker(files: isFilePath) { picked in
+                    editor.set(field.store, field.key, picked)
+                }
             }
         }
     }
@@ -854,12 +863,8 @@ struct ConfigFieldRow: View {
                 ForEach(options.indices, id: \.self) { i in Text(options[i].label).tag(options[i].value) }
             }
             .pickerStyle(.menu)
-        case .switches(let source):
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(Array(source(editor).filter { $0.show?(editor) ?? true }.enumerated()), id: \.offset) { _, sw in
-                    Toggle(sw.label, isOn: editor.switchBinding(field.store, listKey: field.key, sw))
-                }
-            }
+        case .switches:
+            EmptyView()
         case .tags(let numeric, let placeholder):
             TagsEditor(label: field.label, placeholder: placeholder, numeric: numeric,
                        values: editor.tags(field.store, field.key, numeric: numeric))
@@ -968,7 +973,10 @@ struct TagsEditor: View {
                             .padding(.horizontal, 10).padding(.vertical, 5)
                             .glassEffect(.regular, in: .capsule)
                         }
-                        .buttonStyle(.plain)
+                        // Borderless: in a list row only the tapped chip reacts, not the whole row.
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(.primary)
+                        .accessibilityLabel("Remove \(v)")
                     }
                 }
             }
@@ -978,7 +986,7 @@ struct TagsEditor: View {
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
                     .submitLabel(.done)
                     .onSubmit(add)
-                Button("Add", action: add).disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty)
+                Button("Add", action: add).buttonStyle(.borderless).disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         }
     }
@@ -1010,7 +1018,7 @@ struct PublishedURIsEditor: View {
     private var others: [String] { value.filter { p in p.contains("=") && !["all=", "internal=", "external="].contains { p.hasPrefix($0) } } }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        Group {
             Toggle("Use the same published server URI for internal and external access", isOn: Binding(get: { same }, set: { s in
                 let u = uris
                 same = s

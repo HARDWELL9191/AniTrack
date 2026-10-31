@@ -8,10 +8,37 @@ struct UITestHost: View {
     let mode: String
     @State private var ready = false
 
+    /// A Jellyfin 10.11 encoding configuration as the server returns it (Quick Sync chosen).
+    static let encodingJSON = """
+    {"EncodingThreadCount":-1,"FallbackFontPath":"","EnableFallbackFont":false,"EnableAudioVbr":false,"DownMixAudioBoost":2,
+     "DownMixStereoAlgorithm":"None","MaxMuxingQueueSize":2048,"EnableThrottling":false,"ThrottleDelaySeconds":180,
+     "EnableSegmentDeletion":false,"SegmentKeepSeconds":720,"HardwareAccelerationType":"qsv",
+     "EncoderAppPathDisplay":"/usr/lib/jellyfin-ffmpeg/ffmpeg","VaapiDevice":"/dev/dri/renderD128","QsvDevice":"",
+     "EnableTonemapping":false,"EnableVppTonemapping":false,"EnableVideoToolboxTonemapping":false,"TonemappingAlgorithm":"bt2390",
+     "TonemappingMode":"auto","TonemappingRange":"auto","TonemappingDesat":0,"TonemappingPeak":100,"TonemappingParam":0,
+     "VppTonemappingBrightness":16,"VppTonemappingContrast":1,"H264Crf":23,"H265Crf":28,"EncoderPreset":"auto",
+     "DeinterlaceDoubleRate":false,"DeinterlaceMethod":"yadif","EnableDecodingColorDepth10Hevc":true,
+     "EnableDecodingColorDepth10Vp9":true,"EnableDecodingColorDepth10HevcRext":false,"EnableDecodingColorDepth12HevcRext":false,
+     "EnableEnhancedNvdecDecoder":true,"PreferSystemNativeHwDecoder":true,"EnableIntelLowPowerH264HwEncoder":false,
+     "EnableIntelLowPowerHevcHwEncoder":false,"EnableHardwareEncoding":true,"AllowHevcEncoding":false,"AllowAv1Encoding":false,
+     "EnableSubtitleExtraction":true,"HardwareDecodingCodecs":["h264","hevc","mpeg2video","vc1","vp9","av1"],
+     "HlsAudioSeekStrategy":"TranscodeAudio"}
+    """
+
     var body: some View {
         ZStack {
             Color.clear
-            if ready {
+            if ready, mode == "transcoding" {
+                NavigationStack {
+                    ConfigPageView(page: ServerSettingsCatalog.transcoding, preview: [
+                        .encoding: (try? JSONSerialization.jsonObject(with: Data(Self.encodingJSON.utf8)) as? [String: Any]) ?? [:],
+                    ])
+                }
+            } else if ready, mode == "dashboard" {
+                NavigationStack { AdminDashboardView() }
+            } else if ready, mode == "settings" {
+                SettingsView()
+            } else if ready {
                 ForYouView()
                     .overlay(alignment: .bottom) {
                         Text(model.discovery.hasKey ? "STATE: For You sees the key" : "STATE: For You sees no key")

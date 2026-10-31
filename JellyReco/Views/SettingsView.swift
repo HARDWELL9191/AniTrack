@@ -1,80 +1,115 @@
 import SwiftUI
 
+/// Settings, organised like the JellyReco desktop client's: Account, Display, Home, Playback,
+/// Player, Subtitles, For You, Devices & servers, About — and, for administrators, the server
+/// Dashboard (its own tab on the desktop; inside Settings here, where a phone has less room).
 struct SettingsView: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    NavigationLink { AccountSettingsView() } label: {
+                        HStack(spacing: 14) {
+                            UserAvatar(serverURL: model.client?.baseURL, userId: model.user?.id ?? "",
+                                       tag: model.user?.primaryImageTag, size: 54)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(model.user?.name ?? "…").font(.headline)
+                                Text(model.serverName).font(.subheadline).foregroundStyle(.secondary)
+                                if model.isAdmin { Text("Administrator").font(.caption.weight(.semibold)).foregroundStyle(.secondary) }
+                            }
+                        }
+                    }
+                }
+                Section {
+                    link("Display", "paintpalette.fill") { DisplaySettingsView() }
+                    link("Home", "house.fill") { HomeSettingsView() }
+                    link("Playback", "play.fill") { PlaybackSettingsView() }
+                    link("Player", "play.rectangle.fill") { PlayerSettingsView() }
+                    link("Subtitles", "captions.bubble.fill") { SubtitleSettingsView() }
+                    link("For You", "wand.and.stars") { ForYouSettingsView() }
+                }
+                if model.isAdmin {
+                    Section {
+                        link("Dashboard", "server.rack") { AdminDashboardView() }
+                    } header: { Text("Administration") } footer: {
+                        Text("Your server's settings, users, libraries, plugins and more, organised like Jellyfin's dashboard.")
+                    }
+                }
+                Section {
+                    link("Devices & servers", "macbook.and.iphone") { AccountsView() }
+                    link("About", "info.circle.fill") { AboutSettingsView() }
+                }
+            }
+            .navigationTitle("Settings")
+            .toolbarTitleDisplayMode(.inlineLarge)
+        }
+    }
+
+    private func link<D: View>(_ title: String, _ symbol: String, @ViewBuilder _ destination: @escaping () -> D) -> some View {
+        NavigationLink { destination() } label: { Label(title, systemImage: symbol) }
+    }
+}
+
+// MARK: - Account
+
+struct AccountSettingsView: View {
     @Environment(AppModel.self) private var model
     @State private var confirmSignOut = false
     @State private var showQuickConnectApprove = false
     @State private var showPassword = false
 
     var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    HStack(spacing: 14) {
-                        UserAvatar(serverURL: model.client?.baseURL, userId: model.user?.id ?? "",
-                                   tag: model.user?.primaryImageTag, size: 54)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(model.user?.name ?? "…").font(.headline)
-                            Text(model.serverName).font(.subheadline).foregroundStyle(.secondary)
-                            if model.isAdmin { Text("Administrator").font(.caption.weight(.semibold)).foregroundStyle(Theme.accent) }
-                        }
+        Form {
+            Section("Profile") {
+                HStack(spacing: 14) {
+                    UserAvatar(serverURL: model.client?.baseURL, userId: model.user?.id ?? "", tag: model.user?.primaryImageTag, size: 64)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(model.user?.name ?? "…").font(.title3.weight(.semibold))
+                        Text(model.serverName).font(.subheadline).foregroundStyle(.secondary)
+                        if model.isAdmin { Text("Administrator").font(.caption.weight(.semibold)).foregroundStyle(.secondary) }
                     }
-                    NavigationLink { AccountsView() } label: { Label("Servers & users", systemImage: "person.2.fill") }
-                    Button { showQuickConnectApprove = true } label: { Label("Approve a Quick Connect code", systemImage: "qrcode") }
-                    Button { showPassword = true } label: { Label("Change password", systemImage: "key.fill") }
-                    Button(role: .destructive) { confirmSignOut = true } label: {
-                        Label("Sign out", systemImage: "rectangle.portrait.and.arrow.right").foregroundStyle(.red)
-                    }
-                }
-
-                if model.isAdmin {
-                    Section {
-                        NavigationLink { AdminDashboardView() } label: {
-                            Label("Server dashboard", systemImage: "server.rack")
-                        }
-                    } footer: {
-                        Text("Active sessions, scheduled tasks, users, devices, API keys, logs, activity and libraries.")
-                    }
-                }
-
-                Section("Playback") {
-                    NavigationLink { PlayerSettingsView() } label: { Label("Video player", systemImage: "play.rectangle.fill") }
-                    NavigationLink { SubtitleAudioSettingsView() } label: { Label("Subtitles & audio", systemImage: "captions.bubble.fill") }
-                }
-
-                Section("Browsing") {
-                    NavigationLink { HomeSettingsView() } label: { Label("Home", systemImage: "house.fill") }
-                    NavigationLink { JellyfinDisplaySettingsView() } label: { Label("Display & My Media (Jellyfin)", systemImage: "rectangle.3.group.fill") }
-                    NavigationLink { LibrarySettingsView() } label: { Label("Library & item pages", systemImage: "square.grid.2x2.fill") }
-                    NavigationLink { AppearanceSettingsView() } label: { Label("Appearance & indicators", systemImage: "paintbrush.fill") }
-                }
-
-                Section("For You") {
-                    NavigationLink { ForYouSettingsView() } label: { Label("Recommendations", systemImage: "wand.and.stars") }
-                }
-
-                Section("Privacy & storage") {
-                    @Bindable var s = model.settings
-                    Toggle(isOn: $s.requireFaceID) { Label("Lock with Face ID", systemImage: "faceid") }
-                    Button {
-                        URLCache.shared.removeAllCachedResponses()
-                    } label: { Label("Clear image cache", systemImage: "photo.on.rectangle.angled") }
-                }
-
-                Section("About") {
-                    LabeledContent("JellyReco", value: JellyfinClient.appVersion)
-                    if let v = model.serverInfo?.version ?? model.store.currentServer?.version { LabeledContent("Server", value: "Jellyfin \(v)") }
-                    LabeledContent("Playback", value: "Direct play first")
                 }
             }
-            .navigationTitle("Settings")
-            .toolbarTitleDisplayMode(.inlineLarge)
-            .confirmationDialog("Sign out of \(model.serverName)?", isPresented: $confirmSignOut, titleVisibility: .visible) {
-                Button("Sign out", role: .destructive) { model.signOutCurrentUser() }
+            Section("Password") {
+                Button { showPassword = true } label: { Label("Change password", systemImage: "key.fill") }
             }
-            .sheet(isPresented: $showQuickConnectApprove) { ApproveQuickConnectSheet().presentationDetents([.height(280)]) }
-            .sheet(isPresented: $showPassword) { ChangePasswordSheet(userId: model.user?.id ?? "", isOwn: true) }
+            Section {
+                Button { showQuickConnectApprove = true } label: { Label("Approve a Quick Connect code", systemImage: "qrcode") }
+            } header: { Text("Sign in other devices") } footer: {
+                Text("Enter the code another device shows to sign it in as you.")
+            }
+            Section {
+                Button(role: .destructive) { confirmSignOut = true } label: {
+                    Label("Sign out", systemImage: "rectangle.portrait.and.arrow.right").foregroundStyle(.red)
+                }
+            }
         }
+        .navigationTitle("Account")
+        .confirmationDialog("Sign out of \(model.serverName)?", isPresented: $confirmSignOut, titleVisibility: .visible) {
+            Button("Sign out", role: .destructive) { model.signOutCurrentUser() }
+        }
+        .sheet(isPresented: $showQuickConnectApprove) { ApproveQuickConnectSheet().presentationDetents([.height(280)]) }
+        .sheet(isPresented: $showPassword) { ChangePasswordSheet(userId: model.user?.id ?? "", isOwn: true) }
+    }
+}
+
+// MARK: - About
+
+struct AboutSettingsView: View {
+    @Environment(AppModel.self) private var model
+    var body: some View {
+        Form {
+            Section("About JellyReco") {
+                LabeledContent("Version", value: JellyfinClient.appVersion)
+                if let v = model.serverInfo?.version ?? model.store.currentServer?.version {
+                    LabeledContent("Server", value: "Jellyfin \(v)")
+                }
+                LabeledContent("Playback", value: "Direct play first")
+            }
+        }
+        .navigationTitle("About")
     }
 }
 
@@ -83,6 +118,11 @@ struct SettingsView: View {
 struct AccountsView: View {
     @Environment(AppModel.self) private var model
     @State private var editingServer: SavedServer?
+    @State private var cacheCleared = false
+
+    private var faceID: Binding<Bool> {
+        Binding(get: { model.settings.requireFaceID }, set: { model.settings.requireFaceID = $0 })
+    }
 
     var body: some View {
         List {
@@ -124,8 +164,16 @@ struct AccountsView: View {
             Section {
                 Button("Add server or user", systemImage: "plus") { model.addAnotherAccount() }
             }
+            Section("This iPhone") {
+                Toggle(isOn: faceID) { Label("Lock with Face ID", systemImage: "faceid") }
+                Button {
+                    URLCache.shared.removeAllCachedResponses()
+                    cacheCleared = true
+                } label: { Label(cacheCleared ? "Image cache cleared" : "Clear image cache", systemImage: "photo.on.rectangle.angled") }
+                .disabled(cacheCleared)
+            }
         }
-        .navigationTitle("Servers & users")
+        .navigationTitle("Devices & servers")
         .sheet(item: $editingServer) { ServerAddressesSheet(server: $0) }
     }
 }
@@ -258,196 +306,53 @@ struct ChangePasswordSheet: View {
     }
 }
 
-// MARK: - Player settings
+// MARK: - Display
 
-struct PlayerSettingsView: View {
+struct DisplaySettingsView: View {
     @Environment(AppModel.self) private var model
     var body: some View {
         @Bindable var s = model.settings
         Form {
-            Section {
-                Toggle("Hardware decoding", isOn: $s.hardwareDecoding)
-                Toggle("Server conversion as a fallback", isOn: $s.transcodeFallback)
-            } footer: {
-                Text("Every file plays directly on your iPhone; the renderer is chosen automatically for each file. If a file still can't play on your iPhone, \(s.transcodeFallback ? "your server converts it as a last resort" : "you'll see why instead (the server never converts)").")
-            }
-            Section("Resume & jumping") {
-                Stepper("Rewind on resume: \(s.resumeOffset) s", value: $s.resumeOffset, in: 0...30)
-                Picker("Jump back", selection: $s.jumpBackward) {
-                    ForEach([5, 10, 15, 30, 45, 60], id: \.self) { Text("\($0) s").tag($0) }
-                }
-                Picker("Jump forward", selection: $s.jumpForward) {
-                    ForEach([5, 10, 15, 30, 45, 60, 90], id: \.self) { Text("\($0) s").tag($0) }
-                }
-                Picker("Default speed", selection: $s.defaultSpeed) {
-                    ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0], id: \.self) { Text(String(format: "%g×", $0)).tag($0) }
-                }
-            }
-            Section {
-                Toggle("Play next episode automatically", isOn: $s.autoPlayNext)
-                    .onChange(of: s.autoPlayNext) { _, v in
-                        guard model.user?.configuration?.enableNextEpisodeAutoPlay != v else { return }
-                        Task { try? await model.client?.updateUserConfiguration(["EnableNextEpisodeAutoPlay": v]); await model.refreshSession() }
-                    }
-                if s.autoPlayNext {
-                    Stepper("Countdown: \(s.nextUpCountdown) s", value: $s.nextUpCountdown, in: 3...30)
-                    Picker("Ask \"Still watching?\"", selection: $s.stillWatchingAfter) {
-                        Text("Never").tag(0)
-                        ForEach([2, 3, 4, 5, 6, 8], id: \.self) { Text("After \($0) episodes").tag($0) }
-                    }
-                }
-            } header: { Text("Next episode") }
-            Section {
-                ForEach(AppSettings.segmentTypes, id: \.type) { seg in
-                    Picker(seg.label, selection: Binding(get: { s.segmentAction(seg.type) }, set: { v in
-                        var actions = s.segmentActions
-                        actions[seg.type] = v
-                        s.segmentActions = actions
-                    })) {
-                        Text("Show a skip button").tag("ask")
-                        Text("Skip automatically").tag("skip")
-                        Text("Skip the first time").tag("skipOnce")
-                        Text("Never").tag("none")
-                    }
+            Section("Display") {
+                Picker("Theme", selection: $s.appearance) { ForEach(AppearanceMode.allCases) { Text($0.label).tag($0) } }
                     .pickerStyle(.menu)
-                }
-            } header: { Text("Intros & credits") } footer: {
-                Text("Intro and credits times come from your server's media segments (e.g. the Intro Skipper plugin or chapter names).")
-            }
-            Section("Controls") {
-                Picker("Time on the right", selection: $s.timestampStyle) {
-                    ForEach(TimestampStyle.allCases) { Text($0.label).tag($0) }
-                }
-                Toggle("Chapter marks on the timeline", isOn: $s.showChaptersOnSlider)
-                Toggle("Thumbnail previews while scrubbing", isOn: $s.trickplayPreviews)
-                Toggle("Start in landscape", isOn: $s.startInLandscape)
-                Picker("Default picture", selection: $s.defaultAspect) {
-                    Text("Fit").tag("fit")
-                    Text("Fill").tag("fill")
-                    Text("Stretch").tag("stretch")
-                }
-                .pickerStyle(.menu)
-            }
-            Section("Background") {
-                Toggle("Picture in Picture when leaving the app", isOn: $s.pipAutomatically)
-                Toggle("Keep playing audio in the background", isOn: $s.backgroundAudio)
-            }
-            Section {
-                Button("Reset player settings", role: .destructive) { s.resetPlayer() }
-            }
-        }
-        .navigationTitle("Video player")
-    }
-}
-
-struct SubtitleAudioSettingsView: View {
-    @Environment(AppModel.self) private var model
-    struct Lang: Identifiable { let id: String; let name: String }
-    // Jellyfin stores ISO 639-2 codes ("eng", "jpn"); empty = any.
-    private let languages: [Lang] = [Lang(id: "", name: "Any")] + [
-        "eng", "jpn", "slv", "ger", "fre", "spa", "ita", "por", "rus", "chi", "kor", "hrv", "srp", "bos", "pol",
-        "dut", "swe", "nor", "dan", "fin", "hun", "cze", "slo", "tur", "ara", "hin", "tha", "vie",
-    ].map { Lang(id: $0, name: Locale.current.localizedString(forLanguageCode: $0) ?? $0) }
-    private let subtitleModes = [("Default", "Default"), ("Smart", "Smart"), ("OnlyForced", "Only forced"),
-                                 ("Always", "Always play"), ("None", "None")]
-    @State private var saving = false
-
-    private var config: UserConfiguration? { model.user?.configuration }
-
-    var body: some View {
-        @Bindable var s = model.settings
-        Form {
-            Section {
-                Picker("Audio language", selection: binding(\.audioLanguagePreference, key: "AudioLanguagePreference", fallback: "")) {
-                    ForEach(languages) { Text($0.name).tag($0.id) }
-                }
-                Toggle("Play default audio track", isOn: boolBinding(\.playDefaultAudioTrack, key: "PlayDefaultAudioTrack", fallback: true))
-                Toggle("Remember audio selections", isOn: boolBinding(\.rememberAudioSelections, key: "RememberAudioSelections", fallback: true))
-                Picker("Subtitle language", selection: binding(\.subtitleLanguagePreference, key: "SubtitleLanguagePreference", fallback: "")) {
-                    ForEach(languages) { Text($0.name).tag($0.id) }
-                }
-                Picker("Subtitle mode", selection: binding(\.subtitleMode, key: "SubtitleMode", fallback: "Default")) {
-                    ForEach(subtitleModes, id: \.0) { Text($0.1).tag($0.0) }
-                }
-                Toggle("Remember subtitle selections", isOn: boolBinding(\.rememberSubtitleSelections, key: "RememberSubtitleSelections", fallback: true))
-                if saving { ProgressView() }
-            } header: { Text("Your Jellyfin playback settings") } footer: {
-                Text("These are your account's settings on the server (the same as in Jellyfin web). The server uses them to pick the audio and subtitle track when you press play, exactly as in Jellyfin and Swiftfin.")
-            }
-            Section {
-                VStack(alignment: .leading) {
-                    Text("Size: \(Int(s.subtitleSize * 100))%")
-                    Slider(value: $s.subtitleSize, in: 0.6...2.0, step: 0.05)
-                }
-                Picker("Colour", selection: $s.subtitleColor) { ForEach(SubtitleColor.allCases) { Text($0.label).tag($0) } }
-                Picker("Background", selection: $s.subtitleBackground) { ForEach(SubtitleBackground.allCases) { Text($0.label).tag($0) } }
-                Toggle("Bold", isOn: $s.subtitleBold)
-                VStack(alignment: .leading) {
-                    Text("Vertical position: \(s.subtitlePosition)%")
-                    Slider(value: Binding(get: { Double(s.subtitlePosition) }, set: { s.subtitlePosition = Int($0) }), in: 50...100, step: 1)
-                }
-                if s.subtitleBackground == .outline {
-                    VStack(alignment: .leading) {
-                        Text("Outline: \(String(format: "%g", s.subtitleOutlineSize))")
-                        Slider(value: $s.subtitleOutlineSize, in: 0...6, step: 0.5)
+                Toggle("Titles under posters", isOn: $s.showPosterLabels)
+                Toggle("Match % on posters", isOn: $s.showRatingBadges)
+                Toggle(isOn: $s.hideSpoilers) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Blur unwatched episode thumbnails")
+                        Text("No spoilers in episode stills").font(.caption).foregroundStyle(.secondary)
                     }
                 }
-                Picker("Styled subtitles (ASS, anime typesetting)", selection: $s.subtitleASSMode) {
-                    Text("Keep their own styling").tag("no")
-                    Text("Keep styling, use my size").tag("scale")
-                    Text("Force my style").tag("force")
-                    Text("Plain text").tag("strip")
+            }
+            Section("Indicators") {
+                Toggle("Watch progress", isOn: $s.showProgressIndicator)
+                Toggle("Unwatched episode count", isOn: $s.showUnplayedIndicator)
+                Toggle("Watched tick", isOn: $s.showPlayedIndicator)
+                Toggle("Favourite heart", isOn: $s.showFavoriteIndicator)
+            }
+            Section("Libraries") {
+                Picker("Layout", selection: $s.libraryLayout) {
+                    Text("Grid").tag(LibraryLayout.grid)
+                    Text("List").tag(LibraryLayout.list)
                 }
                 .pickerStyle(.menu)
-                subtitlePreview(s)
-            } header: { Text("Subtitle look") } footer: {
-                Text("Styled ASS/SSA subtitles (typical for anime) keep their own fonts, colours and positions unless you choose Force my style or Plain text.")
+                Picker("Posters", selection: $s.libraryPosterStyle) { ForEach(PosterStyle.allCases) { Text($0.label).tag($0) } }
+                    .pickerStyle(.menu)
+                Stepper("Columns: \(s.gridColumns)", value: $s.gridColumns, in: 2...6)
+                Toggle("Remember layout per library", isOn: $s.rememberLayoutPerLibrary)
+                Toggle("A–Z scrubber", isOn: $s.showLetterPicker)
+                Toggle("Random button", isOn: $s.showRandomButton)
             }
-            Section("Audio output") {
-                Toggle("Downmix to stereo", isOn: $s.stereoDownmix)
-            }
         }
-        .navigationTitle("Subtitles & audio")
-    }
-
-    private func binding(_ path: KeyPath<UserConfiguration, String?>, key: String, fallback: String) -> Binding<String> {
-        Binding(get: { config?[keyPath: path] ?? fallback }, set: { save(key, $0) })
-    }
-
-    private func boolBinding(_ path: KeyPath<UserConfiguration, Bool?>, key: String, fallback: Bool) -> Binding<Bool> {
-        Binding(get: { config?[keyPath: path] ?? fallback }, set: { save(key, $0) })
-    }
-
-    private func save(_ key: String, _ value: Any) {
-        Task {
-            saving = true
-            defer { saving = false }
-            do {
-                try await model.client?.updateUserConfiguration([key: value])
-                await model.refreshSession()
-            } catch { model.report(error) }
-        }
-    }
-
-    private func subtitlePreview(_ s: AppSettings) -> some View {
-        ZStack(alignment: .bottom) {
-            LinearGradient(colors: [.indigo, .black], startPoint: .top, endPoint: .bottom)
-            Text("The quick brown fox jumps.")
-                .font(.system(size: 17 * s.subtitleSize, weight: s.subtitleBold ? .bold : .regular))
-                .foregroundStyle(s.subtitleColor.color)
-                .shadow(color: .black, radius: s.subtitleBackground == .shadow ? 3 : 1)
-                .padding(.horizontal, 6)
-                .background { if s.subtitleBackground == .box { Color.black.opacity(0.6) } }
-                .padding(.bottom, 12)
-        }
-        .frame(height: 110)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .listRowInsets(EdgeInsets())
+        .navigationTitle("Display")
     }
 }
 
-/// Jellyfin's home settings (shared with Jellyfin web): section order, and which libraries show in
-/// My Media and Recently Added. Next Up's limits are per device, as in Jellyfin web.
+// MARK: - Home
+
+/// Jellyfin's home settings (shared with Jellyfin web): section order, library order, and which
+/// libraries show in My Media and Recently Added. Next Up's limits are per device, as in Jellyfin web.
 struct HomeSettingsView: View {
     @Environment(AppModel.self) private var model
     @State private var sections: [HomeSection] = HomeSection.defaults
@@ -457,6 +362,7 @@ struct HomeSettingsView: View {
 
     private let choices: [HomeSection] = [.libraryTiles, .libraryButtons, .resume, .nextUp, .latestMedia, .liveTV,
                                           .activeRecordings, .resumeAudio, .resumeBook, .none]
+    private var config: UserConfiguration? { model.user?.configuration }
 
     var body: some View {
         @Bindable var s = model.settings
@@ -465,35 +371,60 @@ struct HomeSettingsView: View {
                 ForEach(0..<10, id: \.self) { i in
                     Picker("Section \(i + 1)", selection: Binding(get: { sections[i] }, set: { v in
                         sections[i] = v
-                        save(["homesection\(i)": v.rawValue])
+                        saveWeb(["homesection\(i)": v.rawValue])
                     })) {
                         ForEach(choices) { Text($0.label).tag($0) }
                     }
+                    .pickerStyle(.menu)
                 }
             } header: { Text("Home sections") } footer: {
-                Text("Saved on your server, the same as Jellyfin web → Settings → Home. Continue Listening, Continue Reading and Active Recordings are kept for Jellyfin web; JellyReco shows video sections.")
+                Text("Saved on your server, the same as Jellyfin web → Settings → Home.")
             }
-            Section("Libraries") {
+            Section {
                 ForEach(allViews) { lib in
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(lib.displayName).font(.subheadline.weight(.semibold))
-                        Toggle("Show in My Media", isOn: excludeBinding("MyMediaExcludes", list: model.user?.configuration?.myMediaExcludes, id: lib.id))
-                        Toggle("Show in Recently Added", isOn: excludeBinding("LatestItemsExcludes", list: model.user?.configuration?.latestItemsExcludes, id: lib.id))
+                    Label(lib.displayName, systemImage: "line.3.horizontal")
+                }
+                .onMove { from, to in
+                    allViews.move(fromOffsets: from, toOffset: to)
+                    saveConfig("OrderedViews", allViews.map(\.id))
+                }
+            } header: { Text("Library order") } footer: {
+                Text("Tap Edit, then drag to reorder your libraries.")
+            }
+            Section {
+                ForEach(allViews) { lib in
+                    Toggle(lib.displayName, isOn: excludeBinding("MyMediaExcludes", list: config?.myMediaExcludes, id: lib.id))
+                }
+            } header: { Text("Show in My Media") }
+            Section {
+                ForEach(allViews) { lib in
+                    Toggle(lib.displayName, isOn: excludeBinding("LatestItemsExcludes", list: config?.latestItemsExcludes, id: lib.id))
+                }
+                Toggle("Hide watched content from Recently Added", isOn: configBool(\.hidePlayedInLatest, key: "HidePlayedInLatest"))
+            } header: { Text("Show in Recently Added") }
+            Section {
+                Toggle("Display a Collections view", isOn: configBool(\.displayCollectionsView, key: "DisplayCollectionsView"))
+                Toggle(isOn: configBool(\.displayMissingEpisodes, key: "DisplayMissingEpisodes")) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Display missing episodes within seasons")
+                        Text("Episodes you don't have, inside seasons").font(.caption).foregroundStyle(.secondary)
                     }
                 }
-                if saving { ProgressView() }
-            }
+            } header: { Text("Libraries (saved in your Jellyfin account)") }
             Section {
                 Picker("Max days in Next Up", selection: $s.nextUpMaxDays) {
                     ForEach([7, 14, 30, 60, 90, 180, 365], id: \.self) { Text("\($0) days").tag($0) }
                     Text("No limit").tag(0)
                 }
+                .pickerStyle(.menu)
                 Toggle("Rewatching in Next Up", isOn: $s.nextUpRewatching)
             } header: { Text("Next Up (this device)") } footer: {
                 Text("Like Jellyfin web, these are per device. Jellyfin's default is 365 days.")
             }
         }
         .navigationTitle("Home")
+        .toolbar { EditButton() }
+        .overlay(alignment: .top) { if saving { ProgressView().padding() } }
         .task {
             guard !loaded, let client = model.client else { return }
             sections = HomeSection.sections(from: await client.loadWebUserSettings())
@@ -510,66 +441,261 @@ struct HomeSettingsView: View {
         Binding(get: { !(list ?? []).contains { norm($0) == norm(id) } }, set: { show in
             var new = (list ?? []).filter { norm($0) != norm(id) }
             if !show { new.append(id) }
-            Task {
-                saving = true
-                defer { saving = false }
-                do {
-                    try await model.client?.updateUserConfiguration([key: new])
-                    await model.refreshSession()
-                } catch { model.report(error) }
-            }
+            saveConfig(key, new)
         })
     }
 
-    private func save(_ changes: [String: String]) {
+    private func configBool(_ path: KeyPath<UserConfiguration, Bool?>, key: String) -> Binding<Bool> {
+        Binding(get: { config?[keyPath: path] ?? false }, set: { saveConfig(key, $0) })
+    }
+
+    private func saveConfig(_ key: String, _ value: Any) {
+        Task {
+            saving = true
+            defer { saving = false }
+            do {
+                try await model.client?.updateUserConfiguration([key: value])
+                await model.refreshSession()
+            } catch { model.report(error) }
+        }
+    }
+
+    private func saveWeb(_ changes: [String: String]) {
         Task {
             do { try await model.client?.saveWebUserSettings(changes) } catch { model.report(error) }
         }
     }
 }
 
-struct LibrarySettingsView: View {
+// MARK: - Playback (your Jellyfin account's playback settings, plus this app's)
+
+struct PlaybackSettingsView: View {
     @Environment(AppModel.self) private var model
+    struct Lang: Hashable { let code: String; let name: String }
+    @State private var languages: [Lang] = []
+    @State private var saving = false
+    private let subtitleModes = [("Default", "Default"), ("Smart", "Smart"), ("OnlyForced", "Only forced"),
+                                 ("Always", "Always"), ("None", "None")]
+    private var config: UserConfiguration? { model.user?.configuration }
+
     var body: some View {
         @Bindable var s = model.settings
         Form {
-            Section("Library") {
-                Picker("Layout", selection: $s.libraryLayout) {
-                    Text("Grid").tag(LibraryLayout.grid)
-                    Text("List").tag(LibraryLayout.list)
+            Section {
+                Picker("Preferred audio language", selection: configString(\.audioLanguagePreference, key: "AudioLanguagePreference")) {
+                    Text("Any (the file's default)").tag("")
+                    ForEach(languages, id: \.self) { Text($0.name).tag($0.code) }
                 }
-                Picker("Posters", selection: $s.libraryPosterStyle) { ForEach(PosterStyle.allCases) { Text($0.label).tag($0) } }
-                Stepper("Columns: \(s.gridColumns)", value: $s.gridColumns, in: 2...6)
-                Toggle("Remember layout per library", isOn: $s.rememberLayoutPerLibrary)
-                Toggle("A–Z scrubber", isOn: $s.showLetterPicker)
-                Toggle("Random button", isOn: $s.showRandomButton)
+                .pickerStyle(.menu)
+                Toggle("Play the default audio track whatever its language", isOn: configBool(\.playDefaultAudioTrack, key: "PlayDefaultAudioTrack", fallback: true))
+                Picker("Preferred subtitle language", selection: configString(\.subtitleLanguagePreference, key: "SubtitleLanguagePreference")) {
+                    Text("Any").tag("")
+                    ForEach(languages, id: \.self) { Text($0.name).tag($0.code) }
+                }
+                .pickerStyle(.menu)
+                Picker("Subtitles", selection: Binding(get: { config?.subtitleMode ?? "Default" }, set: { saveConfig("SubtitleMode", $0) })) {
+                    ForEach(subtitleModes, id: \.0) { Text($0.1).tag($0.0) }
+                }
+                .pickerStyle(.menu)
+                Toggle("Remember my audio choices per show", isOn: configBool(\.rememberAudioSelections, key: "RememberAudioSelections", fallback: true))
+                Toggle("Remember my subtitle choices per show", isOn: configBool(\.rememberSubtitleSelections, key: "RememberSubtitleSelections", fallback: true))
+                Toggle("Play the next episode automatically", isOn: Binding(
+                    get: { config?.enableNextEpisodeAutoPlay ?? s.autoPlayNext },
+                    set: { v in s.autoPlayNext = v; saveConfig("EnableNextEpisodeAutoPlay", v) }))
+            } header: { Text("Languages (your Jellyfin account)") } footer: {
+                Text("Smart: subtitles on when the audio isn't in your language. These are your account's settings on the server, the same as in Jellyfin web.")
             }
-            Section("Item pages") {
-                Toggle("Hide spoilers of unwatched episodes", isOn: $s.hideSpoilers)
+            Section {
+                if s.autoPlayNext {
+                    Stepper("Countdown: \(s.nextUpCountdown) s", value: $s.nextUpCountdown, in: 3...30)
+                    Picker("Ask \"Still watching?\"", selection: $s.stillWatchingAfter) {
+                        Text("Never").tag(0)
+                        ForEach([2, 3, 4, 5, 6, 8], id: \.self) { Text("After \($0) episodes").tag($0) }
+                    }
+                    .pickerStyle(.menu)
+                }
+                ForEach(AppSettings.segmentTypes, id: \.type) { seg in
+                    Picker(seg.label, selection: Binding(get: { s.segmentAction(seg.type) }, set: { v in
+                        var actions = s.segmentActions
+                        actions[seg.type] = v
+                        s.segmentActions = actions
+                    })) {
+                        Text("Show a skip button").tag("ask")
+                        Text("Skip automatically").tag("skip")
+                        Text("Skip the first time").tag("skipOnce")
+                        Text("Never").tag("none")
+                    }
+                    .pickerStyle(.menu)
+                }
+            } header: { Text("Next episode & skipping") } footer: {
+                Text("Intro and credits times come from your server's media segments (e.g. the Intro Skipper plugin or chapter names).")
+            }
+            Section("Starting") {
+                Stepper("Rewind on resume: \(s.resumeOffset) s", value: $s.resumeOffset, in: 0...30)
+                Picker("Jump back", selection: $s.jumpBackward) {
+                    ForEach([5, 10, 15, 30, 45, 60], id: \.self) { Text("\($0) s").tag($0) }
+                }
+                .pickerStyle(.menu)
+                Picker("Jump forward", selection: $s.jumpForward) {
+                    ForEach([5, 10, 15, 30, 45, 60, 90], id: \.self) { Text("\($0) s").tag($0) }
+                }
+                .pickerStyle(.menu)
+            }
+            Section {
+                Toggle("Server conversion as a fallback", isOn: $s.transcodeFallback)
+            } header: { Text("Quality") } footer: {
+                Text("Every file plays directly on your iPhone, as stored. If a file still can't play, \(s.transcodeFallback ? "your server converts it as a last resort" : "you'll see why instead (the server never converts)").")
             }
         }
-        .navigationTitle("Library & item pages")
+        .navigationTitle("Playback")
+        .overlay(alignment: .top) { if saving { ProgressView().padding() } }
+        .task { await loadLanguages() }
+    }
+
+    private func configString(_ path: KeyPath<UserConfiguration, String?>, key: String) -> Binding<String> {
+        Binding(get: { config?[keyPath: path] ?? "" }, set: { saveConfig(key, $0) }   // "" = any, as jellyfin-web saves it)
+    }
+
+    private func configBool(_ path: KeyPath<UserConfiguration, Bool?>, key: String, fallback: Bool) -> Binding<Bool> {
+        Binding(get: { config?[keyPath: path] ?? fallback }, set: { saveConfig(key, $0) })
+    }
+
+    private func saveConfig(_ key: String, _ value: Any) {
+        Task {
+            saving = true
+            defer { saving = false }
+            do {
+                try await model.client?.updateUserConfiguration([key: value])
+                await model.refreshSession()
+            } catch { model.report(error) }
+        }
+    }
+
+    /// The server's language list (three-letter codes, as Jellyfin stores them), like jellyfin-web.
+    private func loadLanguages() async {
+        guard languages.isEmpty, let client = model.client,
+              let data = try? await client.send("GET", "/Localization/Cultures"),
+              let list = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return }
+        var seen = Set<String>()
+        languages = list.compactMap { c -> Lang? in
+            guard let code = c["ThreeLetterISOLanguageName"] as? String, !code.isEmpty, seen.insert(code).inserted else { return nil }
+            return Lang(code: code, name: c["DisplayName"] as? String ?? code)
+        }
+        // A saved language the list doesn't have still shows.
+        for code in [config?.audioLanguagePreference, config?.subtitleLanguagePreference].compactMap({ $0 }) where !code.isEmpty && !seen.contains(code) {
+            languages.append(Lang(code: code, name: code))
+            seen.insert(code)
+        }
     }
 }
 
-struct AppearanceSettingsView: View {
+// MARK: - Player
+
+struct PlayerSettingsView: View {
     @Environment(AppModel.self) private var model
     var body: some View {
         @Bindable var s = model.settings
         Form {
-            Section("Appearance") {
-                Picker("Theme", selection: $s.appearance) { ForEach(AppearanceMode.allCases) { Text($0.label).tag($0) } }
-                Toggle("Titles under posters", isOn: $s.showPosterLabels)
-                Toggle("Match % on posters", isOn: $s.showRatingBadges)
+            Section("Picture") {
+                Toggle("Hardware decoding", isOn: $s.hardwareDecoding)
+                Picker("Default picture", selection: $s.defaultAspect) {
+                    Text("Fit").tag("fit")
+                    Text("Fill").tag("fill")
+                    Text("Stretch").tag("stretch")
+                }
+                .pickerStyle(.menu)
+                Toggle("Thumbnail previews on the timeline", isOn: $s.trickplayPreviews)
+                Toggle("Chapter marks on the timeline", isOn: $s.showChaptersOnSlider)
             }
-            Section("Indicators") {
-                Toggle("Watch progress", isOn: $s.showProgressIndicator)
-                Toggle("Unwatched episode count", isOn: $s.showUnplayedIndicator)
-                Toggle("Watched tick", isOn: $s.showPlayedIndicator)
-                Toggle("Favourite heart", isOn: $s.showFavoriteIndicator)
+            Section("Sound") {
+                Toggle("Downmix to stereo", isOn: $s.stereoDownmix)
+                Picker("Default speed", selection: $s.defaultSpeed) {
+                    ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0], id: \.self) { Text(String(format: "%g×", $0)).tag($0) }
+                }
+                .pickerStyle(.menu)
+            }
+            Section("Controls") {
+                Picker("Time on the right", selection: $s.timestampStyle) {
+                    ForEach(TimestampStyle.allCases) { Text($0.label).tag($0) }
+                }
+                .pickerStyle(.menu)
+                Toggle("Start in landscape", isOn: $s.startInLandscape)
+                Toggle("Picture in Picture when leaving the app", isOn: $s.pipAutomatically)
+                Toggle("Keep playing audio in the background", isOn: $s.backgroundAudio)
+            }
+            Section {
+                NavigationLink { PlaybackTestView() } label: { Label("Playback test", systemImage: "checkmark.seal") }
+            } footer: {
+                Text("Plays your files on this iPhone and lists anything that fails to decode.")
+            }
+            Section {
+                Button("Reset player settings", role: .destructive) { s.resetPlayer() }
             }
         }
-        .navigationTitle("Appearance")
+        .navigationTitle("Player")
+    }
+}
+
+// MARK: - Subtitles
+
+struct SubtitleSettingsView: View {
+    @Environment(AppModel.self) private var model
+    var body: some View {
+        @Bindable var s = model.settings
+        Form {
+            Section {
+                preview(s)
+            }
+            Section {
+                VStack(alignment: .leading) {
+                    Text("Size: \(Int(s.subtitleSize * 100))%")
+                    Slider(value: $s.subtitleSize, in: 0.6...2.0, step: 0.05)
+                }
+                Toggle("Bold", isOn: $s.subtitleBold)
+                Picker("Text color", selection: $s.subtitleColor) { ForEach(SubtitleColor.allCases) { Text($0.label).tag($0) } }
+                    .pickerStyle(.menu)
+                Picker("Background", selection: $s.subtitleBackground) { ForEach(SubtitleBackground.allCases) { Text($0.label).tag($0) } }
+                    .pickerStyle(.menu)
+                if s.subtitleBackground == .outline {
+                    VStack(alignment: .leading) {
+                        Text("Outline: \(String(format: "%g", s.subtitleOutlineSize))")
+                        Slider(value: $s.subtitleOutlineSize, in: 0...6, step: 0.5)
+                    }
+                }
+                VStack(alignment: .leading) {
+                    Text("Vertical position: \(s.subtitlePosition)%")
+                    Slider(value: Binding(get: { Double(s.subtitlePosition) }, set: { s.subtitlePosition = Int($0) }), in: 50...100, step: 1)
+                }
+            } header: { Text("Subtitle style") }
+            Section {
+                Picker("Styled subtitles (ASS, anime typesetting)", selection: $s.subtitleASSMode) {
+                    Text("Keep their own styling").tag("no")
+                    Text("Keep styling, use my size").tag("scale")
+                    Text("Force my style").tag("force")
+                    Text("Plain text").tag("strip")
+                }
+                .pickerStyle(.menu)
+            } footer: {
+                Text("Styled ASS/SSA subtitles (typical for anime) keep their own fonts, colours and positions unless you choose Force my style or Plain text.")
+            }
+        }
+        .navigationTitle("Subtitles")
+    }
+
+    private func preview(_ s: AppSettings) -> some View {
+        ZStack(alignment: .bottom) {
+            LinearGradient(colors: [.indigo, .black], startPoint: .top, endPoint: .bottom)
+            Text("The quick brown fox jumps.")
+                .font(.system(size: 17 * s.subtitleSize, weight: s.subtitleBold ? .bold : .regular))
+                .foregroundStyle(s.subtitleColor.color)
+                .shadow(color: .black, radius: s.subtitleBackground == .shadow ? 3 : 1)
+                .padding(.horizontal, 6)
+                .background { if s.subtitleBackground == .box { Color.black.opacity(0.6) } }
+                .padding(.bottom, 12)
+        }
+        .frame(height: 110)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .listRowInsets(EdgeInsets())
     }
 }
 
@@ -625,7 +751,7 @@ struct ForYouSettingsView: View {
                 }
             }
         }
-        .navigationTitle("Recommendations")
+        .navigationTitle("For You")
     }
 
     private var explainer: String {
@@ -660,62 +786,6 @@ extension ForYouSettingsView {
             }
         } catch {
             keyStatus = error.localizedDescription
-        }
-    }
-}
-
-
-/// Your Jellyfin account's display settings (the same values jellyfin-web's Display and Home
-/// pages edit, saved on the server for every client).
-struct JellyfinDisplaySettingsView: View {
-    @Environment(AppModel.self) private var model
-    @State private var order: [BaseItem] = []
-    @State private var saving = false
-
-    private var config: UserConfiguration? { model.user?.configuration }
-
-    var body: some View {
-        Form {
-            Section {
-                Toggle("Display missing episodes within seasons", isOn: boolBinding(\.displayMissingEpisodes, key: "DisplayMissingEpisodes"))
-                Toggle("Display a Collections view", isOn: boolBinding(\.displayCollectionsView, key: "DisplayCollectionsView"))
-                Toggle("Hide watched content from Recently Added", isOn: boolBinding(\.hidePlayedInLatest, key: "HidePlayedInLatest"))
-                Toggle("Play next episode automatically", isOn: Binding(
-                    get: { config?.enableNextEpisodeAutoPlay ?? true },
-                    set: { v in model.settings.autoPlayNext = v; save("EnableNextEpisodeAutoPlay", v) }))
-            } header: { Text("Display") } footer: {
-                Text("Saved to your Jellyfin account, shared with Jellyfin web and other apps.")
-            }
-            Section {
-                ForEach(order) { lib in
-                    Label(lib.displayName, systemImage: "line.3.horizontal")
-                }
-                .onMove { from, to in
-                    order.move(fromOffsets: from, toOffset: to)
-                    save("OrderedViews", order.map(\.id))
-                }
-            } header: { Text("My Media order") } footer: {
-                Text("Drag to reorder your libraries (Edit).")
-            }
-        }
-        .navigationTitle("Display & My Media")
-        .toolbar { EditButton() }
-        .overlay(alignment: .top) { if saving { ProgressView().padding() } }
-        .task { order = model.libraries }
-    }
-
-    private func boolBinding(_ path: KeyPath<UserConfiguration, Bool?>, key: String) -> Binding<Bool> {
-        Binding(get: { config?[keyPath: path] ?? false }, set: { save(key, $0) })
-    }
-
-    private func save(_ key: String, _ value: Any) {
-        Task {
-            saving = true
-            defer { saving = false }
-            do {
-                try await model.client?.updateUserConfiguration([key: value])
-                await model.refreshSession()
-            } catch { model.report(error) }
         }
     }
 }
