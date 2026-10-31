@@ -1205,3 +1205,7 @@ html.platform-linux .mono { font-family: "JetBrains Mono", "Cascadia Mono", "Dej
 .player .player-top, .player .player-dock, .player .pd-title, .player .player-top-right, .player .player-center { pointer-events: none; }
 .player .player-top > *, .player .player-top-right > *, .player .pd-bar { pointer-events: auto; }
 .player.controls-off .player-top > *, .player.controls-off .player-top-right > *, .player.controls-off .pd-bar { pointer-events: none; }
+/* The show / episode title is information, not a button: clicking the text does nothing (the empty
+   space beside it still plays / pauses). */
+.player .pd-title > .pd-title-text, .player .pd-title > .pd-logo { pointer-events: auto; cursor: default; }
+.player.controls-off .pd-title > .pd-title-text, .player.controls-off .pd-title > .pd-logo { pointer-events: none; }
