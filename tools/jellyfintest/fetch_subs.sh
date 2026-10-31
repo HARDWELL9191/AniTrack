@@ -35,9 +35,13 @@ A="Authorization: $H, Token=\"$TOKEN\""
 echo "token ok: ${#TOKEN} chars"
 curl -fs -X POST "$J/Library/VirtualFolders?name=Test&collectionType=movies&paths=/media&refreshLibrary=true" -H "$A" -H "Content-Type: application/json" -d '{"LibraryOptions":{}}'
 UID_=$(curl -fs $J/Users -H "$A" | python3 -c "import json,sys; print(json.load(sys.stdin)[0]['Id'])")
-for i in $(seq 1 60); do
+for i in $(seq 1 90); do
   ITEMS=$(curl -fs "$J/Items?userId=$UID_&recursive=true&includeItemTypes=Movie&fields=MediaSources,MediaStreams" -H "$A")
-  echo "$ITEMS" | python3 -c "import json,sys; sys.exit(0 if json.load(sys.stdin)['Items'] else 1)" && break
+  # Wait until the scan has read the file's tracks (the item appears before its streams).
+  echo "$ITEMS" | python3 -c "import json,sys
+items=json.load(sys.stdin)['Items']
+ok=any(s['Type']=='Subtitle' for it in items for s in (it.get('MediaSources') or [{}])[0].get('MediaStreams',[]))
+sys.exit(0 if ok else 1)" && break
   sleep 3
 done
 echo "$ITEMS" > "$out/items.json"
