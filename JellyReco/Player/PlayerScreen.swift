@@ -71,8 +71,29 @@ enum OrientationLock {
     }
 
     @MainActor static func exitPlayer() {
+        rotationLocked = false
         mask = .portrait
         request(.portrait)
+    }
+
+    /// Rotation lock (the player's ⋯ menu): the picture stays the way it is now, whichever way
+    /// the phone is turned, until unlocked (or the player closes).
+    @MainActor private(set) static var rotationLocked = false
+
+    @MainActor static func setRotationLocked(_ on: Bool) {
+        rotationLocked = on
+        if on {
+            let current = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first?.effectiveGeometry.interfaceOrientation
+            switch current {
+            case .landscapeLeft: mask = .landscapeLeft
+            case .landscapeRight: mask = .landscapeRight
+            default: mask = .portrait
+            }
+        } else {
+            mask = .allButUpsideDown
+        }
+        guard let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first else { return }
+        scene.keyWindow?.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
     }
 
     @MainActor static func request(_ orientations: UIInterfaceOrientationMask) {
@@ -108,6 +129,8 @@ private struct PlayerContent: View {
     @State private var hideTask: Task<Void, Never>?
     @State private var panel: PlayerPanel?
     @State private var locked = false
+    /// Rotation lock from the ⋯ menu (OrientationLock keeps the actual mask).
+    @State private var rotationLocked = OrientationLock.rotationLocked
     @State private var scrubbing: Double?
     @State private var hud: HUD?
     @State private var hudTask: Task<Void, Never>?
@@ -381,8 +404,15 @@ private struct PlayerContent: View {
                     withAnimation(.smooth(duration: 0.35)) { controller.setAspect(mode) }
                 }
             })
+            let rotation = UIAction(title: rotationLocked ? "Unlock Rotation" : "Lock Rotation",
+                                    image: UIImage(systemName: rotationLocked ? "lock.rotation.open" : "lock.rotation"),
+                                    state: rotationLocked ? .on : .off) { _ in
+                rotationLocked.toggle()
+                OrientationLock.setRotationLocked(rotationLocked)
+            }
             let view = UIMenu(title: "", options: .displayInline, children: [
                 aspect,
+                rotation,
                 UIAction(title: "Lock Controls", image: UIImage(systemName: "lock")) { _ in withAnimation { locked = true } },
             ])
             let info = UIAction(title: "Playback Info", image: UIImage(systemName: "info.circle")) { _ in openPanel(.info) }
