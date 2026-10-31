@@ -1,0 +1,212 @@
+run 41233276601
+total 0
+drwxr-xr-x   5 runner  staff  160 Oct 31 19:22 .
+drwxr-xr-x  21 runner  staff  672 Oct 31 19:22 ..
+lrwxr-xr-x   1 runner  staff   44 Oct 31 19:22 Arial.ttf -> /System/Library/Fonts/Supplemental/Arial.ttf
+lrwxr-xr-x   1 runner  staff   35 Oct 31 19:22 Helvetica.ttc -> /System/Library/Fonts/Helvetica.ttc
+lrwxr-xr-x   1 runner  staff   39 Oct 31 19:22 HelveticaNeue.ttc -> /System/Library/Fonts/HelveticaNeue.ttc
+Subtitle render test (no fonts given)
+    [cplayer] client removed during hook handling
+    [mkv] Discarding potentially broken or useless index.
+PASS samples/render/render_ass_colored.mkv: 3469 subtitle pixels (codec ass)
+    [mkv] Track 2 was compressed with zlib but mpv has not been compiled
+    [mkv] with support for zlib compression. Skipping track.
+    [mkv] Discarding potentially broken or useless index.
+FAIL samples/render/render_pgs_zlib.mkv: 0 subtitle pixels (codec hdmv_pgs_subtitle)
+    [mkv] Discarding potentially broken or useless index.
+PASS samples/render/render_pgs.mkv: 26432 subtitle pixels (codec hdmv_pgs_subtitle)
+    [mkv] Discarding potentially broken or useless index.
+PASS samples/render/render_srt.mkv: 3634 subtitle pixels (codec subrip)
+    [cplayer] client removed during hook handling
+PASS samples/render/render_dvb.ts: 26432 subtitle pixels (codec dvb_subtitle)
+1 failure(s)
+Subtitle render test (with the app's fonts)
+    [cplayer] client removed during hook handling
+    [mkv] Discarding potentially broken or useless index.
+PASS samples/render/render_ass_colored.mkv: 3469 subtitle pixels (codec ass)
+    [mkv] Track 2 was compressed with zlib but mpv has not been compiled
+    [mkv] with support for zlib compression. Skipping track.
+    [mkv] Discarding potentially broken or useless index.
+FAIL samples/render/render_pgs_zlib.mkv: 0 subtitle pixels (codec hdmv_pgs_subtitle)
+    [mkv] Discarding potentially broken or useless index.
+PASS samples/render/render_pgs.mkv: 26432 subtitle pixels (codec hdmv_pgs_subtitle)
+    [mkv] Discarding potentially broken or useless index.
+PASS samples/render/render_srt.mkv: 3634 subtitle pixels (codec subrip)
+    [cplayer] client removed during hook handling
+PASS samples/render/render_dvb.ts: 26432 subtitle pixels (codec dvb_subtitle)
+1 failure(s)
+NO SUBTITLE FILE FROM JELLYFIN
+Subtitle render test (with the app's fonts, demuxer=lavf)
+    [cplayer] client removed during hook handling
+PASS samples/render/render_ass_colored.mkv: 3469 subtitle pixels (codec ass)
+    [cplayer] client removed during hook handling
+    [ffmpeg/demuxer] matroska,webm: Unsupported encoding type
+FAIL samples/render/render_pgs_zlib.mkv: 0 subtitle pixels (codec hdmv_pgs_subtitle)
+PASS samples/render/render_pgs.mkv: 26432 subtitle pixels (codec hdmv_pgs_subtitle)
+PASS samples/render/render_srt.mkv: 3634 subtitle pixels (codec subrip)
+PASS samples/render/render_dvb.ts: 26432 subtitle pixels (codec dvb_subtitle)
+1 failure(s)
+--- formats
+  video #1 av1            ok
+  audio #1 opus           ok
+  sub   #1 subrip         ok
+PASS samples/av1_opus_srt.mkv (1 video, 1 audio, 1 subtitle tracks)
+
+  video #1 h264           ok
+  audio #1 ac3            ok
+  audio #2 aac            ok
+PASS samples/h264_ac3_aac_two_audio.mkv (1 video, 2 audio, 0 subtitle tracks)
+
+  video #1 h264           ok
+  audio #1 dts            ok
+  sub   #1 subrip         ok
+PASS samples/h264_dts_srt.mkv (1 video, 1 audio, 1 subtitle tracks)
+
+  video #1 hevc           ok
+  audio #1 truehd         ok
+  sub   #1 ass            ok
+PASS samples/hevc10_truehd_ass.mkv (1 video, 1 audio, 1 subtitle tracks)
+
+  video #1 vp9            ok
+  audio #1 flac           ok
+  sub   #1 webvtt-webm    ok
+PASS samples/vp9_flac_webvtt.mkv (1 video, 1 audio, 1 subtitle tracks)
+
+  video #1 hevc           ok
+  audio #1 eac3           ok
+  sub   #1 mov_text       ok
+PASS samples/hevc_eac3_movtext.mp4 (1 video, 1 audio, 1 subtitle tracks)
+
+  video #1 mpeg4          ok
+  audio #1 mp3            ok
+PASS samples/mpeg4_mp3.avi (1 video, 1 audio, 0 subtitle tracks)
+
+  video #1 wmv2           ok
+  audio #1 wmav2          ok
+PASS samples/wmv2_wma.wmv (1 video, 1 audio, 0 subtitle tracks)
+
+  video #1 mpeg2video     ok
+  audio #1 ac3            ok
+PASS samples/mpeg2_ac3.ts (1 video, 1 audio, 0 subtitle tracks)
+
+  video #1 vp8            ok
+  audio #1 vorbis         ok
+PASS samples/vp8_vorbis.webm (1 video, 1 audio, 0 subtitle tracks)
+
+  video #1 h264           ok
+  audio #1 alac           ok
+PASS samples/h264_alac.mov (1 video, 1 audio, 0 subtitle tracks)
+
+  video #1 hevc           ok
+  audio #1 dts            ok
+PASS samples/hevc_dts_m2ts.m2ts (1 video, 1 audio, 0 subtitle tracks)
+
+0 of 12 files failed
+--- link/build
+Libmpv.xcframework
+
+libmpv/Libmpv.xcframework:
+build-record.json
+Info.plist
+ios-arm64
+ios-arm64_x86_64-maccatalyst
+ios-arm64_x86_64-simulator
+macos-arm64_x86_64
+RECIPE_LICENSE
+SOURCE_NOTICES.txt
+tvos-arm64
+tvos-arm64_x86_64-simulator
+xros-arm64
+xros-arm64-simulator
+
+libmpv/Libmpv.xcframework/ios-arm64:
+Libmpv.framework
+
+libmpv/Libmpv.xcframework/ios-arm64/Libmpv.framework:
+Headers
+Info.plist
+Libmpv
+Modules
+
+libmpv/Libmpv.xcframework/ios-arm64/Libmpv.framework/Headers:
+client.h
+mpvui_hls.h
+render_gl.h
+render.h
+stream_cb.h
+
+libmpv/Libmpv.xcframework/ios-arm64/Libmpv.framework/Modules:
+module.modulemap
+
+libmpv/Libmpv.xcframework/ios-arm64_x86_64-maccatalyst:
+Libmpv.framework
+
+libmpv/Libmpv.xcframework/ios-arm64_x86_64-maccatalyst/Libmpv.framework:
+Headers
+--- samples
+made hevc10_truehd_ass.mkv
+Svt[info]: -------------------------------------------
+Svt[info]: SVT [version]:	SVT-AV1 Encoder Lib v1.7.0
+Svt[info]: SVT [build]  :	GCC 13.2.0	 64 bit
+Svt[info]: -------------------------------------------
+Svt[info]: Number of logical cores available: 4
+Svt[info]: Number of PPCS 74
+Svt[info]: [asm level on system : up to avx2]
+Svt[info]: [asm level selected : up to avx2]
+Svt[info]: -------------------------------------------
+Svt[info]: SVT [config]: main profile	tier (auto)	level (auto)
+Svt[info]: SVT [config]: width / height / fps numerator / fps denominator 		: 640 / 360 / 24 / 1
+Svt[info]: SVT [config]: bit-depth / color format 					: 8 / YUV420
+Svt[info]: SVT [config]: preset / tune / pred struct 					: 12 / PSNR / random access
+Svt[info]: SVT [config]: gop size / mini-gop size / key-frame type 			: 161 / 32 / key frame
+Svt[info]: SVT [config]: BRC mode / rate factor 					: CRF / 35 
+Svt[info]: -------------------------------------------
+made av1_opus_srt.mkv
+made h264_dts_srt.mkv
+made hevc_eac3_movtext.mp4
+made vp9_flac_webvtt.mkv
+made h264_ac3_aac_two_audio.mkv
+made mpeg4_mp3.avi
+made wmv2_wma.wmv
+made mpeg2_ac3.ts
+made vp8_vorbis.webm
+made h264_alac.mov
+made hevc_dts_m2ts.m2ts
+total 10660
+drwxr-xr-x 2 runner runner    4096 Oct 31 19:15 .
+drwxr-xr-x 8 runner runner    4096 Oct 31 19:15 ..
+-rw-r--r-- 1 runner runner  526778 Oct 31 19:15 av1_opus_srt.mkv
+-rw-r--r-- 1 runner runner 1692505 Oct 31 19:15 h264_ac3_aac_two_audio.mkv
+-rw-r--r-- 1 runner runner 1414172 Oct 31 19:15 h264_alac.mov
+-rw-r--r-- 1 runner runner 1967092 Oct 31 19:15 h264_dts_srt.mkv
+-rw-r--r-- 1 runner runner  565987 Oct 31 19:15 hevc10_truehd_ass.mkv
+-rw-r--r-- 1 runner runner 1603584 Oct 31 19:15 hevc_dts_m2ts.m2ts
+-rw-r--r-- 1 runner runner  571392 Oct 31 19:15 hevc_eac3_movtext.mp4
+-rw-r--r-- 1 runner runner  725680 Oct 31 19:15 mpeg2_ac3.ts
+-rw-r--r-- 1 runner runner  382622 Oct 31 19:15 mpeg4_mp3.avi
+-rw-r--r-- 1 runner runner     667 Oct 31 19:15 subs.ass
+-rw-r--r-- 1 runner runner      53 Oct 31 19:15 subs.srt
+-rw-r--r-- 1 runner runner      53 Oct 31 19:15 subs.vtt
+-rw-r--r-- 1 runner runner  206834 Oct 31 19:15 vp8_vorbis.webm
+-rw-r--r-- 1 runner runner  778790 Oct 31 19:15 vp9_flac_webvtt.mkv
+-rw-r--r-- 1 runner runner  426531 Oct 31 19:15 wmv2_wma.wmv
+made render_pgs.mkv
+made render_dvb.ts
+made render_srt.mkv
+made render_pgs_zlib.mkv
+|    + Content compression
+|+ EBML void: size 1142
+|+ Cluster
+made render_ass_colored.mkv
+total 324
+drwxr-xr-x 2 runner runner   4096 Oct 31 19:15 .
+drwxr-xr-x 3 runner runner   4096 Oct 31 19:15 ..
+-rw-r--r-- 1 runner runner    610 Oct 31 19:15 colored.ass
+-rw-r--r-- 1 runner runner   6859 Oct 31 19:15 render_ass_colored.mkv
+-rw-r--r-- 1 runner runner 269216 Oct 31 19:15 render_dvb.ts
+-rw-r--r-- 1 runner runner   6859 Oct 31 19:15 render_pgs.mkv
+-rw-r--r-- 1 runner runner  11831 Oct 31 19:15 render_pgs_zlib.mkv
+-rw-r--r-- 1 runner runner   6297 Oct 31 19:15 render_srt.mkv
+-rw-r--r-- 1 runner runner    667 Oct 31 19:15 subs.ass
+-rw-r--r-- 1 runner runner     53 Oct 31 19:15 subs.srt
+-rw-r--r-- 1 runner runner    902 Oct 31 19:15 subs.sup
