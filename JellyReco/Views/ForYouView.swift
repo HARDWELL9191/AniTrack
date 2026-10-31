@@ -222,17 +222,18 @@ struct ForYouView: View {
 struct ExternalAgeBubble: View {
     @Environment(AppModel.self) private var model
     let title: ExternalTitle
-    @State private var looked: ExternalTitle?
+    @State private var looked: (id: String, rating: String)?
 
     var body: some View {
-        let label = (looked ?? title).ageLabel
+        let rating = title.ageRating ?? (looked?.id == title.id ? looked?.rating : nil)
+        let label = rating.flatMap(TMDBCertification.bucket)
         ZStack {
             if let label { GlassLabel(text: label).transition(.opacity) }
         }
         .animation(.easeOut(duration: 0.2), value: label)
         .task(id: title.id) {
             guard title.ageRating == nil, looked?.id != title.id else { return }
-            looked = await model.discovery.details(title)
+            if let r = await model.discovery.ageRating(title) { looked = (title.id, r) }
         }
     }
 }

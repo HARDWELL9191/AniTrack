@@ -52,13 +52,15 @@ final class AppModel {
     private(set) var contentVersion = 0
     /// My List: anything you want to watch — titles on your server and For You picks that
     /// aren't on it yet — newest first. Saved in your account's JellyReco storage on the server.
-    private(set) var myList: [MyListEntry] = []
+    private(set) var myList: [MyListEntry] = [] { didSet { updateHidden() } }
     /// For You picks you said you've already seen elsewhere / don't want.
-    private(set) var externalSeen: [ExternalTitle] = []
-    private(set) var externalNotForMe: [ExternalTitle] = []
-    /// For You never shows these again.
-    var externalHidden: Set<String> {
-        Set(myList.compactMap { $0.external?.id }).union(externalSeen.map(\.id)).union(externalNotForMe.map(\.id))
+    private(set) var externalSeen: [ExternalTitle] = [] { didSet { updateHidden() } }
+    private(set) var externalNotForMe: [ExternalTitle] = [] { didSet { updateHidden() } }
+    /// For You never shows these again. Kept up to date when the lists change (it used to be
+    /// rebuilt on every read, which For You and "More like this" do once per title).
+    private(set) var externalHidden: Set<String> = []
+    private func updateHidden() {
+        externalHidden = Set(myList.compactMap { $0.external?.id }).union(externalSeen.map(\.id)).union(externalNotForMe.map(\.id))
     }
     @ObservationIgnored private var storage: DisplayPreferencesDto?
 
@@ -71,8 +73,7 @@ final class AppModel {
         // Installed here (not after the server answers) so a saved key always starts For You.
         settings.onTMDBKeyChange = { [weak self] in
             guard let self else { return }
-            let key = self.settings.tmdbKey
-            Task { await self.saveStorage { custom in custom["tmdbkey"] = key } }
+            self.markDirty("tmdbkey")
             self.discovery.keyChanged()
         }
     }
@@ -100,11 +101,24 @@ final class AppModel {
         await refreshSession()
     }
 
+    @ObservationIgnored private var refreshTask: Task<Void, Never>?
+
     /// Re-validates the token, refreshes the user and libraries (works offline-tolerantly).
+    /// One refresh at a time: a caller that comes while one is running (Home's first load right
+    /// after launch / sign-in, pull-to-refresh) waits for that one instead of starting a second.
     func refreshSession() async {
+        if let running = refreshTask { await running.value; return }
+        let task = Task { await self.performRefresh(triedOtherAddresses: false) }
+        refreshTask = task
+        await task.value
+        if refreshTask == task { refreshTask = nil }
+    }
+
+    private func performRefresh(triedOtherAddresses: Bool) async {
         guard let client else { return }
         do {
             let me = try await client.me()
+            guard client === self.client else { return }   // the account changed meanwhile
             user = me
             // Autoplay of the next episode is a Jellyfin account setting: follow it.
             if let auto = me.configuration?.enableNextEpisodeAutoPlay, settings.autoPlayNext != auto {
@@ -113,16 +127,23 @@ final class AppModel {
             if let sid = store.currentServerId { store.updateUser(me, on: sid) }
             async let views = client.userViews()
             async let info = try? client.get("/System/Info", as: SystemInfo.self)
-            libraries = (try? await views) ?? libraries
-            serverInfo = await info
+            let fetchedViews = try? await views
+            let fetchedInfo = await info
+            guard client === self.client else { return }
+            libraries = fetchedViews ?? libraries
+            serverInfo = fetchedInfo
             await loadAccountStorage()
             await client.reportCapabilities()
         } catch JellyfinError.http(401, _) {
+            guard client === self.client else { return }
             errorMessage = JellyfinError.http(401, nil).errorDescription
             signOutCurrentUser(revoke: false)
         } catch {
-            // Server unreachable: try the other saved addresses (LAN ↔ remote) before giving up.
-            if await switchToReachableAddress() { await refreshSession() }
+            // Server unreachable: try the other saved addresses (LAN ↔ remote), once, before giving
+            // up. Only for network errors: a server that answers with an error (500, bad data) at
+            // every address would otherwise be switched back and forth forever.
+            guard !triedOtherAddresses, error is URLError, client === self.client else { return }
+            if await switchToReachableAddress() { await performRefresh(triedOtherAddresses: true) }
         }
     }
 
@@ -153,16 +174,13 @@ final class AppModel {
         }
         let saved = store.upsert(server: info, url: url)
         store.addUser(user, token: token, to: saved.id)
+        resetAccountState()
         client = JellyfinClient(baseURL: url, token: token, userId: user.id)
         self.user = user
-        userDataOverrides = [:]
-        libraries = []
         phase = .ready
         selectedTab = .home
         reco.attach(model: self)
         discovery.attach(model: self)
-        reco.reset()
-        discovery.reset()
         Task { await refreshSession() }
     }
 
@@ -173,18 +191,11 @@ final class AppModel {
         }
         store.currentServerId = server.id
         store.currentUserId = user.id
+        resetAccountState()
         client = JellyfinClient(baseURL: url, token: token, userId: user.id)
         self.user = nil
-        userDataOverrides = [:]
-        libraries = []
-        storage = nil
-        settings.dismissedPicks = []
-        myList = []; externalSeen = []; externalNotForMe = []
-        reco.reset()
-        discovery.reset()
         phase = .ready
         selectedTab = .home
-        contentVersion &+= 1
         Task { await refreshSession() }
     }
 
@@ -192,14 +203,9 @@ final class AppModel {
         let old = client
         if revoke { Task { await old?.logout() } }
         if let sid = store.currentServerId, let uid = store.currentUserId { store.removeUser(uid, from: sid) }
+        resetAccountState()
         client = nil
         user = nil
-        libraries = []
-        userDataOverrides = [:]
-        myList = []; externalSeen = []; externalNotForMe = []
-        storage = nil
-        reco.reset()
-        discovery.reset()
         DiskCache.clearPersonal()
         // Another saved account on any server: switch to it; otherwise back to sign-in.
         if let server = store.servers.first(where: { !$0.users.isEmpty }), let next = server.users.first {
@@ -209,8 +215,53 @@ final class AppModel {
         }
     }
 
+    /// Removing a saved server or account also signs those sessions out on the server (they used
+    /// to stay valid there, listed under Devices).
+    func removeSavedServer(_ server: SavedServer) {
+        let wasCurrent = server.id == store.currentServerId
+        revoke(server.users, on: server)
+        store.removeServer(server.id)
+        if wasCurrent { signOutCurrentUser(revoke: false) }
+    }
+
+    func removeSavedUser(_ user: SavedUser, from server: SavedServer) {
+        if server.id == store.currentServerId && user.id == store.currentUserId {
+            signOutCurrentUser(revoke: true)
+            return
+        }
+        revoke([user], on: server)
+        store.removeUser(user.id, from: server.id)
+    }
+
+    private func revoke(_ users: [SavedUser], on server: SavedServer) {
+        guard let url = server.url else { return }
+        let sessions = users.compactMap { u in store.token(for: u).map { JellyfinClient(baseURL: url, token: $0, userId: u.id) } }
+        Task { for c in sessions { await c.logout() } }
+    }
+
     func addAnotherAccount() {
         phase = .signedOut
+    }
+
+    /// Everything that belongs to the signed-in account, cleared on every account change (sign in,
+    /// switch, sign out), so a new account never shows (or saves into its storage) the previous
+    /// account's My List, Not for me, hidden picks or a half-finished save.
+    private func resetAccountState() {
+        refreshTask?.cancel(); refreshTask = nil
+        flushTask?.cancel(); flushTask = nil
+        settingsSyncTask?.cancel(); settingsSyncTask = nil
+        playback = nil
+        user = nil
+        libraries = []
+        userDataOverrides = [:]
+        storage = nil
+        storageLoaded = false
+        dirty = [:]
+        myList = []; externalSeen = []; externalNotForMe = []
+        settings.dismissedPicks = []
+        reco.reset()
+        discovery.reset()
+        contentVersion &+= 1
     }
 
     // MARK: User data
@@ -236,7 +287,9 @@ final class AppModel {
             userDataOverrides[item.id] = merged
             contentVersion &+= 1
             reco.listChanged()
-            if target, isOnMyList(item) { await toggleMyList(item) }   // finished = off My List
+            // A finished movie / show leaves My List. Not an episode or season: those stand for their
+            // show on the list, and ticking one episode mustn't remove the whole show.
+            if target, [.movie, .series, .video].contains(item.kind), isOnMyList(item) { await toggleMyList(item) }
         } catch {
             userDataOverrides[item.id] = item.userData
             errorMessage = error.localizedDescription
@@ -263,79 +316,158 @@ final class AppModel {
 
     // MARK: Account storage on the server (For You lists, synced settings)
 
+    /// The first load of this account's storage succeeded. Until then nothing is written: a save
+    /// before it would replace the server's lists with whatever (little) this device has.
+    @ObservationIgnored private var storageLoaded = false
+    /// Keys changed here and not saved yet, with a counter per change (a change made while a save
+    /// is on its way stays pending for the next one).
+    @ObservationIgnored private var dirty: [String: Int] = [:]
+    @ObservationIgnored private var flushTask: Task<Void, Never>?
+
     /// For You lists and synced settings, from this account's storage on the server.
+    /// A key with an unsaved change here keeps this device's value (it's the newer one).
     func loadAccountStorage() async {
         guard let client else { return }
-        if let prefs = try? await client.loadAppStorage() {
+        if let prefs = try? await client.loadAppStorage(), client === self.client {
             storage = prefs
-            myList = Self.decodeList(prefs.customPrefs?["mylist"] ?? nil)
+            let custom = prefs.customPrefs ?? [:]
+            let firstLoad = !storageLoaded
+            func value(_ key: String) -> String? { custom[key] ?? nil }
+
+            let serverList = Self.decodeList(value("mylist"))
+            if dirty["mylist"] == nil {
+                myList = serverList
+            } else if firstLoad {
+                // Added here before the server answered: keep those, on top of the server's list.
+                let ids = Set(myList.map(\.id))
+                myList = myList + serverList.filter { !ids.contains($0.id) }
+            }
             // Older builds kept For You picks in a separate "wishlist": fold them into My List.
-            let legacy = Self.decodeTitles(prefs.customPrefs?["wishlist"] ?? nil)
+            let legacy = Self.decodeTitles(value("wishlist"))
             if !legacy.isEmpty {
                 for t in legacy where !myList.contains(where: { $0.external?.id == t.id }) {
                     myList.append(MyListEntry(external: t))
                 }
-                await saveStorage { custom in
-                    custom["mylist"] = Self.encodeList(self.myList)
-                    custom["wishlist"] = "[]"
-                }
+                markDirty("mylist", "wishlist")
+            }
+            for list in [ExternalList.seenelsewhere, .notforme] {
+                let server = Self.decodeTitles(value(list.rawValue))
+                let local = list == .seenelsewhere ? externalSeen : externalNotForMe
+                let merged: [ExternalTitle]
+                if dirty[list.rawValue] == nil { merged = server }
+                else if firstLoad { let ids = Set(local.map(\.id)); merged = local + server.filter { !ids.contains($0.id) } }
+                else { merged = local }
+                if list == .seenelsewhere { externalSeen = merged } else { externalNotForMe = merged }
             }
             // TMDB key: the phone's copy and the server's copy keep each other filled in.
-            let serverKey = ((prefs.customPrefs?["tmdbkey"] ?? nil) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let serverKey = (value("tmdbkey") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             if settings.tmdbKey.isEmpty && !serverKey.isEmpty {
                 settings.tmdbKey = serverKey
             } else if !settings.tmdbKey.isEmpty && serverKey != settings.tmdbKey {
-                let key = settings.tmdbKey
-                await saveStorage { custom in custom["tmdbkey"] = key }
+                markDirty("tmdbkey")
             }
-            externalSeen = Self.decodeTitles(prefs.customPrefs?["seenelsewhere"] ?? nil)
-            externalNotForMe = Self.decodeTitles(prefs.customPrefs?["notforme"] ?? nil)
-            if let json = prefs.customPrefs?["settings"] ?? nil, !json.isEmpty {
-                settings.importJSON(json)
+            // Settings: the server's copy, unless a change made here is still waiting to be saved
+            // (importing then put the old values back, and the pending save uploaded them).
+            if let json = value("settings"), !json.isEmpty {
+                if dirty["settings"] == nil { settings.importJSON(json) }
             } else {
-                scheduleSettingsSync()   // first device for this account: upload what's here
+                markDirty("settings")   // first device for this account: upload what's here
             }
+            storageLoaded = true
+            scheduleFlush()   // anything changed before the first load can be saved now
         }
         settings.onChange = { [weak self] in self?.scheduleSettingsSync() }
     }
 
     @ObservationIgnored private var settingsSyncTask: Task<Void, Never>?
 
-    /// Saves settings to the server a moment after the last change (one request per burst).
+    /// Saves settings to the server a moment after the last change (one request per burst). The
+    /// change counts as pending right away, so a refresh in between doesn't undo it.
     func scheduleSettingsSync() {
+        dirty["settings", default: 0] += 1
         settingsSyncTask?.cancel()
         settingsSyncTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 2_000_000_000)
             guard !Task.isCancelled else { return }
-            await self?.saveStorage { custom in
-                if let json = self?.settings.exportJSON() { custom["settings"] = json }
+            self?.scheduleFlush()
+        }
+    }
+
+    /// Marks keys as changed and saves them (together with anything else pending) shortly.
+    private func markDirty(_ keys: String...) {
+        for k in keys { dirty[k, default: 0] += 1 }
+        scheduleFlush()
+    }
+
+    private func scheduleFlush() {
+        guard flushTask == nil, storageLoaded, !dirty.isEmpty else { return }
+        let token = UUID()
+        flushToken = token
+        flushTask = Task { [weak self] in
+            await Task.yield()   // changes made in the same moment go in the same save
+            await self?.flushStorage()
+            // (A save cancelled by an account change mustn't clear the new account's save.)
+            if self?.flushToken == token { self?.flushTask = nil }
+        }
+    }
+    @ObservationIgnored private var flushToken: UUID?
+
+    /// Saves the pending keys, one save at a time. Jellyfin replaces the whole stored record on
+    /// every save, so each save starts from a fresh copy of it (keeping what other devices wrote)
+    /// and puts in the current value of every pending key. If that copy can't be read, nothing is
+    /// written (writing over an old or empty copy would erase the other keys); the keys stay
+    /// pending and go with the next change or refresh.
+    private func flushStorage() async {
+        while storageLoaded, !dirty.isEmpty, let client {
+            let pending = dirty
+            guard let fresh = try? await client.loadAppStorage() else { return }
+            guard client === self.client, storageLoaded else { return }
+            var prefs = fresh
+            var custom = prefs.customPrefs ?? [:]
+            for key in pending.keys {
+                if let v = currentValue(key) { custom[key] = .some(v) }
+            }
+            prefs.customPrefs = custom
+            do {
+                try await client.saveAppStorage(prefs)
+                guard client === self.client else { return }
+                storage = prefs
+                for (key, n) in pending where dirty[key] == n { dirty[key] = nil }
+            } catch {
+                report(error)
+                return
             }
         }
     }
 
-    /// Read-modify-write of the account's JellyReco storage (keeps keys written by other devices).
-    private func saveStorage(_ change: (inout [String: String?]) -> Void) async {
-        guard let client else { return }
-        var prefs = (try? await client.loadAppStorage()) ?? storage ?? DisplayPreferencesDto()
-        var custom = prefs.customPrefs ?? [:]
-        change(&custom)
-        prefs.customPrefs = custom
-        do {
-            try await client.saveAppStorage(prefs)
-            storage = prefs
-        } catch {
-            report(error)
+    /// This device's current value for a stored key.
+    private func currentValue(_ key: String) -> String? {
+        switch key {
+        case "mylist": return Self.encodeList(myList)
+        case "notforme": return Self.encodeTitles(externalNotForMe)
+        case "seenelsewhere": return Self.encodeTitles(externalSeen)
+        case "settings": return settings.exportJSON()
+        case "tmdbkey": return settings.tmdbKey
+        case "wishlist": return "[]"
+        default: return nil
         }
     }
-
 
     // MARK: My List & Not for me — saved on the server
 
     enum ExternalList: String { case seenelsewhere, notforme }
 
+    /// One element that may fail to decode on its own (the rest of the list still loads).
+    private struct Lossy<T: Decodable>: Decodable {
+        let value: T?
+        init(from decoder: Decoder) throws { value = try? T(from: decoder) }
+    }
+
+    /// Element by element: one entry this build can't read (written by a newer app, or by the PC
+    /// app) no longer makes the whole list come back empty, which the next save then stored.
     private static func decodeTitles(_ json: String?) -> [ExternalTitle] {
         guard let json, let data = json.data(using: .utf8) else { return [] }
-        return (try? JSONDecoder().decode([ExternalTitle].self, from: data)) ?? []
+        return ((try? JSONDecoder().decode([Lossy<ExternalTitle>].self, from: data)) ?? []).compactMap(\.value)
     }
 
     private static func slim(_ t: ExternalTitle) -> ExternalTitle {
@@ -346,13 +478,15 @@ final class AppModel {
     }
 
     private static func encodeTitles(_ list: [ExternalTitle]) -> String {
-        let slimmed = list.prefix(500).map(slim)
+        // Up to 1500 (was 500: the oldest Not for me titles silently dropped off and came back on
+        // For You). The PC app keeps the same limit.
+        let slimmed = list.prefix(1500).map(slim)
         return String(data: (try? JSONEncoder().encode(Array(slimmed))) ?? Data(), encoding: .utf8) ?? "[]"
     }
 
     private static func decodeList(_ json: String?) -> [MyListEntry] {
         guard let json, let data = json.data(using: .utf8) else { return [] }
-        return (try? JSONDecoder().decode([MyListEntry].self, from: data)) ?? []
+        return ((try? JSONDecoder().decode([Lossy<MyListEntry>].self, from: data)) ?? []).compactMap(\.value)
     }
 
     private static func encodeList(_ list: [MyListEntry]) -> String {
@@ -381,7 +515,7 @@ final class AppModel {
             myList.insert(MyListEntry(serverId: id, name: name), at: 0)
         }
         reco.listChanged()
-        await saveMyList()
+        saveMyList()
     }
 
     func toggleMyList(_ t: ExternalTitle) async {
@@ -391,31 +525,29 @@ final class AppModel {
             myList.insert(MyListEntry(external: t), at: 0)
             externalNotForMe.removeAll { $0.id == t.id }
             externalSeen.removeAll { $0.id == t.id }
-            await saveExternal(.notforme)
-            await saveExternal(.seenelsewhere)
+            saveExternal(.notforme)
+            saveExternal(.seenelsewhere)
         }
-        await saveMyList()
+        saveMyList()
     }
 
     func removeFromMyList(_ entry: MyListEntry) async {
         myList.removeAll { $0.id == entry.id }
         reco.listChanged()
-        await saveMyList()
+        saveMyList()
     }
 
-    private func saveMyList() async {
-        let json = Self.encodeList(myList)
-        await saveStorage { custom in custom["mylist"] = json }
-    }
+    /// My List and the For You lists save together (one request per action, not three).
+    private func saveMyList() { markDirty("mylist") }
 
     func markSeenElsewhere(_ t: ExternalTitle) async {
         externalSeen.removeAll { $0.id == t.id }
         externalSeen.insert(t, at: 0)
         if myList.contains(where: { $0.external?.id == t.id }) {
             myList.removeAll { $0.external?.id == t.id }
-            await saveMyList()
+            saveMyList()
         }
-        await saveExternal(.seenelsewhere)
+        saveExternal(.seenelsewhere)
     }
 
     func markExternalNotForMe(_ t: ExternalTitle, _ on: Bool = true) async {
@@ -424,15 +556,15 @@ final class AppModel {
             externalNotForMe.insert(t, at: 0)
             if myList.contains(where: { $0.external?.id == t.id }) {
                 myList.removeAll { $0.external?.id == t.id }
-                await saveMyList()
+                saveMyList()
             }
         }
-        await saveExternal(.notforme)
+        saveExternal(.notforme)
     }
 
     func unmarkSeen(_ t: ExternalTitle) async {
         externalSeen.removeAll { $0.id == t.id }
-        await saveExternal(.seenelsewhere)
+        saveExternal(.seenelsewhere)
     }
 
     func clearExternal(_ list: ExternalList) async {
@@ -440,13 +572,10 @@ final class AppModel {
         case .seenelsewhere: externalSeen = []
         case .notforme: externalNotForMe = []
         }
-        await saveExternal(list)
+        saveExternal(list)
     }
 
-    private func saveExternal(_ list: ExternalList) async {
-        let json = Self.encodeTitles(list == .seenelsewhere ? externalSeen : externalNotForMe)
-        await saveStorage { custom in custom[list.rawValue] = json }
-    }
+    private func saveExternal(_ list: ExternalList) { markDirty(list.rawValue) }
 
     // MARK: Not for me — Jellyfin's own thumbs-down, saved on the server
 
@@ -492,15 +621,20 @@ final class AppModel {
     func playbackEnded(itemIds: [String]) {
         for id in itemIds { userDataOverrides[id] = nil }
         contentVersion &+= 1
-        reco.listChanged()
+        reco.listChanged(refreshing: itemIds)   // their watched state changed on the server
 
     }
 
     // MARK: Playback
 
+    @ObservationIgnored private var playTask: Task<Void, Never>?
+
+    /// One play request at a time: a second tap while the first is still looking up the episode
+    /// replaces it instead of opening two players.
     func play(_ item: BaseItem, from start: Double? = nil, audio: Int? = nil, subtitle: Int? = nil,
               mediaSourceId: String? = nil) {
-        Task {
+        playTask?.cancel()
+        playTask = Task {
             var target = item
             // A plain folder plays its first video (in name order).
             if item.isFolder == true && ![.series, .season, .boxSet].contains(item.kind), let client {
@@ -526,6 +660,7 @@ final class AppModel {
             }
             var queue: [BaseItem] = []
             if target.kind == .episode { queue = await episodesAfter(target) }
+            guard !Task.isCancelled, playback == nil else { return }
             playback = PlaybackRequest(item: target, startSeconds: start, mediaSourceId: mediaSourceId,
                                        audioIndex: audio, subtitleIndex: subtitle, queue: queue)
         }
@@ -541,11 +676,13 @@ final class AppModel {
         return eps.first { !($0.userData?.played ?? false) } ?? eps.first
     }
 
+    /// The next episodes (up to 50), fetched from this episode on instead of the whole series.
     func episodesAfter(_ episode: BaseItem) async -> [BaseItem] {
         guard let client, let sid = episode.seriesId else { return [] }
-        let all = (try? await client.episodes(seriesId: sid)) ?? []
-        guard let index = all.firstIndex(where: { $0.id == episode.id }) else { return [] }
-        return Array(all[(index + 1)...].filter { $0.locationType != "Virtual" }.prefix(50))
+        var list = (try? await client.episodes(seriesId: sid, startItemId: episode.id, limit: 80)) ?? []
+        if list.first?.id != episode.id { list = (try? await client.episodes(seriesId: sid)) ?? [] }
+        guard let index = list.firstIndex(where: { $0.id == episode.id }) else { return [] }
+        return Array(list[(index + 1)...].filter { $0.locationType != "Virtual" }.prefix(50))
     }
 
     // MARK: Helpers

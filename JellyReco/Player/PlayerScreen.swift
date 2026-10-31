@@ -29,13 +29,17 @@ struct PlayerScreen: View {
         .preferredColorScheme(.dark)
         .task {
             guard controller == nil else { return }
-            let c = PlaybackController(request: request, model: model)
+            // Signed out (or the account changed) before the player opened: nothing to play.
+            guard let client = model.client else { dismiss(); return }
+            let c = PlaybackController(request: request, model: model, client: client)
             c.player.pictureInPicture.allowsAutomaticStartFromInline = model.settings.pipAutomatically
             controller = c
             OrientationLock.enterPlayer(landscape: model.settings.startInLandscape)
             UIApplication.shared.isIdleTimerDisabled = true
             await c.start()
         }
+        // Closed some other way than the close button (signed out, account switched): stop playing.
+        .onDisappear { if let c = controller { Task { await c.stop() } } }
         .onChange(of: scenePhase) { _, phase in
             guard let c = controller else { return }
             if phase == .background && !model.settings.backgroundAudio && !c.player.pictureInPicture.isActive
@@ -47,7 +51,7 @@ struct PlayerScreen: View {
 
     private func close() {
         Task {
-            await controller?.stop()
+            await controller?.stop()   // returns at once; the server is told in the background
             UIApplication.shared.isIdleTimerDisabled = false
             OrientationLock.exitPlayer()
             dismiss()

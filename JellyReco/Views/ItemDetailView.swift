@@ -8,6 +8,8 @@ struct ItemDetailView: View {
     @State private var detail: BaseItem?
     @State private var seasons: [BaseItem] = []
     @State private var selectedSeason: String?
+    @State private var episodesSeason: String?
+    @State private var episodesLoading = false
     @State private var episodes: [BaseItem] = []
     @State private var nextUp: BaseItem?
     @State private var similar: [BaseItem] = []
@@ -75,7 +77,9 @@ struct ItemDetailView: View {
                 }
             }
         }
-        .task(id: item.id) { await load() }
+        // Loads again after playback / watched changes elsewhere (contentVersion), so the page
+        // never keeps showing the old "Resume from…" or watched state.
+        .task(id: "\(item.id)#\(model.contentVersion)") { await load() }
         .sheet(isPresented: $showMediaInfo) {
             MediaInfoSheet(item: current, sourceIndex: sourceIndex).presentationDetents([.medium, .large])
         }
@@ -487,11 +491,11 @@ struct ItemDetailView: View {
                 if selectedSeason == nil {
                     selectedSeason = nextUp?.seasonId ?? seasons.first(where: { !model.isPlayed($0) })?.id ?? seasons.first?.id
                 }
-                if nextUp == nil { nextUp = try? await client.episodes(seriesId: full.id).first }
-                await loadEpisodes()
+                if nextUp == nil { nextUp = try? await client.episodes(seriesId: full.id, limit: 1).first }
+                await loadEpisodes(force: true)
             case .season:
                 selectedSeason = full.id
-                await loadEpisodes()
+                await loadEpisodes(force: true)
                 nextUp = episodes.first { !model.isPlayed($0) } ?? episodes.first
             case .boxSet, .folder, .playlist:
                 var q = JellyfinClient.ItemQuery()
@@ -513,10 +517,19 @@ struct ItemDetailView: View {
         }
     }
 
-    private func loadEpisodes() async {
+    /// The selected season's episodes. Only the latest selection's answer is shown (switching
+    /// seasons quickly used to let an older, slower answer win), and the season change that the
+    /// first load makes doesn't load the same episodes a second time.
+    private func loadEpisodes(force: Bool = false) async {
         guard let client = model.client else { return }
+        let season = selectedSeason
+        if !force, season == episodesSeason, episodesLoading || !episodes.isEmpty { return }
+        episodesSeason = season
+        episodesLoading = true
         let seriesId = current.kind == .series ? current.id : (current.seriesId ?? current.parentId ?? current.id)
-        let eps = (try? await client.episodes(seriesId: seriesId, seasonId: selectedSeason)) ?? []
+        let eps = (try? await client.episodes(seriesId: seriesId, seasonId: season)) ?? []
+        guard selectedSeason == season else { return }
+        episodesLoading = false
         episodes = eps.filter { (model.user?.configuration?.displayMissingEpisodes ?? false) || $0.locationType != "Virtual" }
     }
 

@@ -46,21 +46,25 @@ final class JellyfinClient: @unchecked Sendable {
     }
 
     let baseURL: URL
-    var token: String?
-    var userId: String?
+    let token: String?
+    let userId: String?
 
-    private let session: URLSession
-
-    init(baseURL: URL, token: String? = nil, userId: String? = nil) {
-        self.baseURL = baseURL
-        self.token = token
-        self.userId = userId
+    private var session: URLSession { Self.sharedSession }
+    /// One session for every client (each client made its own, never released: every account
+    /// switch, address probe and avatar left one behind).
+    private static let sharedSession: URLSession = {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 20
         config.timeoutIntervalForResource = 120
         config.waitsForConnectivity = false
         config.httpMaximumConnectionsPerHost = 6
-        session = URLSession(configuration: config)
+        return URLSession(configuration: config)
+    }()
+
+    init(baseURL: URL, token: String? = nil, userId: String? = nil) {
+        self.baseURL = baseURL
+        self.token = token
+        self.userId = userId
     }
 
     /// Normalizes what the user typed ("jelly.local:8096" → "http://jelly.local:8096").
@@ -412,9 +416,13 @@ final class JellyfinClient: @unchecked Sendable {
         return r.items ?? []
     }
 
-    func episodes(seriesId: String, seasonId: String? = nil) async throws -> [BaseItem] {
+    /// `startItemId` + `limit`: only the episodes from that one on (long anime have 1000+);
+    /// `adjacentTo`: just the episode before and after it (and itself).
+    func episodes(seriesId: String, seasonId: String? = nil, startItemId: String? = nil, limit: Int? = nil,
+                  adjacentTo: String? = nil) async throws -> [BaseItem] {
         let r: QueryResult<BaseItem> = try await get("/Shows/\(seriesId)/Episodes", [
             "userId": try requireUser(), "seasonId": seasonId,
+            "startItemId": startItemId, "limit": limit, "adjacentTo": adjacentTo,
             // Light list (a season can have 1000+ episodes); the player loads the full item.
             "fields": Self.listFields,
             "enableUserData": true,
@@ -616,6 +624,11 @@ final class JellyfinClient: @unchecked Sendable {
     /// Server-relative URLs (TranscodingUrl, DeliveryUrl) made absolute, with the token attached.
     func absolute(_ relative: String) -> URL? {
         guard var comps = URLComponents(string: relative) else { return nil }
+        // A full address on another host (an IPTV stream, a remote subtitle) is used as it is:
+        // the Jellyfin token only ever goes to this server.
+        if let host = comps.host, host.lowercased() != (baseURL.host ?? "").lowercased() {
+            return URL(string: relative)
+        }
         var items = comps.queryItems ?? []
         if let token, !items.contains(where: { $0.name.lowercased() == "apikey" }) {
             items.append(URLQueryItem(name: "apikey", value: token))
@@ -647,12 +660,24 @@ final class JellyfinClient: @unchecked Sendable {
         var playbackRate: Double?
         var eventName: String?
         var failed: Bool?
+        /// Live TV: the tuner stream, so the server can release it when playback stops.
+        var liveStreamId: String?
     }
 
     func reportStart(_ r: PlaybackReport) async { _ = try? await postVoid("/Sessions/Playing", json: r) }
     func reportProgress(_ r: PlaybackReport) async { _ = try? await postVoid("/Sessions/Playing/Progress", json: r) }
     func reportStopped(_ r: PlaybackReport) async { _ = try? await postVoid("/Sessions/Playing/Stopped", json: r) }
     func pingSession(_ playSessionId: String) async { _ = try? await send("POST", "/Sessions/Playing/Ping", query: ["playSessionId": playSessionId]) }
+
+    /// Live TV: frees the tuner (Jellyfin keeps it open otherwise).
+    func closeLiveStream(_ liveStreamId: String) async {
+        _ = try? await send("POST", "/LiveStreams/Close", query: ["liveStreamId": liveStreamId])
+    }
+
+    /// Log text with any API key in it hidden (logs are shown on screen and can be shared).
+    static func redacted(_ text: String) -> String {
+        text.replacingOccurrences(of: #"(?i)(api_?key=)[^&\s"']+"#, with: "$1•••", options: .regularExpression)
+    }
 
     func stopEncoding(playSessionId: String) async {
         _ = try? await send("DELETE", "/Videos/ActiveEncodings", query: ["deviceId": Self.deviceId, "playSessionId": playSessionId])

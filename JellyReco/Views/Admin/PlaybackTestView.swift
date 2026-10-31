@@ -108,7 +108,7 @@ final class PlaybackTester {
         ))
         player.logHandler = { [weak self] msg in
             guard msg.level == .error || msg.level == .fatal || msg.message.localizedCaseInsensitiveContains("decod") else { return }
-            self?.log.append("[\(msg.prefix)] \(msg.message.trimmingCharacters(in: .whitespacesAndNewlines))")
+            self?.log.append(JellyfinClient.redacted("[\(msg.prefix)] \(msg.message.trimmingCharacters(in: .whitespacesAndNewlines))"))
         }
     }
 

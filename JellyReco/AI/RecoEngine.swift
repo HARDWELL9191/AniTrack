@@ -53,11 +53,25 @@ final class RecoEngine {
     @ObservationIgnored private var debounce: Task<Void, Never>?
     @ObservationIgnored private var dirty = true
     @ObservationIgnored private var similarCache: [String: (items: [String], at: Date)] = [:]
+    /// When the libraries were last read from the server, and titles to re-read before the next
+    /// ranking (what was just played: its watched state changed on the server).
+    @ObservationIgnored private var snapshotAt: Date?
+    @ObservationIgnored private var refreshIds: Set<String> = []
+    /// Server ids on My List (looked up for every title while ranking).
+    @ObservationIgnored private var myListIds: Set<String> = []
 
     func attach(model: AppModel) { self.model = model }
 
+    /// Account change: everything goes, including a build or refresh still running for the old
+    /// account (its results must never land in the new one).
     func reset() {
         buildTask?.cancel()
+        buildTask = nil
+        debounce?.cancel()
+        debounce = nil
+        refreshIds = []
+        snapshotAt = nil
+        profileReady = false
         picks = [:]
         genres = [:]
         snapshot = [:]
@@ -74,16 +88,63 @@ final class RecoEngine {
         version &+= 1
     }
 
-    /// Something was watched/favourited: rebuild a little later (several changes → one build).
-    func listChanged() {
+    /// Something was watched / favourited / listed: re-rank a little later (several changes →
+    /// one pass). The libraries aren't downloaded again for that (it used to page through every
+    /// library on each tap and after each video): your changes are already known here, and only
+    /// the titles in `refreshing` (just played) are re-read. A full re-read happens on launch,
+    /// pull-to-refresh, or when the last one is over 15 minutes old.
+    func listChanged(refreshing ids: [String] = []) {
         dirty = true
+        refreshIds.formUnion(ids)
         debounce?.cancel()
         debounce = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 4_000_000_000)
             guard !Task.isCancelled else { return }
-            await self?.build(force: true)
+            await self?.refreshAfterChange()
         }
     }
+
+    private func refreshAfterChange() async {
+        if buildTask != nil { await build(force: false); return }   // a full read is already on its way
+        guard let at = snapshotAt, Date().timeIntervalSince(at) < 15 * 60, !snapshot.isEmpty, let reader = model?.reader else {
+            await build(force: true)
+            return
+        }
+        let ids = refreshIds
+        refreshIds = []
+        if !ids.isEmpty { await reread(ids, reader: reader) }
+        if Task.isCancelled { return }
+        rebuildProfile()
+        rankAll(aiAllowed: usedAI)
+        dirty = false
+    }
+
+    /// Fresh copies of a few titles (and the shows of played episodes), put into the snapshot.
+    private func reread(_ ids: Set<String>, reader: LibraryReader) async {
+        var q = JellyfinClient.ItemQuery()
+        q.ids = Array(ids.prefix(100))
+        q.recursive = true
+        q.limit = nil
+        q.isMissing = nil
+        q.fields = Self.libraryFields
+        guard let played = try? await reader.items(q).items else { return }
+        let shows = Set(played.compactMap { $0.kind == .episode || $0.kind == .season ? $0.seriesId : nil }).filter { byId[$0] != nil }
+        var fresh = played.filter { byId[$0.id] != nil }
+        if !shows.isEmpty {
+            q.ids = Array(shows.prefix(100))
+            fresh += (try? await reader.items(q).items) ?? []
+        }
+        guard !Task.isCancelled else { return }
+        for item in fresh {
+            guard let lib = itemLibrary[item.id], let i = snapshot[lib]?.firstIndex(where: { $0.id == item.id }) else { continue }
+            snapshot[lib]?[i] = item
+            byId[item.id] = item
+        }
+    }
+
+    static let libraryFields = ["Overview", "Genres", "Tags", "Studios", "ProductionYear", "CommunityRating", "OfficialRating",
+                                "RecursiveItemCount", "ChildCount", "ProductionLocations", "OriginalTitle", "DateCreated",
+                                "PrimaryImageAspectRatio", "Status", "EndDate", "RunTimeTicks", "ProviderIds"]
 
     // MARK: Sources (first dropdown)
 
@@ -193,7 +254,12 @@ final class RecoEngine {
     }
 
     func ensureBuilt() async {
-        if picks.isEmpty || dirty { await build(force: false) }
+        if picks.isEmpty || snapshot.isEmpty {
+            await build(force: false)
+        } else if dirty {
+            debounce?.cancel()
+            await refreshAfterChange()
+        }
     }
 
     func build(force: Bool) async {
@@ -220,6 +286,7 @@ final class RecoEngine {
         // 0) Fast start: last snapshot from disk while the fresh one loads.
         let cacheName = "reco-\(model.store.currentServerId ?? "s")-\(reader.userId ?? "u")"
         if snapshot.isEmpty, let saved = await DiskCache.loadInBackground([String: [BaseItem]].self, name: cacheName) {
+            if Task.isCancelled { return }
             ingest(saved)
             rebuildProfile()
             profileReady = true
@@ -233,7 +300,10 @@ final class RecoEngine {
                 if Task.isCancelled { return }
                 fresh[source.id] = try await fetchLibrary(source, reader: reader)
             }
+            if Task.isCancelled { return }   // e.g. the account changed while reading
             ingest(fresh)
+            snapshotAt = Date()
+            refreshIds = []
             DiskCache.saveInBackground(fresh, name: cacheName)
         } catch {
             if AppModel.isCancellation(error) { return }
@@ -271,9 +341,7 @@ final class RecoEngine {
         case "tvshows": q.includeItemTypes = [.series]
         default: q.includeItemTypes = [.movie, .series]
         }
-        q.fields = ["Overview", "Genres", "Tags", "Studios", "ProductionYear", "CommunityRating", "OfficialRating",
-                    "RecursiveItemCount", "ChildCount", "ProductionLocations", "OriginalTitle", "DateCreated",
-                    "PrimaryImageAspectRatio", "Status", "EndDate", "RunTimeTicks", "ProviderIds"]
+        q.fields = Self.libraryFields
         q.sortBy = ["SortName"]
         q.limit = 400
         q.isMissing = nil
@@ -320,7 +388,7 @@ final class RecoEngine {
         if model.isNotForMe(item) { return -1.0 }
         let ud = model.userData(for: item) ?? UserItemData()
         // On My List = liked enough to plan it (like AniReco's Planning).
-        var w: Double? = model.myList.contains(where: { $0.serverId == item.id }) ? 0.5 : nil
+        var w: Double? = myListIds.contains(item.id) ? 0.5 : nil
         let daysSince = ud.lastPlayedDate.map { Date().timeIntervalSince($0) / 86_400 } ?? 0
 
         if ud.played == true {
@@ -347,7 +415,7 @@ final class RecoEngine {
 
     private func isCandidate(_ item: BaseItem) -> Bool {
         guard let model else { return false }
-        if model.isNotForMe(item) || model.myList.contains(where: { $0.serverId == item.id }) { return false }
+        if model.isNotForMe(item) || myListIds.contains(item.id) { return false }
         let ud = model.userData(for: item)
         if ud?.played == true || ud?.isFavorite == true { return false }
         if (ud?.playedPercentage ?? 0) > 0 { return false }
@@ -360,6 +428,7 @@ final class RecoEngine {
     }
 
     private func rebuildProfile() {
+        myListIds = Set(model?.myList.compactMap(\.serverId) ?? [])
         var p = TasteProfile()
         var w: [String: Double] = [:]
         for item in byId.values {
@@ -494,7 +563,11 @@ final class RecoEngine {
 
     // MARK: Ranking
 
+    /// Ranks every library (the best of each feed the on-device AI pass). Explanations aren't
+    /// worked out here: nothing reads them from these picks, and computing them for 200 titles
+    /// per library was most of the time this took (on the main thread).
     private func rankAll(aiAllowed: Bool) {
+        myListIds = Set(model?.myList.compactMap(\.serverId) ?? [])
         var result: [String: [Pick]] = [:]
         let maxQuality = 10.0
         func rank(_ items: [BaseItem], sourceId: String) -> [Pick] {
@@ -512,7 +585,7 @@ final class RecoEngine {
             }
             scored.sort { $0.1 > $1.1 }
             return scored.prefix(200).map { item, score in
-                Pick(item: item, score: score, because: because(for: item), highlights: profile.highlights(for: item))
+                Pick(item: item, score: score, because: [], highlights: [])
             }
         }
         for (lib, items) in snapshot {
@@ -535,24 +608,6 @@ final class RecoEngine {
         profile = p
         defer { profile = saved }
         return body()
-    }
-
-    private func because(for item: BaseItem) -> [String] {
-        if let viaSimilar = becauseSimilar[item.id], !viaSimilar.isEmpty { return Array(viaSimilar.prefix(3)) }
-        if let v = candidateVectors[item.id], !anchorVectors.isEmpty {
-            return anchorVectors.map { ($0.key, SemanticEngine.cosine($0.value, v)) }
-                .sorted { $0.1 > $1.1 }
-                .prefix(2)
-                .compactMap { byId[$0.0]?.displayName }
-        }
-        let mine = Set(item.genres ?? [])
-        return weights.filter { $0.value > 0.6 }
-            .compactMap { id, _ in byId[id] }
-            .map { ($0, Set($0.genres ?? []).intersection(mine).count) }
-            .filter { $0.1 >= 2 }
-            .sorted { $0.1 > $1.1 }
-            .prefix(2)
-            .map(\.0.displayName)
     }
 
     // MARK: Match %
@@ -629,7 +684,8 @@ final class RecoEngine {
             }
             return 0.65 * tag + 0.35 * mine
         }
-        return candidates.sorted { score($0) > score($1) }.prefix(30).map { $0 }
+        // Each title scored once (scoring inside the sort's comparison redid it many times per title).
+        return candidates.map { ($0, score($0)) }.sorted { $0.1 > $1.1 }.prefix(30).map(\.0)
     }
 
     // MARK: For the discovery engine (For You)

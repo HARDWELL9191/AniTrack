@@ -116,11 +116,18 @@ final class DiscoveryEngine {
         return counts.filter { $0.value >= 2 }.sorted { $0.value > $1.value }.map(\.key)
     }
 
+    /// Picks saved on this phone are used as they are while less than 12 hours old (it used to
+    /// rebuild from TMDB on every launch, 100+ requests); pull down on For You for fresh ones.
     func ensureBuilt(_ sourceId: String) async {
         if picks[sourceId] == nil || (picks[sourceId]?.isEmpty ?? true) {
-            if let saved = await DiskCache.loadInBackground([ExternalPick].self, name: cacheName(sourceId)) {
+            if let saved = await DiskCache.loadInBackground([ExternalPick].self, name: cacheName(sourceId)), !saved.isEmpty {
                 picks[sourceId] = saved
                 version &+= 1
+                if let at = await DiskCache.loadInBackground(Date.self, name: cacheName(sourceId) + "-at"),
+                   Date().timeIntervalSince(at) < 12 * 3600 {
+                    builtAt[sourceId] = at
+                    return
+                }
             }
             await build(sourceId, genre: nil)
         }
@@ -251,18 +258,26 @@ final class DiscoveryEngine {
         for tv in types {
             var genreIds = await topGenres.asyncCompactMap { await tmdb.genreId(named: $0, tv: tv) }
             if let genre, let gid = await tmdb.genreId(named: genre, tv: tv) { genreIds = [gid] }
-            for gid in genreIds.prefix(3) {
-                for page in 1...2 {
-                    for t in (try? await tmdb.discover(tv: tv, genreIds: [gid], anime: animeFilter, page: page, minVotes: animeFilter == true ? 80 : 300)) ?? [] {
-                        candidates[t.id] = candidates[t.id] ?? t
+            // The discover pages are asked for together, not one after another; results are
+            // merged in the same order as before, so the picks come out the same.
+            let minVotes = animeFilter == true ? 80 : 300
+            var requests: [(genre: Int?, page: Int)] = []
+            for gid in genreIds.prefix(3) { for page in 1...2 { requests.append((genre: gid, page: page)) } }
+            if genre == nil { requests.append((genre: nil, page: 1)) }
+            let pages = await withTaskGroup(of: (Int, [ExternalTitle]).self) { group -> [[ExternalTitle]] in
+                for (i, r) in requests.enumerated() {
+                    group.addTask {
+                        let list = r.genre == nil
+                            ? (try? await tmdb.discover(tv: tv, genreIds: [], anime: animeFilter, page: 1, sort: "popularity.desc", minVotes: 150)) ?? []
+                            : (try? await tmdb.discover(tv: tv, genreIds: [r.genre!], anime: animeFilter, page: r.page, minVotes: minVotes)) ?? []
+                        return (i, list)
                     }
                 }
+                var out = [[ExternalTitle]](repeating: [], count: requests.count)
+                for await (i, list) in group { out[i] = list }
+                return out
             }
-            if genre == nil {
-                for t in (try? await tmdb.discover(tv: tv, genreIds: [], anime: animeFilter, page: 1, sort: "popularity.desc", minVotes: 150)) ?? [] {
-                    candidates[t.id] = candidates[t.id] ?? t
-                }
-            }
+            for list in pages { for t in list { candidates[t.id] = candidates[t.id] ?? t } }
         }
         if Task.isCancelled { return }
         if candidates.isEmpty {
@@ -397,6 +412,7 @@ final class DiscoveryEngine {
         builtAt[sourceId] = Date()
         version &+= 1
         DiskCache.saveInBackground(picks[sourceId] ?? [], name: cacheName(sourceId))
+        if genre == nil { DiskCache.saveInBackground(Date(), name: cacheName(sourceId) + "-at") }
         saveIdMap()
     }
 
@@ -412,6 +428,26 @@ final class DiscoveryEngine {
     func details(_ title: ExternalTitle) async -> ExternalTitle {
         guard let tmdb = client() else { return title }
         return await tmdb.details(title)
+    }
+
+    /// Age ratings found for covers, kept on the phone: each cover used to look its title up on
+    /// TMDB again every session (one request per cover, in grids of hundreds).
+    @ObservationIgnored private var ages: [String: String]?
+    @ObservationIgnored private var agesSave: Task<Void, Never>?
+
+    func ageRating(_ title: ExternalTitle) async -> String? {
+        if let r = title.ageRating { return r }
+        if ages == nil { ages = await DiskCache.loadInBackground([String: String].self, name: "tmdb-ages") ?? [:] }
+        if let hit = ages?[title.id] { return hit }
+        guard let found = await details(title).ageRating else { return nil }
+        ages?[title.id] = found
+        agesSave?.cancel()
+        agesSave = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            guard !Task.isCancelled, let ages = self?.ages else { return }
+            DiskCache.saveInBackground(ages, name: "tmdb-ages")
+        }
+        return found
     }
 
     // MARK: Helpers

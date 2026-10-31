@@ -75,13 +75,21 @@ final class PlaybackController {
     @ObservationIgnored private var started = false
     @ObservationIgnored private var remoteCommandsInstalled = false
     @ObservationIgnored private var playingSince: Date?
+    /// "Cancel" on the Up Next card: no countdown again for this episode (the credits segment and
+    /// the end of the file used to restart it every half second).
+    @ObservationIgnored private var countdownDismissed = false
+    @ObservationIgnored private var stopped = false
+    /// Where this file was opened and whether it ever actually played: until it does, reports
+    /// carry the start position, so a file that failed to open doesn't reset your resume point to 0.
+    @ObservationIgnored private var openedAt: Double = 0
+    @ObservationIgnored private var hasPlayed = false
 
     var settings: AppSettings { model.settings }
 
-    init(request: PlaybackRequest, model: AppModel) {
+    init(request: PlaybackRequest, model: AppModel, client: JellyfinClient) {
         self.request = request
         self.model = model
-        self.client = model.client!
+        self.client = client
         self.item = request.item
         self.queue = request.queue
         self.player = MPVPlayer(configuration: Self.configuration(settings: model.settings,
@@ -93,7 +101,7 @@ final class PlaybackController {
     private func attachLog() {
         player.logHandler = { [weak self] msg in
             guard let self else { return }
-            let line = "[\(msg.prefix)] \(msg.message.trimmingCharacters(in: .whitespacesAndNewlines))"
+            let line = JellyfinClient.redacted("[\(msg.prefix)] \(msg.message.trimmingCharacters(in: .whitespacesAndNewlines))")
             self.noteSkippedTrack(msg.message)
             self.diagnostics.append(line)
             if self.diagnostics.count > 40 { self.diagnostics.removeFirst(self.diagnostics.count - 40) }
@@ -180,12 +188,18 @@ final class PlaybackController {
         skippedSegments = []
         activeSegment = nil
         upNextCountdown = nil
+        countdownDismissed = false
+        hasPlayed = false
+        // The previous episode's intro / credits times and lock-screen picture don't carry over.
+        segments = []
+        nowPlayingArtwork = nil
         let resumeSeconds: Double = {
             if let start { return start }
             let ticks = model.userData(for: target)?.playbackPositionTicks ?? target.resumeTicks
             guard ticks > 0, !(model.userData(for: target)?.played ?? false) else { return 0 }
             return max(0, Fmt.seconds(ticks) - Double(settings.resumeOffset))
         }()
+        openedAt = resumeSeconds
 
         do {
             // Full item (streams, chapters, trickplay) when the caller only had a list entry.
@@ -237,7 +251,13 @@ final class PlaybackController {
             player.setPlaybackRate(settings.defaultSpeed)
             loadExternalSubtitles(itemId: full.id, source: src)
             prepareTrickplay(full, source: src)
-            Task { segments = await client.mediaSegments(itemId: full.id) }
+            let generation = loadGeneration
+            Task { [weak self, client = self.client] in
+                let found = await client.mediaSegments(itemId: full.id)
+                // A late answer for an episode that's no longer playing is dropped.
+                guard let self, self.loadGeneration == generation else { return }
+                self.segments = found
+            }
 
             await client.reportStart(report())
             lastReport = Date()
@@ -289,18 +309,24 @@ final class PlaybackController {
             // The player can't open a bare .sup file: wrap the server's PGS stream in Matroska.
             let itemId = item.id
             let generation = loadGeneration
+            let language = stream.language ?? "und"
+            let index = stream.index
             Task { [weak self] in
                 do {
                     let (data, response) = try await URLSession.shared.data(from: url)
                     let code = (response as? HTTPURLResponse)?.statusCode ?? 0
-                    guard (200..<300).contains(code), let mks = PGSContainer.matroska(fromSUP: data, language: stream.language ?? "und") else {
-                        self?.diagnostics.append("[JellyReco] Subtitle \(stream.index): server answered HTTP \(code), \(data.count) bytes, not PGS")
+                    // Converting and writing the file happen off the main thread (it held up the
+                    // start of playback for large subtitle tracks).
+                    let file = try await Task.detached(priority: .userInitiated) { () -> URL? in
+                        guard (200..<300).contains(code), let mks = PGSContainer.matroska(fromSUP: data, language: language) else { return nil }
+                        let file = Self.subtitleDirectory.appendingPathComponent("\(itemId)-\(index).mks")
+                        try mks.write(to: file, options: .atomic)
+                        return file
+                    }.value
+                    guard let file else {
+                        self?.diagnostics.append("[JellyReco] Subtitle \(index): server answered HTTP \(code), \(data.count) bytes, not PGS")
                         return
                     }
-                    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("jellyreco-subs", isDirectory: true)
-                    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-                    let file = dir.appendingPathComponent("\(itemId)-\(stream.index).mks")
-                    try mks.write(to: file, options: .atomic)
                     guard let self, self.loadGeneration == generation else { return }
                     self.externalSubs.append(stream)
                     self.player.loadExternalSubtitle(file, selecting: nil)
@@ -316,6 +342,13 @@ final class PlaybackController {
         // It's the subtitle that should be on: select it as soon as it arrives.
         let wanted = request.subtitleIndex ?? source?.defaultSubtitleStreamIndex ?? -1
         if wanted == stream.index { pendingSubtitleSelection = stream.index }
+    }
+
+    /// Converted picture subtitles for this session (emptied when the player closes).
+    nonisolated static var subtitleDirectory: URL {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("jellyreco-subs", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
     }
 
     private func loadExternalSubtitles(itemId: String, source: MediaSourceInfo) {
@@ -348,7 +381,8 @@ final class PlaybackController {
         ticker = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 500_000_000)
-                await self?.tick()
+                guard let self else { return }   // the player is gone: stop (it used to loop forever)
+                await self.tick()
             }
         }
     }
@@ -364,6 +398,7 @@ final class PlaybackController {
             statusNote = nil
         }
         if state == .playing && playingSince == nil { playingSince = Date() }
+        if state == .playing { hasPlayed = true }
         // Track lists arrive in pieces: wait until subtitles are known (or 3 s of playback)
         // before choosing, otherwise the subtitle choice is made against an empty list.
         let expectsSubs = streams.contains(where: \.isSubtitle)
@@ -389,7 +424,7 @@ final class PlaybackController {
         if paused != lastPaused || Date().timeIntervalSince(lastReport) >= 10 {
             lastPaused = paused
             lastReport = Date()
-            if phase == .playing { await client.reportProgress(report()) }
+            if phase == .playing { reportProgressInBackground() }
             updateNowPlaying()
         }
     }
@@ -400,6 +435,7 @@ final class PlaybackController {
         if player.configuration.videoOutput == .sampleBuffer && !triedMetal {
             triedMetal = true
             statusNote = "Switching to the high-quality renderer…"
+            endSession(failed: true)
             rebuildPlayer(output: .metal)
             await open(item, start: at > 1 ? at : request.startSeconds, fallback: false)
             return
@@ -407,7 +443,7 @@ final class PlaybackController {
         // 3) The iPhone really can't play it: server conversion, only if allowed.
         if settings.transcodeFallback && !triedTranscode {
             triedTranscode = true
-            await client.reportStopped(report(failed: true))
+            endSession(failed: true)
             await open(item, start: at > 1 ? at : request.startSeconds, fallback: true)
             return
         }
@@ -485,6 +521,7 @@ final class PlaybackController {
         request.audioIndex = player.audioTracks.first(where: \.isSelected).flatMap { stream(for: $0)?.index }
         request.subtitleIndex = player.selectedSubtitle().flatMap { stream(for: $0)?.index } ?? request.subtitleIndex
         triedMetal = toMetal
+        endSession()
         rebuildPlayer(output: toMetal ? .metal : .sampleBuffer)
         await open(item, start: at, fallback: method == .transcode)
     }
@@ -570,7 +607,7 @@ final class PlaybackController {
 
     func selectAudio(_ id: MPVMediaTrackIdentifier) {
         player.selectTrack(id)
-        Task { await client.reportProgress(report()) }
+        reportProgressInBackground()
     }
 
     func selectSubtitle(_ id: MPVMediaTrackIdentifier?, secondary: Bool = false) {
@@ -582,7 +619,7 @@ final class PlaybackController {
         } else {
             player.disableTrack(.subtitle)
         }
-        Task { await client.reportProgress(report()) }
+        reportProgressInBackground()
     }
 
     /// Like Jellyfin and Swiftfin: the tracks chosen on the item page win; otherwise the server's
@@ -629,7 +666,7 @@ final class PlaybackController {
 
     func seek(to s: Double) {
         player.seek(to: .seconds(max(0, s)))
-        Task { await client.reportProgress(report()) }
+        reportProgressInBackground()
     }
 
     func jump(_ delta: Double) {
@@ -720,7 +757,7 @@ final class PlaybackController {
             skippedSegments.contains(seg.id) || settings.segmentAction(seg.type) == "none" ? nil : seg
         }
         // Credits with another episode queued: offer it now (Netflix-style).
-        if let current, current.type == "Outro", upNext != nil, settings.autoPlayNext, upNextCountdown == nil, !askStillWatching {
+        if let current, current.type == "Outro", upNext != nil, settings.autoPlayNext, upNextCountdown == nil, !askStillWatching, !countdownDismissed {
             beginCountdown()
         }
     }
@@ -749,7 +786,7 @@ final class PlaybackController {
 
     private func handleEnded() async {
         guard upNext != nil else { return }
-        if settings.autoPlayNext && !askStillWatching && upNextCountdown == nil { beginCountdown() }
+        if settings.autoPlayNext && !askStillWatching && upNextCountdown == nil && !countdownDismissed { beginCountdown() }
     }
 
     private func beginCountdown() {
@@ -774,6 +811,7 @@ final class PlaybackController {
     func cancelCountdown() {
         countdownTask?.cancel()
         upNextCountdown = nil
+        countdownDismissed = true   // stays on the credits until you pick the next episode yourself
     }
 
     func confirmStillWatching() {
@@ -787,7 +825,7 @@ final class PlaybackController {
         upNextCountdown = nil
         guard let next = queue.first else { return }
         autoplayStreak = auto ? autoplayStreak + 1 : 0
-        await client.reportStopped(report())
+        endSession()
         queue.removeFirst()
         request.audioIndex = nil
         request.subtitleIndex = nil
@@ -798,18 +836,28 @@ final class PlaybackController {
     }
 
     func playPrevious() async {
-        guard let sid = item.seriesId, let all = try? await client.episodes(seriesId: sid),
-              let i = all.firstIndex(where: { $0.id == item.id }), i > 0 else { return }
-        await client.reportStopped(report())
+        guard let sid = item.seriesId else { return }
+        // Just the neighbours of this episode, not the whole series.
+        var around = (try? await client.episodes(seriesId: sid, adjacentTo: item.id)) ?? []
+        if !around.contains(where: { $0.id == item.id }) { around = (try? await client.episodes(seriesId: sid)) ?? [] }
+        guard let i = around.firstIndex(where: { $0.id == item.id }), i > 0 else { return }
+        countdownTask?.cancel()
+        upNextCountdown = nil
+        endSession()
         queue.insert(item, at: 0)
-        await open(all[i - 1], start: 0, fallback: false)
+        request.audioIndex = nil
+        request.subtitleIndex = nil
+        request.mediaSourceId = nil
+        triedMetal = false
+        triedTranscode = false
+        await open(around[i - 1], start: 0, fallback: false)
     }
 
     /// Another episode chosen from the Episodes panel (the player stays open).
     func switchTo(_ episode: BaseItem) async {
         countdownTask?.cancel()
         upNextCountdown = nil
-        await client.reportStopped(report())
+        endSession()
         queue = await model.episodesAfter(episode)
         request.audioIndex = nil
         request.subtitleIndex = nil
@@ -827,23 +875,61 @@ final class PlaybackController {
     func retry() async {
         triedMetal = false
         triedTranscode = false
+        endSession(failed: true)
         await open(item, start: currentSeconds > 1 ? currentSeconds : request.startSeconds, fallback: false)
     }
 
     func retryWithConversion() async {
         triedTranscode = true
+        endSession(failed: true)
         await open(item, start: currentSeconds > 1 ? currentSeconds : request.startSeconds, fallback: true)
     }
 
+    /// Closing: the player stops at once and the screen can close; telling the server (which can
+    /// take up to the request timeout on a slow connection) happens in the background, and the
+    /// app's shelves refresh once the server has the final position.
     func stop() async {
+        guard !stopped else { return }
+        stopped = true
         ticker?.cancel()
         countdownTask?.cancel()
-        let final = report()
+        let finished = sessionEnd()
         player.stop()
-        await client.reportStopped(final)
-        if method == .transcode, let ps = playSessionId { await client.stopEncoding(playSessionId: ps) }
         clearNowPlaying()
-        model.playbackEnded(itemIds: playedIds)
+        if let routeObserver { NotificationCenter.default.removeObserver(routeObserver) }
+        routeObserver = nil
+        try? FileManager.default.removeItem(at: Self.subtitleDirectory)
+        let ids = playedIds
+        Task { [model = self.model] in
+            await finished()
+            model.playbackEnded(itemIds: ids)
+        }
+    }
+
+    /// Tells the server this play session is over (stop report, the server's conversion, a live
+    /// TV tuner) before another one starts: a renderer switch, a fallback, next / previous episode.
+    /// Without it the dashboard kept ghost sessions and the server went on converting the old file.
+    private func endSession(failed: Bool = false) {
+        let finished = sessionEnd(failed: failed)
+        Task { await finished() }
+    }
+
+    private func sessionEnd(failed: Bool = false) -> @Sendable () async -> Void {
+        let final = report(failed: failed)
+        let client = client
+        let transcoding = method == .transcode ? playSessionId : nil
+        let live = source?.liveStreamId
+        return {
+            await client.reportStopped(final)
+            if let transcoding { await client.stopEncoding(playSessionId: transcoding) }
+            if let live { await client.closeLiveStream(live) }
+        }
+    }
+
+    private func reportProgressInBackground() {
+        let r = report()
+        let client = client
+        Task { await client.reportProgress(r) }
     }
 
     // MARK: Reporting
@@ -855,7 +941,7 @@ final class PlaybackController {
             itemId: item.id,
             mediaSourceId: source?.id,
             playSessionId: playSessionId,
-            positionTicks: Fmt.ticks(currentSeconds),
+            positionTicks: Fmt.ticks(hasPlayed ? currentSeconds : openedAt),
             isPaused: player.isPaused,
             isMuted: player.isMuted,
             playMethod: method.rawValue,
@@ -863,7 +949,8 @@ final class PlaybackController {
             subtitleStreamIndex: subIdx,
             canSeek: player.isSeekable,
             playbackRate: player.playbackRate,
-            failed: failed ? true : nil
+            failed: failed ? true : nil,
+            liveStreamId: source?.liveStreamId
         )
     }
 
@@ -937,8 +1024,13 @@ final class TrickplayProvider {
     private let client: JellyfinClient
     private let itemId: String
     private let sourceId: String
+    /// The few most recent tile sheets (each is a large decoded image: keeping every sheet of a
+    /// long film used 100–200 MB), and sheets that failed (not asked for again on every redraw).
     private var sheets: [Int: UIImage] = [:]
+    private var recent: [Int] = []
     private var loading: Set<Int> = []
+    private var failed: Set<Int> = []
+    private let keep = 4
 
     init(client: JellyfinClient, itemId: String, sourceId: String, info: TrickplayInfo) {
         self.client = client
@@ -959,6 +1051,7 @@ final class TrickplayProvider {
             load(sheet)
             return nil
         }
+        if recent.last != sheet { recent.removeAll { $0 == sheet }; recent.append(sheet) }
         let within = index % perSheet
         let x = (within % info.tileWidth) * info.width
         let y = (within / info.tileWidth) * info.height
@@ -969,15 +1062,22 @@ final class TrickplayProvider {
     }
 
     private func load(_ sheet: Int) {
-        guard !loading.contains(sheet), let url = client.trickplayTileURL(itemId: itemId, mediaSourceId: sourceId, width: info.width, index: sheet) else { return }
+        guard !loading.contains(sheet), !failed.contains(sheet), let url = client.trickplayTileURL(itemId: itemId, mediaSourceId: sourceId, width: info.width, index: sheet) else { return }
         loading.insert(sheet)
         var request = URLRequest(url: url)
         request.setValue(client.authorizationHeader, forHTTPHeaderField: "Authorization")
         Task { [weak self] in
-            if let (data, _) = try? await URLSession.shared.data(for: request), let image = UIImage(data: data) {
-                self?.sheets[sheet] = image
+            guard let self else { return }
+            if let (data, response) = try? await URLSession.shared.data(for: request),
+               ((response as? HTTPURLResponse)?.statusCode ?? 200) < 400, let image = UIImage(data: data) {
+                self.sheets[sheet] = image
+                self.recent.removeAll { $0 == sheet }
+                self.recent.append(sheet)
+                while self.recent.count > self.keep { self.sheets[self.recent.removeFirst()] = nil }
+            } else {
+                self.failed.insert(sheet)
             }
-            self?.loading.remove(sheet)
+            self.loading.remove(sheet)
         }
     }
 }

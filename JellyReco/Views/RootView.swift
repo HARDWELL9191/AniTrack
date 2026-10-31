@@ -3,6 +3,7 @@ import SwiftUI
 
 struct RootView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         @Bindable var model = model
@@ -18,6 +19,13 @@ struct RootView: View {
         }
         .overlay {
             if model.isLocked { LockView() }
+        }
+        // Face ID lock: also when you come back to the app, not only at a cold start (not while a
+        // video keeps playing in the background or in picture in picture).
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .background, model.settings.requireFaceID, model.phase == .ready, model.playback == nil {
+                model.isLocked = true
+            }
         }
         .fullScreenCover(item: $model.playback) { request in
             PlayerScreen(request: request)

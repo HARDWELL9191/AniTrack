@@ -78,3 +78,41 @@ enum TitleKey {
         return t.unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) }.map(String.init).joined()
     }
 }
+
+// Lenient reading (My List / Not for me are shared with other devices and the PC app): only the
+// title's identity is required; any other field that's missing takes its default instead of
+// making the whole saved list unreadable. In an extension, so the memberwise initializer stays.
+extension ExternalTitle {
+    private enum Keys: String, CodingKey {
+        case source, sourceId, title, originalTitle, originalLanguage, year, overview, genres, tags, posterURL, backdropURL
+        case score, voteCount, popularity, episodes, seasons, runtime, imdbId, tvdbId, status, isAdult, ageRating, ageRatingCountry
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Keys.self)
+        func opt<T: Decodable>(_ type: T.Type, _ key: Keys) -> T? { (try? c.decodeIfPresent(type, forKey: key)) ?? nil }
+        self.init(source: try c.decode(Source.self, forKey: .source),
+                  sourceId: try c.decode(Int.self, forKey: .sourceId),
+                  title: opt(String.self, .title) ?? "",
+                  originalTitle: opt(String.self, .originalTitle),
+                  originalLanguage: opt(String.self, .originalLanguage),
+                  year: opt(Int.self, .year),
+                  overview: opt(String.self, .overview) ?? "",
+                  genres: opt([String].self, .genres) ?? [],
+                  tags: opt([String].self, .tags) ?? [],
+                  posterURL: opt(URL.self, .posterURL),
+                  backdropURL: opt(URL.self, .backdropURL),
+                  score: opt(Double.self, .score),
+                  voteCount: opt(Int.self, .voteCount),
+                  popularity: opt(Double.self, .popularity),
+                  episodes: opt(Int.self, .episodes),
+                  seasons: opt(Int.self, .seasons),
+                  runtime: opt(Int.self, .runtime),
+                  imdbId: opt(String.self, .imdbId),
+                  tvdbId: opt(Int.self, .tvdbId),
+                  status: opt(String.self, .status),
+                  isAdult: opt(Bool.self, .isAdult) ?? false,
+                  ageRating: opt(String.self, .ageRating),
+                  ageRatingCountry: opt(String.self, .ageRatingCountry))
+    }
+}

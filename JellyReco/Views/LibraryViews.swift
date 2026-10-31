@@ -153,6 +153,7 @@ struct LibraryView: View {
     var itemTypes: [ItemKind]? = nil
 
     @State private var items: [BaseItem] = []
+    @State private var reloadTask: Task<Void, Never>?
     @State private var total = 0
     @State private var isLoading = false
     @State private var sort: LibrarySort = .name
@@ -214,14 +215,14 @@ struct LibraryView: View {
             didInit = true
             sort = initialSort
             descending = initialSort.defaultDescending
-            await reload()
+            scheduleReload()
             if let client = model.client {
                 available = (try? await client.filters(parentId: library.id, types: types)) ?? QueryFiltersLegacy()
             }
         }
-        .onChange(of: sort) { _, new in descending = new.defaultDescending; Task { await reload() } }
-        .onChange(of: descending) { _, _ in Task { await reload() } }
-        .onChange(of: filters) { _, _ in Task { await reload() } }
+        .onChange(of: sort) { _, new in descending = new.defaultDescending; scheduleReload() }
+        .onChange(of: descending) { _, _ in scheduleReload() }
+        .onChange(of: filters) { _, _ in scheduleReload() }
         .sheet(isPresented: $showFilters) {
             FilterSheet(filters: $filters, available: available).presentationDetents([.medium, .large])
         }
@@ -322,6 +323,17 @@ struct LibraryView: View {
         q.officialRatings = Array(filters.ratings)
         q.tags = Array(filters.tags)
         return q
+    }
+
+    /// Changes that come together (a new sort also sets its direction; the first load sets both)
+    /// load the library once, not two or three times.
+    private func scheduleReload() {
+        reloadTask?.cancel()
+        reloadTask = Task {
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            await reload()
+        }
     }
 
     private func reload() async {

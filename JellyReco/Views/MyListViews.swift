@@ -166,11 +166,15 @@ struct MyListView: View {
         guard let client = model.client else { return }
         let ids = model.myList.compactMap(\.serverId).filter { serverItems[$0] == nil }
         guard !ids.isEmpty else { return }
-        var q = JellyfinClient.ItemQuery()
-        q.ids = ids
-        q.limit = ids.count
-        q.isMissing = nil
-        for item in (try? await client.items(q).items) ?? [] { serverItems[item.id] = item }
+        // In batches of 100: one request with every id got too long for the server past ~240
+        // titles, failed, and every server title then showed as removed.
+        for start in stride(from: 0, to: ids.count, by: 100) {
+            var q = JellyfinClient.ItemQuery()
+            q.ids = Array(ids[start..<min(start + 100, ids.count)])
+            q.limit = q.ids.count
+            q.isMissing = nil
+            for item in (try? await client.items(q).items) ?? [] { serverItems[item.id] = item }
+        }
     }
 }
 

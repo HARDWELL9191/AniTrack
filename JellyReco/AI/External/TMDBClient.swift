@@ -56,12 +56,16 @@ actor TMDBClient {
 
     private func rawGet(_ path: String, _ query: [String: String]) async throws -> Data {
         guard !key.isEmpty else { throw TMDBError.noKey }
-        var comps = URLComponents(string: "https://api.themoviedb.org/3" + path)!
+        // Paths carry ids from your server's metadata (editable: an IMDb id with a space in it used
+        // to crash here): encoded, and a bad address is an error instead of a crash.
+        let encoded = path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? path
+        guard var comps = URLComponents(string: "https://api.themoviedb.org/3" + encoded) else { throw URLError(.badURL) }
         var items = query.map { URLQueryItem(name: $0.key, value: $0.value) }
         items.append(URLQueryItem(name: "language", value: "en-US"))
         if !isBearer { items.append(URLQueryItem(name: "api_key", value: key)) }
         comps.queryItems = items
-        var request = URLRequest(url: comps.url!)
+        guard let url = comps.url else { throw URLError(.badURL) }
+        var request = URLRequest(url: url)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if isBearer { request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
         for attempt in 0..<4 {
@@ -224,7 +228,10 @@ actor TMDBClient {
 
     /// TMDB id for an IMDb or TVDB id.
     func find(externalId: String, source: String, tv: Bool) async -> Int? {
-        guard let data = try? await get("/find/\(externalId)", ["external_source": source]),
+        let id = externalId.trimmingCharacters(in: .whitespacesAndNewlines)
+        // IMDb ids are tt + digits, TVDB ids digits: anything else is skipped (falls back to search).
+        guard id.range(of: source == "imdb_id" ? #"^tt\d+$"# : #"^\d+$"#, options: .regularExpression) != nil else { return nil }
+        guard let data = try? await get("/find/\(id)", ["external_source": source]),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
         let list = json[tv ? "tv_results" : "movie_results"] as? [[String: Any]]
         return list?.first?["id"] as? Int

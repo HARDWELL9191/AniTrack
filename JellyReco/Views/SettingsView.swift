@@ -146,16 +146,14 @@ struct AccountsView: View {
                         }
                         .foregroundStyle(.primary)
                         .swipeActions {
-                            Button(role: .destructive) { model.store.removeUser(user.id, from: server.id) } label: {
+                            Button(role: .destructive) { model.removeSavedUser(user, from: server) } label: {
                                 Label("Remove", systemImage: "trash")
                             }
                         }
                     }
                     Button("Addresses…", systemImage: "network") { editingServer = server }
                     Button("Remove server", systemImage: "trash", role: .destructive) {
-                        let wasCurrent = server.id == model.store.currentServerId
-                        model.store.removeServer(server.id)
-                        if wasCurrent { model.signOutCurrentUser(revoke: false) }
+                        model.removeSavedServer(server)
                     }
                 } header: {
                     Text("\(server.name)\(server.version.map { " · \($0)" } ?? "")")
