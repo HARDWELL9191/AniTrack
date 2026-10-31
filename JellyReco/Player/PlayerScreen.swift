@@ -213,14 +213,10 @@ private struct PlayerContent: View {
 
     private var controls: some View {
         ZStack {
-            // Apple's soft top and bottom shading, only where the controls are.
-            VStack(spacing: 0) {
-                LinearGradient(colors: [.black.opacity(0.55), .clear], startPoint: .top, endPoint: .bottom).frame(height: 140)
-                Spacer()
-                LinearGradient(colors: [.clear, .black.opacity(0.65)], startPoint: .top, endPoint: .bottom).frame(height: 200)
-            }
-            .ignoresSafeArea()
-            .allowsHitTesting(false)
+            // Like Apple's player: the whole picture dims evenly while the controls are up.
+            Color.black.opacity(0.3)
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
 
             VStack(spacing: 0) {
                 topBar
@@ -239,9 +235,9 @@ private struct PlayerContent: View {
         HStack(alignment: .top) {
             GlassEffectContainer(spacing: 10) {
                 HStack(spacing: 10) {
-                    glassCircle("xmark", size: 44, action: close)
+                    glassCircle("xmark", size: 48, font: .title3, action: close)
                     if player.pictureInPicture.isSupported {
-                        glassCircle(player.pictureInPicture.isActive ? "pip.exit" : "pip.enter", size: 44) {
+                        glassCircle(player.pictureInPicture.isActive ? "pip.exit" : "pip.enter", size: 48, font: .title3) {
                             player.pictureInPicture.toggle()
                         }
                         .disabled(!player.pictureInPicture.isPossible)
@@ -253,7 +249,7 @@ private struct PlayerContent: View {
                 HStack(spacing: 10) {
                     VolumeCapsule(volume: volume)
                     MPVRoutePicker(player: player)
-                        .frame(width: 44, height: 44)
+                        .frame(width: 48, height: 48)
                         .glassEffect(.regular.interactive(), in: .circle)
                 }
             }
@@ -261,7 +257,7 @@ private struct PlayerContent: View {
     }
 
     private var transport: some View {
-        HStack(spacing: 44) {
+        HStack(spacing: 58) {
             transportButton("gobackward.\(settings.jumpBackward)", glyph: 28, size: 60) {
                 controller.jump(-Double(settings.jumpBackward))
                 scheduleHide()
@@ -313,23 +309,32 @@ private struct PlayerContent: View {
                     Text(controller.item.displayName).font(.headline).lineLimit(1)
                 }
                 Spacer()
-                GlassEffectContainer(spacing: 10) {
-                    HStack(spacing: 10) {
-                        // Next episode where the speed button was (speed is in the ⋯ menu now).
-                        if controller.item.kind == .episode {
-                            glassCircle("forward.end.fill", size: 44) {
-                                Task { await controller.playNext(auto: false) }
-                                scheduleHide()
-                            }
-                            .disabled(controller.upNext == nil)
-                            .opacity(controller.upNext == nil ? 0.4 : 1)
-                            .accessibilityLabel("Next episode")
+                // Like Apple's player: the buttons share one glass capsule (not a circle each).
+                HStack(spacing: 2) {
+                    // Next episode where the speed button was (speed is in the ⋯ menu now).
+                    if controller.item.kind == .episode {
+                        Button {
+                            Task { await controller.playNext(auto: false) }
+                            scheduleHide()
+                        } label: {
+                            Image(systemName: "forward.end.fill")
+                                .font(.system(size: 17, weight: .semibold))
+                                .frame(width: 44, height: 44)
+                                .contentShape(Rectangle())
                         }
-                        audioMenu
-                        subtitleMenu
-                        moreMenu
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.white)
+                        .disabled(controller.upNext == nil)
+                        .opacity(controller.upNext == nil ? 0.4 : 1)
+                        .accessibilityLabel("Next episode")
                     }
+                    audioMenu
+                    subtitleMenu
+                    moreMenu
                 }
+                .padding(.horizontal, 8)
+                .frame(height: 48)
+                .glassEffect(.regular.interactive(), in: .capsule)
             }
             AppleTimeline(controller: controller, scrubbing: $scrubbing, onInteract: scheduleHide)
         }
@@ -628,12 +633,15 @@ private struct AppleTimeline: View {
         let position = scrubbing ?? controller.currentSeconds
         let buffered = controller.player.bufferStatus.bufferedEnd.map { controller.seconds($0) } ?? position
         let active = scrubbing != nil
-        VStack(spacing: 6) {
+        HStack(spacing: 14) {
+            Text(Fmt.clock(position)).monospacedDigit()
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.6))
             GeometryReader { geo in
                 let w = geo.size.width
                 ZStack(alignment: .leading) {
-                    Capsule().fill(.white.opacity(0.25))
-                    Capsule().fill(.white.opacity(0.35)).frame(width: w * min(1, max(0, buffered / duration)))
+                    Capsule().fill(.white.opacity(0.3))
+                    Capsule().fill(.white.opacity(0.4)).frame(width: w * min(1, max(0, buffered / duration)))
                     Capsule().fill(.white).frame(width: w * min(1, max(0, position / duration)))
                     if model.settings.showChaptersOnSlider {
                         ForEach(Array(controller.chapters.enumerated()), id: \.offset) { _, ch in
@@ -644,7 +652,7 @@ private struct AppleTimeline: View {
                         }
                     }
                 }
-                .frame(height: active ? 12 : 6)
+                .frame(height: active ? 12 : 7)
                 .clipShape(Capsule())
                 .frame(maxHeight: .infinity)
                 .contentShape(Rectangle())
@@ -670,17 +678,13 @@ private struct AppleTimeline: View {
             }
             .frame(height: 28)
             .animation(.snappy(duration: 0.15), value: active)
-            HStack {
-                Text(Fmt.clock(position)).monospacedDigit()
-                if let chapter = controller.chapters.last(where: { $0.start <= position })?.title, controller.chapters.count > 1 {
-                    Text(chapter).lineLimit(1).foregroundStyle(.white.opacity(0.7))
-                }
-                Spacer()
-                Text("−\(Fmt.clock(max(0, duration - position)))").monospacedDigit()
-            }
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(.white.opacity(0.85))
+            Text("−\(Fmt.clock(max(0, duration - position)))").monospacedDigit()
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.6))
         }
+        .padding(.horizontal, 20)
+        .frame(height: 48)
+        .glassEffect(.regular, in: .capsule)
     }
 }
 
@@ -843,7 +847,7 @@ private struct VolumeCapsule: View {
     let volume: SystemVolume
     @State private var dragging = false
     @State private var dragStart: Float = 0
-    private let trackWidth: CGFloat = 92
+    private let trackWidth: CGFloat = 116
 
     private var symbol: String {
         switch volume.shown {
@@ -855,11 +859,7 @@ private struct VolumeCapsule: View {
     }
 
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: symbol)
-                .font(.system(size: 15, weight: .semibold))
-                .contentTransition(.symbolEffect(.replace))
-                .frame(width: 24, alignment: .leading)
+        HStack(spacing: 12) {
             ZStack(alignment: .leading) {
                 Capsule().fill(.white.opacity(0.25))
                 Capsule().fill(.white).frame(width: trackWidth * CGFloat(volume.shown))
@@ -876,10 +876,15 @@ private struct VolumeCapsule: View {
                     .onEnded { _ in dragging = false }
             )
             .animation(.easeOut(duration: 0.15), value: dragging)
+            Image(systemName: symbol)
+                .font(.system(size: 17, weight: .semibold))
+                .contentTransition(.symbolEffect(.replace))
+                .frame(width: 28, alignment: .trailing)
         }
         .foregroundStyle(.white)
-        .padding(.horizontal, 14)
-        .frame(height: 44)
+        .padding(.leading, 18)
+        .padding(.trailing, 14)
+        .frame(height: 48)
         .glassEffect(.regular.interactive(), in: .capsule)
     }
 }
@@ -902,7 +907,7 @@ private struct PlayerMenuButton: UIViewRepresentable {
 
     func makeUIView(context: Context) -> MenuButton {
         let button = MenuButton(type: .system)
-        var config = UIButton.Configuration.glass()
+        var config = UIButton.Configuration.plain()   // inside the shared glass capsule
         config.cornerStyle = .capsule
         config.baseForegroundColor = .white
         config.contentInsets = .zero
