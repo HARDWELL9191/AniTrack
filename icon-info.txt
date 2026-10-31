@@ -1,0 +1,55 @@
+== project reference for AppIcon.icon
+18:		3CF82C6089D0CAAA45B7AFF9 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 3A8DED9581E9250742ABE865 /* AppIcon.icon */; };
+74:		3A8DED9581E9250742ABE865 /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = wrapper.icon; path = AppIcon.icon; sourceTree = "<group>"; };
+150:				3A8DED9581E9250742ABE865 /* AppIcon.icon */,
+339:				3CF82C6089D0CAAA45B7AFF9 /* AppIcon.icon in Resources */,
+== Info.plist CFBundleIcons
+Dict {
+    CFBundlePrimaryIcon = Dict {
+        CFBundleIconFiles = Array {
+            AppIcon60x60
+        }
+        CFBundleIconName = AppIcon
+    }
+}
+== compiled icon renditions (Assets.car)
+{'AssetType': 'Color', 'Name': 'AppIcon_Assets/Color-1', 'Idiom': 'universal'}
+{'AssetType': 'Color', 'Name': 'AppIcon_Assets/Color-2', 'Idiom': 'universal'}
+{'AssetType': 'Color', 'Name': 'AppIcon_Assets/Color-3', 'Idiom': 'universal'}
+{'AssetType': 'Color', 'Name': 'AppIcon_Assets/Color-4', 'Idiom': 'universal'}
+{'AssetType': 'Color', 'Name': 'AppIcon_Assets/Color-5', 'Idiom': 'universal'}
+{'AssetType': 'Color', 'Name': 'AppIcon_Assets/Color-6', 'Idiom': 'universal'}
+{'AssetType': 'Icon Image', 'Name': 'AppIcon', 'RenditionName': 'AppIcon1024x1024_UIAppearanceAny_7D610123-2B8F-4B4D-B818-43F45B4D1A0C-11204-00000002E05AA393.png', 'PixelWidth': 1024, 'Idiom': 'phone'}
+{'AssetType': 'Icon Image', 'Name': 'AppIcon', 'RenditionName': 'AppIcon1024x1024_UIAppearanceAny_7D610123-2B8F-4B4D-B818-43F45B4D1A0C-11204-00000002E05AA393.png', 'PixelWidth': 1024, 'Idiom': 'pad'}
+{'AssetType': 'Icon Image', 'Name': 'AppIcon', 'RenditionName': 'AppIcon1024x1024_UIAppearanceDark_8D6F46DE-0921-49DC-B8E1-432F75B9BC72-11204-00000002E1399E85.png', 'Appearance': 'UIAppearanceDark', 'PixelWidth': 1024, 'Idiom': 'phone'}
+{'AssetType': 'Icon Image', 'Name': 'AppIcon', 'RenditionName': 'AppIcon1024x1024_UIAppearanceDark_8D6F46DE-0921-49DC-B8E1-432F75B9BC72-11204-00000002E1399E85.png', 'Appearance': 'UIAppearanceDark', 'PixelWidth': 1024, 'Idiom': 'pad'}
+{'AssetType': 'Icon Image', 'Name': 'AppIcon', 'RenditionName': 'AppIcon1024x1024_ISAppearanceTintable_26736018-F137-42FD-AF60-1BA252A37CF0-11204-00000002E2A01B2D.png', 'Appearance': 'ISAppearanceTintable', 'PixelWidth': 1024, 'Idiom': 'phone'}
+{'AssetType': 'Icon Image', 'Name': 'AppIcon', 'RenditionName': 'AppIcon1024x1024_ISAppearanceTintable_26736018-F137-42FD-AF60-1BA252A37CF0-11204-00000002E2A01B2D.png', 'Appearance': 'ISAppearanceTintable', 'PixelWidth': 1024, 'Idiom': 'pad'}
+{'AssetType': 'IconGroup', 'Name': 'AppIcon/Background', 'RenditionName': 'IconGroup', 'Appearance': 'UIAppearanceDark', 'Idiom': 'universal'}
+{'AssetType': 'IconGroup', 'Name': 'AppIcon/Background', 'RenditionName': 'IconGroup', 'Appearance': 'UIAppearanceLight', 'Idiom': 'universal'}
+{'AssetType': 'IconGroup', 'Name': 'AppIcon/Background', 'RenditionName': 'IconGroup', 'Appearance': 'ISAppearanceTintable', 'Idiom': 'universal'}
+{'AssetType': 'IconGroup', 'Name': 'AppIcon/Play', 'RenditionName': 'IconGroup', 'Appearance': 'UIAppearanceDark', 'Idiom': 'universal'}
+{'AssetType': 'IconGroup', 'Name': 'AppIcon/Play', 'RenditionName': 'IconGroup', 'Appearance': 'UIAppearanceLight', 'Idiom': 'universal'}
+{'AssetType': 'IconGroup', 'Name': 'AppIcon/Play', 'RenditionName': 'IconGroup', 'Appearance': 'ISAppearanceTintable', 'Idiom': 'universal'}
+{'AssetType': 'IconGroup', 'Name': 'AppIcon/Progress', 'RenditionName': 'IconGroup', 'Appearance': 'UIAppearanceDark', 'Idiom': 'universal'}
+{'AssetType': 'IconGroup', 'Name': 'AppIcon/Progress', 'RenditionName': 'IconGroup', 'Appearance': 'UIAppearanceLight', 'Idiom': 'universal'}
+{'AssetType': 'IconGroup', 'Name': 'AppIcon/Progress', 'RenditionName': 'IconGroup', 'Appearance': 'ISAppearanceTintable', 'Idiom': 'universal'}
+{'AssetType': 'IconGroup', 'Name': 'AppIcon/Track', 'RenditionName': 'IconGroup', 'Appearance': 'UIAppearanceDark', 'Idiom': 'universal'}
+{'AssetType': 'IconGroup', 'Name': 'AppIcon/Track', 'RenditionName': 'IconGroup', 'Appearance': 'UIAppearanceLight', 'Idiom': 'universal'}
+{'AssetType': 'IconGroup', 'Name': 'AppIcon/Track', 'RenditionName': 'IconGroup', 'Appearance': 'ISAppearanceTintable', 'Idiom': 'universal'}
+{'AssetType': 'IconImageStack', 'Name': 'AppIcon', 'RenditionName': 'AppIcon.iconstack', 'Appearance': 'UIAppearanceDark', 'Idiom': 'universal'}
+{'AssetType': 'IconImageStack', 'Name': 'AppIcon', 'RenditionName': 'AppIcon.iconstack', 'Appearance': 'UIAppearanceLight', 'Idiom': 'universal'}
+{'AssetType': 'IconImageStack', 'Name': 'AppIcon', 'RenditionName': 'AppIcon.iconstack', 'Appearance': 'ISAppearanceTintable', 'Idiom': 'universal'}
+{'AssetType': 'MultiSized Image', 'Name': 'AppIcon', 'Idiom': 'phone'}
+{'AssetType': 'MultiSized Image', 'Name': 'AppIcon', 'Idiom': 'pad'}
+{'AssetType': 'Named Gradient', 'Name': 'AppIcon_Assets/Gradient-1', 'Idiom': 'universal'}
+{'AssetType': 'Named Gradient', 'Name': 'AppIcon_Assets/system-dark', 'Idiom': 'universal'}
+{'AssetType': 'Vector', 'Name': 'AppIcon_Assets/01-Play', 'RenditionName': 'image.svg', 'Idiom': 'universal'}
+{'AssetType': 'Vector', 'Name': 'AppIcon_Assets/01-Play-Dark', 'RenditionName': 'image.svg', 'Idiom': 'universal'}
+{'AssetType': 'Vector', 'Name': 'AppIcon_Assets/02-Progress', 'RenditionName': 'image.svg', 'Idiom': 'universal'}
+{'AssetType': 'Vector', 'Name': 'AppIcon_Assets/02-Progress-Dark', 'RenditionName': 'image.svg', 'Idiom': 'universal'}
+{'AssetType': 'Vector', 'Name': 'AppIcon_Assets/03-Track', 'RenditionName': 'image.svg', 'Idiom': 'universal'}
+{'AssetType': 'Vector', 'Name': 'AppIcon_Assets/04-Background', 'RenditionName': 'image.svg', 'Idiom': 'universal'}
+== icon files in the app
+AppIcon60x60@2x.png
+AppIcon76x76@2x~ipad.png
