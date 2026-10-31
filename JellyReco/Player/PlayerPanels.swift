@@ -139,6 +139,7 @@ struct InfoCard: View {
                 VStack(alignment: .leading, spacing: 5) {
                     row("Method", controller.method == .directPlay ? "Direct play (original file)" : "Converted by server")
                     row("Renderer", controller.usesNativeOutput ? "Native (AVFoundation)" : "Metal (libplacebo)")
+                    row("A/V sync", controller.audioVideoDrift.map { String(format: "%+.3f s", $0) })
                     row("Container", (info.container ?? src?.container)?.uppercased())
                     row("Video", [info.videoCodec?.uppercased() ?? video?.codec?.uppercased(), video?.profile].compactMap { $0 }.joined(separator: " "))
                     if let d = info.dimensions, d.width > 0 { row("Resolution", "\(d.width)×\(d.height)") }

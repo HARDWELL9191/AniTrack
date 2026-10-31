@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // MARK: - All libraries
 
@@ -159,7 +160,7 @@ struct LibraryView: View {
     @State private var filters = LibraryFilters()
     @State private var available = QueryFiltersLegacy()
     @State private var showFilters = false
-    @State private var letter: String?
+    @State private var jumpTask: Task<Void, Never>?
     @State private var didInit = false
     @State private var generation = 0
 
@@ -178,24 +179,31 @@ struct LibraryView: View {
         }
     }
 
+    private var showsScrubber: Bool { model.settings.showLetterPicker && sort == .name && !items.isEmpty }
+
     var body: some View {
+        ScrollViewReader { proxy in
         ScrollView {
-            HStack(alignment: .top, spacing: 0) {
-                Group {
-                    if layout == .grid { grid } else { listLayout }
-                }
-                .frame(maxWidth: .infinity)
-                if model.settings.showLetterPicker && sort == .name && !items.isEmpty {
-                    LetterPicker(selected: $letter).padding(.trailing, 2)
-                }
+            Group {
+                if layout == .grid { grid } else { listLayout }
             }
+            .frame(maxWidth: .infinity)
+            .padding(.trailing, showsScrubber ? 22 : 0)
             if isLoading && items.isEmpty {
                 ProgressView().padding(40)
             } else if !isLoading && items.isEmpty {
-                ContentUnavailableView(filters.isActive || letter != nil ? "No matches" : "Empty library",
+                ContentUnavailableView(filters.isActive ? "No matches" : "Empty library",
                                        systemImage: "rectangle.stack",
                                        description: Text(filters.isActive ? "Try removing some filters." : ""))
             }
+        }
+        // Pinned to the screen (never scrolls away), like the index in Contacts.
+        .overlay(alignment: .trailing) {
+            if showsScrubber {
+                AlphabetScrubber { letter in jump(to: letter, proxy: proxy) }
+                    .padding(.trailing, 2)
+            }
+        }
         }
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { gridWidth = $0 }
         .navigationTitle(library.displayName)
@@ -214,7 +222,6 @@ struct LibraryView: View {
         .onChange(of: sort) { _, new in descending = new.defaultDescending; Task { await reload() } }
         .onChange(of: descending) { _, _ in Task { await reload() } }
         .onChange(of: filters) { _, _ in Task { await reload() } }
-        .onChange(of: letter) { _, _ in Task { await reload() } }
         .sheet(isPresented: $showFilters) {
             FilterSheet(filters: $filters, available: available).presentationDetents([.medium, .large])
         }
@@ -314,9 +321,6 @@ struct LibraryView: View {
         q.years = Array(filters.years)
         q.officialRatings = Array(filters.ratings)
         q.tags = Array(filters.tags)
-        if let letter {
-            if letter == "#" { q.nameLessThan = "A" } else { q.nameStartsWith = letter }
-        }
         return q
     }
 
@@ -333,6 +337,47 @@ struct LibraryView: View {
             total = page.totalRecordCount ?? items.count
         } catch {
             model.report(error)
+        }
+    }
+
+    /// Scrolls to the first title starting with `letter`. Jellyfin counts the titles sorted
+    /// before it (NameLessThan), so this works in libraries of any size; pages up to that
+    /// point are loaded first.
+    private func jump(to letter: String, proxy: ScrollViewProxy) {
+        jumpTask?.cancel()
+        jumpTask = Task {
+            guard let client = model.client else { return }
+            var index = 0
+            if letter != "#" {
+                var q = query(start: 0)
+                q.limit = 1
+                if descending {
+                    let next = letter == "Z" ? "{" : String(UnicodeScalar(letter.unicodeScalars.first!.value + 1)!)
+                    q.nameLessThan = next
+                    let before = (try? await client.items(q).totalRecordCount) ?? 0
+                    index = max(0, total - before)
+                } else {
+                    q.nameLessThan = letter
+                    index = (try? await client.items(q).totalRecordCount) ?? 0
+                }
+            } else if descending {
+                var q = query(start: 0)
+                q.limit = 1
+                q.nameLessThan = "A"
+                index = max(0, total - ((try? await client.items(q).totalRecordCount) ?? 0))
+            }
+            guard !Task.isCancelled else { return }
+            let gen = generation
+            while items.count <= index, items.count < total, !Task.isCancelled, gen == generation {
+                guard let page = try? await client.items(query(start: items.count)), gen == generation else { break }
+                let known = Set(items.map(\.id))
+                let fresh = (page.items ?? []).filter { !known.contains($0.id) }
+                if fresh.isEmpty { break }
+                items += fresh
+            }
+            guard !Task.isCancelled, !items.isEmpty else { return }
+            let target = items[min(index, items.count - 1)].id
+            withAnimation(.snappy(duration: 0.2)) { proxy.scrollTo(target, anchor: .top) }
         }
     }
 
@@ -392,28 +437,58 @@ struct ItemRow: View {
     }
 }
 
-struct LetterPicker: View {
-    @Binding var selected: String?
+/// The A–Z index on the right edge: drag through it (or tap) to jump; a haptic tick and a
+/// big letter show where you are.
+struct AlphabetScrubber: View {
+    let onSelect: (String) -> Void
     private let letters = ["#"] + (65...90).map { String(UnicodeScalar($0)!) }
+    @State private var active: String?
+    @State private var feedback = UISelectionFeedbackGenerator()
 
     var body: some View {
-        VStack(spacing: 1) {
-            ForEach(letters, id: \.self) { l in
-                Button {
-                    selected = selected == l ? nil : l
-                } label: {
+        GeometryReader { geo in
+            let rowHeight = min(17, max(9, (geo.size.height - 24) / CGFloat(letters.count)))
+            VStack(spacing: 0) {
+                ForEach(letters, id: \.self) { l in
                     Text(l)
-                        .font(.system(size: 11, weight: selected == l ? .heavy : .semibold))
-                        .frame(width: 20, height: 17)
-                        .foregroundStyle(selected == l ? .white : Theme.accent)
-                        .background { if selected == l { Circle().fill(Theme.accent) } }
+                        .font(.system(size: min(11, rowHeight - 2), weight: active == l ? .heavy : .semibold))
+                        .foregroundStyle(active == l ? Color.white : Theme.accent)
+                        .frame(width: 20, height: rowHeight)
+                        .background { if active == l { Circle().fill(Theme.accent) } }
                 }
-                .buttonStyle(.plain)
             }
+            .padding(.vertical, 6)
+            .glassEffect(.regular, in: .capsule)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { g in
+                        let i = Int(((g.location.y - 6) / rowHeight).rounded(.down))
+                        let l = letters[min(max(i, 0), letters.count - 1)]
+                        if l != active {
+                            active = l
+                            feedback.selectionChanged()
+                            onSelect(l)
+                        }
+                    }
+                    .onEnded { _ in withAnimation(.easeOut(duration: 0.3)) { active = nil } }
+            )
+            .overlay(alignment: .leading) {
+                if let active {
+                    Text(active)
+                        .font(.system(size: 34, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .frame(width: 64, height: 64)
+                        .glassEffect(.regular.tint(Theme.accent.opacity(0.6)), in: .circle)
+                        .offset(x: -76)
+                        .transition(.scale.combined(with: .opacity))
+                        .allowsHitTesting(false)
+                }
+            }
+            .frame(maxHeight: .infinity)
         }
-        .padding(.vertical, 6)
-        .glassEffect(.regular, in: .capsule)
-        .padding(.top, 4)
+        .frame(width: 22)
+        .padding(.vertical, 12)
     }
 }
 

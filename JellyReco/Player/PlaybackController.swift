@@ -85,7 +85,8 @@ final class PlaybackController {
         self.item = request.item
         self.queue = request.queue
         self.player = MPVPlayer(configuration: Self.configuration(settings: model.settings,
-                                                                  output: model.settings.playerEngine == .mpv ? .metal : .sampleBuffer))
+                                                                  output: .sampleBuffer))   // renderer is automatic (see open())
+        player.setDiagnosticsEnabled(true)
         attachLog()
     }
 
@@ -160,6 +161,7 @@ final class PlaybackController {
         guard !started else { return }
         started = true
         installRemoteCommands()
+        observeAudioRoute()
         await open(item, start: request.startSeconds, fallback: false)
         startTicker()
     }
@@ -212,10 +214,9 @@ final class PlaybackController {
             source = src
             streams = src.mediaStreams ?? full.mediaStreams ?? []
 
-            // The subtitle that will be shown is picture-based: use the Metal renderer from the start.
-            let subIndex = request.subtitleIndex ?? src.defaultSubtitleStreamIndex ?? -1
-            if usesNativeOutput, subIndex >= 0,
-               let sub = streams.first(where: { $0.index == subIndex && $0.isSubtitle }), Self.isPictureSubtitle(sub.codec) {
+            // Files with picture subtitles (PGS, VobSub, DVB) open on the renderer that is proven
+            // to draw them (CI render test), chosen before playback starts: never a switch mid-play.
+            if usesNativeOutput, streams.contains(where: { $0.isSubtitle && Self.isPictureSubtitle($0.codec) }) {
                 rebuildPlayer(output: .metal)
             }
 
@@ -350,7 +351,7 @@ final class PlaybackController {
             pendingSubtitleSelection = nil
             player.selectSubtitle(t.id)
         }
-        checkSubtitleRendering()
+        checkAudioSync()
         updateSegments()
 
         if state == .ended { await handleEnded() }
@@ -389,10 +390,50 @@ final class PlaybackController {
         player.stop()
         player = MPVPlayer(configuration: Self.configuration(settings: settings, output: output))
         player.pictureInPicture.allowsAutomaticStartFromInline = settings.pipAutomatically
+        player.setDiagnosticsEnabled(true)
         attachLog()
     }
 
     var usesNativeOutput: Bool { player.configuration.videoOutput == .sampleBuffer }
+
+    // MARK: Audio/video sync
+
+    /// mpv's own measurement of how far audio is from the picture (seconds).
+    var audioVideoDrift: Double? { player.playbackDiagnostics.audioVideoDriftSeconds }
+    @ObservationIgnored private var driftStrikes = 0
+    @ObservationIgnored private var lastAudioReload = Date.distantPast
+    @ObservationIgnored private var routeObserver: NSObjectProtocol?
+
+    /// Switching audio track and back fixed drift for you: it restarts the audio output.
+    /// Do the same automatically when mpv measures drift for 2 s, and after the audio
+    /// route changes (AirPods, AirPlay, speaker), whose latency differs.
+    private func checkAudioSync() {
+        guard player.state == .playing, let drift = audioVideoDrift, drift.isFinite else { driftStrikes = 0; return }
+        driftStrikes = abs(drift) > 0.12 ? driftStrikes + 1 : 0
+        if driftStrikes >= 4 { reloadAudio(reason: String(format: "audio was %+.2f s off", drift)) }
+    }
+
+    func reloadAudio(reason: String) {
+        guard Date().timeIntervalSince(lastAudioReload) > 15 else { return }
+        lastAudioReload = Date()
+        driftStrikes = 0
+        player.executeCommand("ao-reload")
+        diagnostics.append("[JellyReco] Restarted audio output (\(reason))")
+    }
+
+    private func observeAudioRoute() {
+        guard routeObserver == nil else { return }
+        routeObserver = NotificationCenter.default.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 700_000_000)
+                    self.lastAudioReload = .distantPast
+                    self.reloadAudio(reason: "audio route changed")
+                }
+            }
+        }
+    }
 
     /// Picture-based subtitles (Blu-ray PGS, DVD VobSub, DVB). mpv's Metal renderer always draws
     /// these; the native video layer doesn't reliably, so they get the Metal renderer.

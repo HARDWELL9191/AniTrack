@@ -117,6 +117,7 @@ private struct PlayerContent: View {
     }
 
     private var player: MPVPlayer { controller.player }
+    private var isLoading: Bool { controller.phase == .loading || player.state == .buffering || player.state == .loading }
     private var settings: AppSettings { model.settings }
 
     var body: some View {
@@ -137,8 +138,9 @@ private struct PlayerContent: View {
 
             if case .failed(let message) = controller.phase {
                 ErrorCard(message: message, controller: controller, close: close)
-            } else if controller.phase == .loading || player.state == .buffering || player.state == .loading {
-                LoadingBadge(note: controller.statusNote).allowsHitTesting(false)
+            } else if isLoading && !(showControls || panel != nil || menuOpen) {
+                // Controls hidden: just Apple's spinner, no box.
+                ProgressView().controlSize(.large).tint(.white).allowsHitTesting(false)
             }
 
             if locked {
@@ -230,11 +232,16 @@ private struct PlayerContent: View {
                 controller.jump(-Double(settings.jumpBackward))
                 scheduleHide()
             }
-            transportButton(player.isPaused ? "play.fill" : "pause.fill", glyph: 36, size: 84,
-                            // The play triangle's visual centre sits left of its box (Apple nudges it).
-                            nudge: player.isPaused ? 3 : 0) {
-                controller.togglePlay()
-                scheduleHide()
+            if isLoading {
+                // Like Apple: while loading, the spinner takes the play button's place.
+                ProgressView().controlSize(.large).tint(.white).frame(width: 84, height: 84)
+            } else {
+                transportButton(player.isPaused ? "play.fill" : "pause.fill", glyph: 36, size: 84,
+                                // The play triangle's visual centre sits left of its box (Apple nudges it).
+                                nudge: player.isPaused ? 3 : 0) {
+                    controller.togglePlay()
+                    scheduleHide()
+                }
             }
             transportButton("goforward.\(settings.jumpForward)", glyph: 28, size: 60) {
                 controller.jump(Double(settings.jumpForward))
@@ -326,12 +333,6 @@ private struct PlayerContent: View {
                         controller.selectSubtitle(t.id)
                     }
                 })
-            let secondaryId = controller.secondarySubtitle?.id
-            let second = UIMenu(title: "Second Subtitle", image: UIImage(systemName: "captions.bubble.fill"), options: .singleSelection, children:
-                [UIAction(title: "Off", state: secondaryId == nil ? .on : .off) { _ in controller.selectSubtitle(nil, secondary: true) }] +
-                subtitleOptions.map { t in
-                    UIAction(title: t.title, state: t.id == secondaryId ? .on : .off) { _ in controller.selectSubtitle(t.id, secondary: true) }
-                })
             let sizes: [(String, Double)] = [("Small", 0.8), ("Medium", 1.0), ("Large", 1.25), ("Extra Large", 1.5)]
             let size = UIMenu(title: "Subtitle Size", image: UIImage(systemName: "textformat.size"), options: .singleSelection, children:
                 sizes.map { name, value in
@@ -342,7 +343,7 @@ private struct PlayerContent: View {
                 })
             let extras = UIMenu(title: "", options: .displayInline, children: [
                 delayMenu("Subtitle Timing", symbol: "text.badge.checkmark", value: controller.subtitleDelay) { controller.setSubtitleDelay($0) },
-                second, size,
+                size,
             ])
             return UIMenu(children: [subs, extras])
         }
@@ -391,18 +392,9 @@ private struct PlayerContent: View {
                 aspect,
                 UIAction(title: "Lock Controls", image: UIImage(systemName: "lock")) { _ in withAnimation { locked = true } },
             ])
-            let native = controller.usesNativeOutput
-            let renderer = UIMenu(title: "Renderer", image: UIImage(systemName: "cpu"), options: .singleSelection, children: [
-                UIAction(title: "Native (PiP, Dolby Vision)", state: native ? .on : .off) { _ in
-                    Task { await controller.switchRenderer(toMetal: false) }
-                },
-                UIAction(title: "High Quality (Metal)", state: native ? .off : .on) { _ in
-                    Task { await controller.switchRenderer(toMetal: true) }
-                },
-            ])
             let info = UIAction(title: "Playback Info", image: UIImage(systemName: "info.circle")) { _ in openPanel(.info) }
             return UIMenu(children: [UIMenu(title: "", options: .displayInline, children: top), view,
-                                     UIMenu(title: "", options: .displayInline, children: [renderer, info])])
+                                     UIMenu(title: "", options: .displayInline, children: [info])])
         }
         .frame(width: 44, height: 44)
     }
@@ -1016,18 +1008,6 @@ private struct HUDView: View {
 
 private extension PlayerContent.HUD {
     var isJump: Bool { if case .jump = self { return true } else { return false } }
-}
-
-private struct LoadingBadge: View {
-    let note: String?
-    var body: some View {
-        VStack(spacing: 12) {
-            ProgressView().controlSize(.large).tint(.white)
-            if let note { Text(note).font(.subheadline.weight(.semibold)).foregroundStyle(.white) }
-        }
-        .padding(22)
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-    }
 }
 
 private struct ErrorCard: View {

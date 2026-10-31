@@ -267,13 +267,10 @@ struct PlayerSettingsView: View {
         @Bindable var s = model.settings
         Form {
             Section {
-                Picker("Video output", selection: $s.playerEngine) {
-                    ForEach(PlayerEngine.allCases) { Text($0.label).tag($0) }
-                }
                 Toggle("Hardware decoding", isOn: $s.hardwareDecoding)
                 Toggle("Server conversion as a fallback", isOn: $s.transcodeFallback)
             } footer: {
-                Text(s.playerEngine.footnote + " If a file still can't play on your iPhone, \(s.transcodeFallback ? "your server converts it as a last resort" : "you'll see why instead (the server never converts)").")
+                Text("Every file plays directly on your iPhone; the renderer is chosen automatically for each file. If a file still can't play on your iPhone, \(s.transcodeFallback ? "your server converts it as a last resort" : "you'll see why instead (the server never converts)").")
             }
             Section("Resume & jumping") {
                 Stepper("Rewind on resume: \(s.resumeOffset) s", value: $s.resumeOffset, in: 0...30)
@@ -540,7 +537,7 @@ struct LibrarySettingsView: View {
                 Picker("Posters", selection: $s.libraryPosterStyle) { ForEach(PosterStyle.allCases) { Text($0.label).tag($0) } }
                 Stepper("Columns: \(s.gridColumns)", value: $s.gridColumns, in: 2...6)
                 Toggle("Remember layout per library", isOn: $s.rememberLayoutPerLibrary)
-                Toggle("A–Z letter picker", isOn: $s.showLetterPicker)
+                Toggle("A–Z scrubber", isOn: $s.showLetterPicker)
                 Toggle("Random button", isOn: $s.showRandomButton)
             }
             Section("Item pages") {
