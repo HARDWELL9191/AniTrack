@@ -1,8 +1,9 @@
-name: JellyRec PC
+name: JellyReco PC
 
 # Windows on Arm (.exe installer) and Linux x86_64 (AppImage) from the same commit, in one run:
 # both platforms always ship together, with the same version number (1.0.<run number>), and the
-# "JellyRec PC (latest build)" release holds both files.
+# "JellyReco PC (latest build)" release holds both files. (The file keeps its old name so the
+# build numbers carry on; GitHub counts them per workflow file.)
 
 on:
   push:
@@ -13,7 +14,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: jellyrec-pc-${{ github.ref }}
+  group: jellyreco-pc-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -313,7 +314,7 @@ jobs:
         with:
           name: JellyReco-Linux-x86_64
           path: out
-      - name: Publish "JellyRec PC (latest build)" with both files
+      - name: Publish "JellyReco PC (latest build)" with both files
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -322,6 +323,7 @@ jobs:
           chmod +x out/JellyReco-x86_64.AppImage
           NOTES="Version 1.0.${{ github.run_number }} · $(date -u '+%Y-%m-%d %H:%M UTC') · ${GITHUB_SHA::7}
           Windows on Arm: JellyReco-Setup-arm64.exe · Linux x86_64: JellyReco-x86_64.AppImage"
-          gh release delete jellyrec-pc-latest --yes --cleanup-tag -R "$GITHUB_REPOSITORY" 2>/dev/null || true
-          gh release create jellyrec-pc-latest out/JellyReco-Setup-arm64.exe out/JellyReco-x86_64.AppImage -R "$GITHUB_REPOSITORY" \
-            --target "$GITHUB_SHA" --title "JellyRec PC 1.0.${{ github.run_number }} (latest build)" --notes "$NOTES" --prerelease
+          gh release delete jellyreco-pc-latest --yes --cleanup-tag -R "$GITHUB_REPOSITORY" 2>/dev/null || true
+          gh release delete jellyrec-pc-latest --yes --cleanup-tag -R "$GITHUB_REPOSITORY" 2>/dev/null || true   # the old, misnamed one
+          gh release create jellyreco-pc-latest out/JellyReco-Setup-arm64.exe out/JellyReco-x86_64.AppImage -R "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" --title "JellyReco PC 1.0.${{ github.run_number }} (latest build)" --notes "$NOTES" --prerelease
