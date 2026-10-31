@@ -129,6 +129,7 @@ private struct PlayerContent: View {
     @State private var hideTask: Task<Void, Never>?
     @State private var panel: PlayerPanel?
     @State private var locked = false
+    @State private var layout = ScreenLayout(landscape: true, safe: EdgeInsets())
     /// Playback info stays on screen (also when the controls hide) until its X is tapped, as on the PC.
     @State private var showInfo = false
     /// Rotation lock from the ⋯ menu (OrientationLock keeps the actual mask).
@@ -204,6 +205,11 @@ private struct PlayerContent: View {
         .animation(.easeOut(duration: 0.2), value: hud)
         .animation(.snappy, value: panel)
         .animation(.snappy, value: showInfo)
+        // Measured on a view that fills the whole screen, so it sees the real safe area insets.
+        .background {
+            Color.clear.ignoresSafeArea()
+                .onGeometryChange(for: ScreenLayout.self) { ScreenLayout(landscape: $0.size.width > $0.size.height, safe: $0.safeAreaInsets) } action: { layout = $0 }
+        }
         .onAppear { scheduleHide() }
         .onChange(of: player.isPaused) { _, paused in if paused { hideTask?.cancel() } else { scheduleHide() } }
         .onChange(of: menuOpen) { _, open in if open { hideTask?.cancel() } else { scheduleHide() } }
@@ -224,8 +230,13 @@ private struct PlayerContent: View {
                 if let panel, panel != .episodes { panelView(panel).padding(.bottom, 12) }
                 bottomBar
             }
-            .padding(.horizontal, 24)
-            .padding(.vertical, 14)
+            // Measured from Apple's player: in landscape the controls reach out to 38 pt from the
+            // screen's sides (past the safe area) and sit 24 pt from the top and bottom edges; in
+            // portrait they stay clear of the Dynamic Island and the home indicator.
+            .padding(.horizontal, layout.landscape ? 38 : 16)
+            .padding(.top, layout.landscape ? 24 : layout.safe.top + 8)
+            .padding(.bottom, layout.landscape ? 24 : layout.safe.bottom + 8)
+            .ignoresSafeArea()
         }
         .foregroundStyle(.white)
         .tint(.white)
@@ -233,11 +244,11 @@ private struct PlayerContent: View {
 
     private var topBar: some View {
         HStack(alignment: .top) {
-            GlassEffectContainer(spacing: 10) {
-                HStack(spacing: 10) {
-                    glassCircle("xmark", size: 48, font: .title3, action: close)
+            GlassEffectContainer(spacing: 12) {
+                HStack(spacing: 12) {
+                    glassCircle("xmark", size: 44, font: .title3, action: close)
                     if player.pictureInPicture.isSupported {
-                        glassCircle(player.pictureInPicture.isActive ? "pip.exit" : "pip.enter", size: 48, font: .title3) {
+                        glassCircle(player.pictureInPicture.isActive ? "pip.exit" : "pip.enter", size: 44, font: .title3) {
                             player.pictureInPicture.toggle()
                         }
                         .disabled(!player.pictureInPicture.isPossible)
@@ -245,11 +256,11 @@ private struct PlayerContent: View {
                 }
             }
             Spacer()
-            GlassEffectContainer(spacing: 10) {
-                HStack(spacing: 10) {
+            GlassEffectContainer(spacing: 12) {
+                HStack(spacing: 12) {
                     VolumeCapsule(volume: volume)
                     MPVRoutePicker(player: player)
-                        .frame(width: 48, height: 48)
+                        .frame(width: 44, height: 44)
                         .glassEffect(.regular.interactive(), in: .circle)
                 }
             }
@@ -257,23 +268,23 @@ private struct PlayerContent: View {
     }
 
     private var transport: some View {
-        HStack(spacing: 58) {
-            transportButton("gobackward.\(settings.jumpBackward)", glyph: 28, size: 60) {
+        HStack(spacing: 64) {
+            transportButton("gobackward.\(settings.jumpBackward)", glyph: 30, size: 64) {
                 controller.jump(-Double(settings.jumpBackward))
                 scheduleHide()
             }
             if isLoading {
                 // Like Apple: while loading, the spinner takes the play button's place.
-                ProgressView().controlSize(.large).tint(.white).frame(width: 84, height: 84)
+                ProgressView().controlSize(.large).tint(.white).frame(width: 92, height: 92)
             } else {
-                transportButton(player.isPaused ? "play.fill" : "pause.fill", glyph: 36, size: 84,
+                transportButton(player.isPaused ? "play.fill" : "pause.fill", glyph: 42, size: 92,
                                 // The play triangle's visual centre sits left of its box (Apple nudges it).
                                 nudge: player.isPaused ? 3 : 0) {
                     controller.togglePlay()
                     scheduleHide()
                 }
             }
-            transportButton("goforward.\(settings.jumpForward)", glyph: 28, size: 60) {
+            transportButton("goforward.\(settings.jumpForward)", glyph: 30, size: 64) {
                 controller.jump(Double(settings.jumpForward))
                 scheduleHide()
             }
@@ -310,7 +321,7 @@ private struct PlayerContent: View {
                 }
                 Spacer()
                 // Like Apple's player: the buttons share one glass capsule (not a circle each).
-                HStack(spacing: 2) {
+                HStack(spacing: 10) {
                     // Next episode where the speed button was (speed is in the ⋯ menu now).
                     if controller.item.kind == .episode {
                         Button {
@@ -332,8 +343,8 @@ private struct PlayerContent: View {
                     subtitleMenu
                     moreMenu
                 }
-                .padding(.horizontal, 8)
-                .frame(height: 48)
+                .padding(.horizontal, 2)
+                .frame(height: 44)
                 .glassEffect(.regular.interactive(), in: .capsule)
             }
             AppleTimeline(controller: controller, scrubbing: $scrubbing, onInteract: scheduleHide)
@@ -633,15 +644,15 @@ private struct AppleTimeline: View {
         let position = scrubbing ?? controller.currentSeconds
         let buffered = controller.player.bufferStatus.bufferedEnd.map { controller.seconds($0) } ?? position
         let active = scrubbing != nil
-        HStack(spacing: 14) {
+        HStack(spacing: 12) {
             Text(Fmt.clock(position)).monospacedDigit()
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.6))
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.45))
             GeometryReader { geo in
                 let w = geo.size.width
                 ZStack(alignment: .leading) {
-                    Capsule().fill(.white.opacity(0.3))
-                    Capsule().fill(.white.opacity(0.4)).frame(width: w * min(1, max(0, buffered / duration)))
+                    Capsule().fill(.white.opacity(0.38))
+                    Capsule().fill(.white.opacity(0.5)).frame(width: w * min(1, max(0, buffered / duration)))
                     Capsule().fill(.white).frame(width: w * min(1, max(0, position / duration)))
                     if model.settings.showChaptersOnSlider {
                         ForEach(Array(controller.chapters.enumerated()), id: \.offset) { _, ch in
@@ -652,7 +663,7 @@ private struct AppleTimeline: View {
                         }
                     }
                 }
-                .frame(height: active ? 12 : 7)
+                .frame(height: active ? 12 : 7.5)
                 .clipShape(Capsule())
                 .frame(maxHeight: .infinity)
                 .contentShape(Rectangle())
@@ -679,11 +690,11 @@ private struct AppleTimeline: View {
             .frame(height: 28)
             .animation(.snappy(duration: 0.15), value: active)
             Text("−\(Fmt.clock(max(0, duration - position)))").monospacedDigit()
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.6))
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.45))
         }
-        .padding(.horizontal, 20)
-        .frame(height: 48)
+        .padding(.horizontal, 16)
+        .frame(height: 44)
         .glassEffect(.regular, in: .capsule)
     }
 }
@@ -847,7 +858,7 @@ private struct VolumeCapsule: View {
     let volume: SystemVolume
     @State private var dragging = false
     @State private var dragStart: Float = 0
-    private let trackWidth: CGFloat = 116
+    private let trackWidth: CGFloat = 140
 
     private var symbol: String {
         switch volume.shown {
@@ -859,12 +870,12 @@ private struct VolumeCapsule: View {
     }
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 14) {
             ZStack(alignment: .leading) {
-                Capsule().fill(.white.opacity(0.25))
+                Capsule().fill(.white.opacity(0.42))
                 Capsule().fill(.white).frame(width: trackWidth * CGFloat(volume.shown))
             }
-            .frame(width: trackWidth, height: dragging ? 9 : 5)
+            .frame(width: trackWidth, height: dragging ? 11 : 7.5)
             .frame(height: 44)
             .contentShape(Rectangle())
             .gesture(
@@ -882,9 +893,9 @@ private struct VolumeCapsule: View {
                 .frame(width: 28, alignment: .trailing)
         }
         .foregroundStyle(.white)
-        .padding(.leading, 18)
-        .padding(.trailing, 14)
-        .frame(height: 48)
+        .padding(.leading, 13)
+        .padding(.trailing, 10)
+        .frame(height: 44)
         .glassEffect(.regular.interactive(), in: .capsule)
     }
 }
@@ -1056,4 +1067,10 @@ private struct StillWatchingCard: View {
         .padding(26)
         .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
     }
+}
+
+/// Orientation and safe area of the player's screen (where the controls go).
+private struct ScreenLayout: Equatable {
+    var landscape: Bool
+    var safe: EdgeInsets
 }
