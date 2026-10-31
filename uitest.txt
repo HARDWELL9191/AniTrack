@@ -1,0 +1,96 @@
+Test Case '-[JellyRecoUITests.SettingsPagesUITests testDashboardMenuLikeDesktop]' started.
+RESULT dashboard missing items: []
+Test Case '-[JellyRecoUITests.SettingsPagesUITests testDashboardMenuLikeDesktop]' passed (64.223 seconds).
+Test Case '-[JellyRecoUITests.SettingsPagesUITests testLongPressPreviewKeepsText]' started.
+RESULT server age bubble: 13+
+RESULT long press menu shown: true
+Test Case '-[JellyRecoUITests.SettingsPagesUITests testLongPressPreviewKeepsText]' passed (17.176 seconds).
+Test Case '-[JellyRecoUITests.SettingsPagesUITests testSettingsSectionsLikeDesktop]' started.
+RESULT settings missing: []
+Test Case '-[JellyRecoUITests.SettingsPagesUITests testSettingsSectionsLikeDesktop]' passed (158.204 seconds).
+Test Case '-[JellyRecoUITests.SettingsPagesUITests testStartScreenBranding]' started.
+Test Case '-[JellyRecoUITests.SettingsPagesUITests testStartScreenBranding]' passed (16.344 seconds).
+Test Case '-[JellyRecoUITests.SettingsPagesUITests testTranscodingQuickSyncLikeJellyfin]' started.
+RESULT transcoding qsv switch H264: 1 (expected 1)
+RESULT transcoding qsv switch HEVC: 1 (expected 1)
+RESULT transcoding qsv switch MPEG2: 1 (expected 1)
+RESULT transcoding qsv switch VC1: 1 (expected 1)
+RESULT transcoding qsv switch VP8: 0 (expected 0)
+RESULT transcoding qsv switch VP9: 1 (expected 1)
+RESULT transcoding qsv switch AV1: 1 (expected 1)
+RESULT transcoding qsv switch HEVC 10bit: 1 (expected 1)
+RESULT transcoding qsv switch VP9 10bit: 1 (expected 1)
+RESULT VP8 after tap: 1; H264 still 1
+RESULT dropdown label: Hardware acceleration, Intel Quicksync (QSV) value:  frame (175.33333333333334, 345.0, 194.66666666666666, 34.333333333333314) title frame (32.0, 341.0, 93.33333333333333, 42.333333333333314)
+RESULT after NVENC: MPEG4 true, NVDEC true, Save enabled true
+Test Case '-[JellyRecoUITests.SettingsPagesUITests testTranscodingQuickSyncLikeJellyfin]' passed (97.319 seconds).
+Test Case '-[JellyRecoUITests.TMDBKeyCardUITests testFakeKeyShowsTMDBError]' started.
+RESULT fake key: error shown -> TMDB didn't accept the key: Invalid API key: You must be granted a valid key.. Paste the API Read Access Token (the long one) or the API key.
+Test Case '-[JellyRecoUITests.TMDBKeyCardUITests testFakeKeyShowsTMDBError]' passed (29.754 seconds).
+Test Case '-[JellyRecoUITests.TMDBKeyCardUITests testOldBugReproduces]' started.
+RESULT old bug: card STILL SHOWN, no error (= reported symptom); STATE: For You sees no key
+Test Case '-[JellyRecoUITests.TMDBKeyCardUITests testOldBugReproduces]' passed (37.713 seconds).
+Test Case '-[JellyRecoUITests.TMDBKeyCardUITests testValidKeyStartsForYou]' started.
+RESULT valid key: card replaced by For You; STATE: For You sees the key
+Test Case '-[JellyRecoUITests.TMDBKeyCardUITests testValidKeyStartsForYou]' passed (24.532 seconds).
+** TEST SUCCEEDED **
+    t =    12.08s     Checking `Expect predicate `existsNoRetry == 1` for object SecureTextField (First Match)`
+    t =    12.09s         Checking existence of `SecureTextField (First Match)`
+    t =    13.32s Tap SecureTextField (First Match)
+    t =    13.32s     Wait for com.tim.jellyreco to idle
+    t =    13.33s     Find the SecureTextField (First Match)
+    t =    14.20s     Check for interrupting elements affecting "TMDB API key or read access token" SecureTextField
+    t =    14.36s     Synthesize event
+    t =    14.73s     Wait for com.tim.jellyreco to idle
+<unknown>:0: warning: -[JellyRecoUITests.TMDBKeyCardUITests testValidKeyStartsForYou] : Invalid frame dimension (negative or non-finite).
+    t =    16.06s Type 'uitestvalidkey0000...' into "TMDB API key or read access token" SecureTextField
+    t =    16.06s     Wait for com.tim.jellyreco to idle
+    t =    16.80s     Find the "TMDB API key or read access token" SecureTextField
+    t =    18.13s     Check for interrupting elements affecting "TMDB API key or read access token" SecureTextField
+    t =    18.30s     Synthesize event
+    t =    19.08s     Wait for com.tim.jellyreco to idle
+    t =    19.08s Find the Target Application 'com.tim.jellyreco'
+    t =    19.56s Added attachment named 'foryou-1-typed'
+    t =    19.56s Waiting 5.0s for "Save and find picks" Button to exist
+    t =    20.60s     Checking `Expect predicate `existsNoRetry == 1` for object "Save and find picks" Button`
+    t =    20.60s         Checking existence of `"Save and find picks" Button`
+    t =    20.75s Tap "Save and find picks" Button
+    t =    20.75s     Wait for com.tim.jellyreco to idle
+    t =    20.78s     Find the "Save and find picks" Button
+    t =    20.94s     Check for interrupting elements affecting "Save and find picks" Button
+    t =    21.05s     Synthesize event
+    t =    21.06s         Scroll element to visible
+    t =    21.07s         Find the "Save and find picks" Button
+    t =    21.26s         Computed hit point {65.800000503659248, 382.166666738689} after scrolling to visible
+    t =    21.63s     Wait for com.tim.jellyreco to idle
+    t =    21.92s Waiting 10.0s for SecureTextField (First Match) to not exist
+    t =    22.96s     Checking `Expect predicate `existsNoRetry == 0` for object SecureTextField (First Match)`
+    t =    22.96s         Checking existence of `SecureTextField (First Match)`
+    t =    23.54s Find the Target Application 'com.tim.jellyreco'
+    t =    23.93s Added attachment named 'valid-key-after'
+    t =    23.93s Find the "tmdb-state" StaticText
+RESULT valid key: card replaced by For You; STATE: For You sees the key
+    t =    24.08s Tear Down
+Test Case '-[JellyRecoUITests.TMDBKeyCardUITests testValidKeyStartsForYou]' passed (24.532 seconds).
+Test Suite 'TMDBKeyCardUITests' passed at 2026-10-31 19:33:32.550.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 91.999 (92.002) seconds
+Test Suite 'JellyRecoUITests.xctest' passed at 2026-10-31 19:33:32.552.
+	 Executed 8 tests, with 0 failures (0 unexpected) in 445.266 (445.283) seconds
+Test Suite 'All tests' passed at 2026-10-31 19:33:32.553.
+	 Executed 8 tests, with 0 failures (0 unexpected) in 445.266 (445.297) seconds
+2026-10-31 19:33:34.140 xcodebuild[86921:195617] [MT] IDESchemeActionSDKRecord: operatingSystemBuild = <DVTBuildVersion 24A94232>, error = invalidDigitCount(94232).
+2026-10-31 19:33:34.203 xcodebuild[86921:195617] [MT] IDESchemeActionSDKRecord: operatingSystemBuild = <DVTBuildVersion 24A94232>, error = invalidDigitCount(94232).
+2026-10-31 19:33:34.216 xcodebuild[86921:195617] [MT] IDESchemeActionSDKRecord: operatingSystemBuild = <DVTBuildVersion 24A94232>, error = invalidDigitCount(94232).
+2026-10-31 19:33:34.543 xcodebuild[86921:195617] [MT] IDESchemeActionSDKRecord: operatingSystemBuild = <DVTBuildVersion 24A94232>, error = invalidDigitCount(94232).
+2026-10-31 19:33:34.543 xcodebuild[86921:195617] [MT] IDESchemeActionSDKRecord: operatingSystemBuild = <DVTBuildVersion 24A94232>, error = invalidDigitCount(94232).
+2026-10-31 19:33:34.581 xcodebuild[86921:195617] [MT] IDESchemeActionSDKRecord: operatingSystemBuild = <DVTBuildVersion 24A94232>, error = invalidDigitCount(94232).
+2026-10-31 19:34:32.499 xcodebuild[86921:195617] [MT] IDETestOperationsObserverDebug: 561.885 elapsed -- Testing started completed.
+2026-10-31 19:34:32.499 xcodebuild[86921:195617] [MT] IDETestOperationsObserverDebug: 0.000 sec, +0.000 sec -- start
+2026-10-31 19:34:32.499 xcodebuild[86921:195617] [MT] IDETestOperationsObserverDebug: 561.885 sec, +561.885 sec -- end
+
+Test session results, code coverage, and logs:
+	/Users/runner/work/AniTrack/AniTrack/uitest.xcresult
+
+** TEST SUCCEEDED **
+
+Testing started
