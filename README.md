@@ -23,4 +23,8 @@ The **Build JellyReco** workflow runs on every push to the `jellyfin` branch:
 - **build** produces `JellyReco-ipa` (unsigned; sideload with AltStore like AniReco).
 - **formats** generates test files in the hard formats and plays every audio and subtitle track with the exact libmpv build the app ships; see the `format-test` log.
 
+**AltStore source:** every build also updates `source.json` on the `altstore` branch. Add this source in AltStore and new builds show up as updates (the version is `1.0.<run number>`, so each build is newer than the last):
+
+`https://raw.githubusercontent.com/HARDWELL9191/anitrack/altstore/source.json`
+
 Add `custom-icon.png` to the repo root to use your own icon.
