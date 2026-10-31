@@ -68,7 +68,8 @@ export interface Settings {
   preferredSubLang: string;
   subtitleStyle: SubtitleStyle;
   trickplay: boolean;
-  resumeBehavior: "ask" | "resume" | "start";
+  /** Where a started video plays from: where you left off (default, like the iPhone) or the start. */
+  resumeBehavior: "resume" | "start";
   pauseOnMinimize: boolean;
   screenshotFolder: string;
   showClock: boolean;
@@ -154,7 +155,7 @@ export const DEFAULT_SETTINGS: Settings = {
   preferredSubLang: "",
   subtitleStyle: DEFAULT_SUB_STYLE,
   trickplay: true,
-  resumeBehavior: "ask",
+  resumeBehavior: "resume",
   pauseOnMinimize: false,
   screenshotFolder: "",
   showClock: true,
@@ -231,6 +232,7 @@ export function mergeServerSettings(local: Settings, server: Record<string, unkn
   const m = merged as unknown as Settings;
   return {
     ...m,
+    resumeBehavior: m.resumeBehavior === "start" ? "start" : "resume",   // the old "ask" choice resumes
     segmentActions: { ...DEFAULT_SETTINGS.segmentActions, ...(m.segmentActions ?? {}) },
     subtitleStyle: { ...DEFAULT_SUB_STYLE, ...(m.subtitleStyle ?? {}) },
   };
@@ -244,6 +246,7 @@ export function loadSettings(): Settings {
     return {
       ...structuredClone(DEFAULT_SETTINGS),
       ...saved,
+      resumeBehavior: saved.resumeBehavior === "start" ? "start" : "resume",   // the old "ask" choice resumes
       segmentActions: { ...DEFAULT_SETTINGS.segmentActions, ...(saved.segmentActions ?? {}) },
       subtitleStyle: { ...DEFAULT_SUB_STYLE, ...(saved.subtitleStyle ?? {}) },
     };

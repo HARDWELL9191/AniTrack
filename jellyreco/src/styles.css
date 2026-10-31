@@ -1242,3 +1242,13 @@ html.platform-linux .mono { font-family: "JetBrains Mono", "Cascadia Mono", "Dej
 .glass-icon.green { background-color: rgba(52, 199, 89, 0.55); }
 .bubble-in { animation: bubble-in 0.2s ease-out; }
 @keyframes bubble-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* MARK: Linux player: instant hover
+   With a video playing, every repaint of the page is composited with the video underneath, so
+   hover colors that fade in over 0.15–0.2 s took that many repaints and felt delayed. In the
+   player on Linux the color changes at once; only movement and fades (transform / opacity, done on
+   the GPU) still animate. */
+html.platform-linux.video-mode .player :is(button, [role="button"], .pd-button, .glass-button, .round-button, .menu-item, .select-button, .segmented button, .player-panel *) {
+  transition-property: opacity, transform !important;
+  background-image: none;
+}

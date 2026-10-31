@@ -134,7 +134,6 @@ export class PlayerController {
   private lastSubLang: string | null = null;
   private upNextDismissed = false;
   /** Set by the UI: shows "Resume from …?" and resolves true to resume. */
-  askResume: ((seconds: number, item: Item) => Promise<boolean | null>) | null = null;
   onClose: (() => void) | null = null;
   /** SyncPlay: while in a group, play/pause/seek go through the server. */
   sync: { pause(): Promise<unknown>; unpause(): Promise<unknown>; seek(s: number): Promise<unknown>; buffering(): void; ready(): void } | null = null;
@@ -332,9 +331,8 @@ export class PlayerController {
       : !opts.resume ? 0
       : knownSaved === null ? null
       : knownSaved <= 5 ? 0
-      : s.resumeBehavior === "resume" ? knownSaved
       : s.resumeBehavior === "start" ? 0
-      : null;
+      : knownSaved;
     const early = knownStart !== null ? fetchInfo(knownStart) : null;
     early?.catch(() => {});
     const item = await api.itemFull(base.Id).catch(() => base);
@@ -344,14 +342,8 @@ export class PlayerController {
     // Where to start.
     let start = opts.startSeconds ?? 0;
     const saved = ticksToSeconds(item.UserData?.PlaybackPositionTicks);
-    if (opts.startSeconds === undefined && opts.resume && saved > 5) {
-      if (s.resumeBehavior === "resume") start = saved;
-      else if (s.resumeBehavior === "ask" && this.askResume) {
-        const answer = await this.askResume(saved, item);
-        if (answer === null) { if (token === this.loadToken) this.close(); return; }
-        if (answer) start = saved;
-      }
-    }
+    // Where you left off, without asking (as on the iPhone); "Start over" in Settings plays from the start.
+    if (opts.startSeconds === undefined && opts.resume && saved > 5 && s.resumeBehavior !== "start") start = saved;
     if (token !== this.loadToken) return;
 
     // Direct play first (the file as stored, decoded by mpv). Remuxing (direct stream) and then

@@ -12,7 +12,6 @@ import { cardImage, Cover, Dropdown, Empty, Field, Modal, Segmented, Spinner, To
 import { type ExternalTitle, isMovie, metaLine, resized, titleId, tmdbWebUrl } from "../core/titles";
 import { TitleCard, titleAction, WhyText } from "./foryou";
 import { Icon } from "./icons";
-import { ResumePrompt } from "./player";
 import { type Sheet, ui, useModel, useUI } from "./state";
 
 export function Sheets() {
@@ -20,7 +19,6 @@ export function Sheets() {
   return (
     <>
       {state.sheets.map((s, i) => <SheetView key={i} sheet={s} />)}
-      <ResumeHost />
     </>
   );
 }
@@ -72,19 +70,6 @@ function Prompt({ sheet, close }: { sheet: Extract<Sheet, { kind: "prompt" }>; c
       </form>
     </Modal>
   );
-}
-
-/** Asks "Resume or start over?" for the player. */
-function ResumeHost() {
-  const model = useModel();
-  const [ask, setAsk] = useState<{ seconds: number; item: Item; resolve: (v: boolean | null) => void } | null>(null);
-  useEffect(() => {
-    if (!model.player) return;
-    model.player.askResume = (seconds, item) => new Promise((resolve) => setAsk({ seconds, item, resolve }));
-    return () => { if (model.player) model.player.askResume = null; };
-  }, [model.player]);
-  if (!ask) return null;
-  return <ResumePrompt seconds={ask.seconds} item={ask.item} answer={(v) => { ask.resolve(v); setAsk(null); }} />;
 }
 
 // MARK: A title you don't have (TMDB)

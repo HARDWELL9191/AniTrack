@@ -392,12 +392,23 @@ function Timeline({ st, p }: { st: PlayerState; p: PlayerController }) {
     return { x: f * r.width, t: f * dur, f };
   };
   const pct = (s: number) => `${Math.max(0, Math.min(100, (s / dur) * 100))}%`;
+  // The hover preview follows the pointer once per display frame at most (mouse events can come
+  // faster than the screen refreshes; each one re-rendered the bar and its preview).
+  const hoverFrame = useRef(0);
+  const hoverAt = useRef<{ x: number; t: number } | null>(null);
+  const moveHover = (clientX: number) => {
+    const a = at(clientX);
+    hoverAt.current = { x: a.x, t: a.t };
+    if (hoverFrame.current) return;
+    hoverFrame.current = requestAnimationFrame(() => { hoverFrame.current = 0; setHover(hoverAt.current); });
+  };
+  useEffect(() => () => cancelAnimationFrame(hoverFrame.current), []);
   const chapterAt = (t: number) => [...st.chapters].reverse().find((c) => ticksToSeconds(c.StartPositionTicks) <= t);
 
   return (
     <div className={`timeline ${drag !== null ? "dragging" : ""}`} ref={bar}
-      onMouseMove={(e) => { const a = at(e.clientX); setHover({ x: a.x, t: a.t }); if (drag !== null) setDrag(a.t); }}
-      onMouseLeave={() => { setHover(null); }}
+      onMouseMove={(e) => { moveHover(e.clientX); if (drag !== null) setDrag(at(e.clientX).t); }}
+      onMouseLeave={() => { cancelAnimationFrame(hoverFrame.current); hoverFrame.current = 0; hoverAt.current = null; setHover(null); }}
       onMouseDown={(e) => {
         const a = at(e.clientX);
         setDrag(a.t);
@@ -831,22 +842,5 @@ function Lyrics({ id, position }: { id: string; position: number }) {
   );
 }
 
-/** "Resume from 12:34?" when starting something you've watched part of. */
-export function ResumePrompt({ seconds, item, answer }: { seconds: number; item: Item; answer: (v: boolean | null) => void }) {
-  return (
-    <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) answer(null); }}>
-      <div className="modal resume-modal" role="dialog">
-        <div className="modal-body center">
-          <h3>{item.Name}</h3>
-          <p className="muted">You stopped at {clock(seconds)}{item.RunTimeTicks ? ` of ${clock(ticksToSeconds(item.RunTimeTicks))}` : ""}.</p>
-          <div className="row-line">
-            <button className="glass-button prominent big" autoFocus onClick={() => answer(true)}><Icon name="playFill" size={16} /> Resume</button>
-            <button className="glass-button big" onClick={() => answer(false)}><Icon name="repeat" size={16} /> Start over</button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 export { languageName };

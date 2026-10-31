@@ -118,7 +118,11 @@ let pointer: PointerEvent | null = null;
 let frame = 0;
 // Once per frame at most, and the control's position is measured only when the pointer enters it
 // (measuring on every move forces a layout each time).
+// Linux with a video playing: off. There every repaint of the page is also composited with the
+// video underneath, so a glow redrawn on each mouse move delayed hover feedback in the player.
+const linux = document.documentElement.classList.contains("platform-linux");
 window.addEventListener("pointermove", (e) => {
+  if (linux && document.documentElement.classList.contains("video-mode")) return;
   pointer = e;
   if (frame) return;
   frame = requestAnimationFrame(() => {

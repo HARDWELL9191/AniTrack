@@ -279,7 +279,7 @@ function PlaybackSettings() {
         <p className="muted small">Intro and credits times come from your server's media segments (e.g. the Intro Skipper plugin or chapter names).</p>
       </Group>
       <Group title="Starting">
-        <div className="toggle-row"><span>Continue where you left off</span><Segmented value={s.resumeBehavior} options={[{ value: "ask", label: "Ask" }, { value: "resume", label: "Always" }, { value: "start", label: "Start over" }]} onChange={(v) => set("resumeBehavior", v)} /></div>
+        <div className="toggle-row"><span>Continue where you left off</span><Segmented value={s.resumeBehavior} options={[{ value: "resume", label: "Always" }, { value: "start", label: "Start over" }]} onChange={(v) => set("resumeBehavior", v)} /></div>
         <div className="toggle-row"><span>Short seek</span><Segmented value={s.seekShort} options={[5, 10, 15, 30].map((n) => ({ value: n, label: `${n}s` }))} onChange={(v) => set("seekShort", v)} /></div>
         <div className="toggle-row"><span>Long seek</span><Segmented value={s.seekLong} options={[30, 60, 90, 120].map((n) => ({ value: n, label: `${n}s` }))} onChange={(v) => set("seekLong", v)} /></div>
       </Group>
