@@ -108,7 +108,7 @@ final class PlaybackController {
             "sub-auto": "no",
             "sid": "no",
             "sub-codepage": "auto",
-            "sub-ass-override": settings.overrideASSStyles ? "force" : "scale",
+            "sub-ass-override": settings.subtitleASSMode,
             "sub-scale": String(format: "%.2f", settings.subtitleSize),
             "sub-color": settings.subtitleColor.mpvHex,
             "sub-bold": settings.subtitleBold ? "yes" : "no",
@@ -122,7 +122,7 @@ final class PlaybackController {
         switch settings.subtitleBackground {
         case .outline:
             options["sub-border-style"] = "outline-and-shadow"
-            options["sub-border-size"] = "3"
+            options["sub-border-size"] = String(format: "%g", settings.subtitleOutlineSize)
             options["sub-shadow-offset"] = "1"
         case .shadow:
             options["sub-border-style"] = "outline-and-shadow"
@@ -160,6 +160,7 @@ final class PlaybackController {
     func start() async {
         guard !started else { return }
         started = true
+        aspectMode = AspectMode(rawValue: settings.defaultAspect) ?? .fit
         installRemoteCommands()
         observeAudioRoute()
         await open(item, start: request.startSeconds, fallback: false)
@@ -707,16 +708,17 @@ final class PlaybackController {
             return now >= a && now < b - 1 && ["Intro", "Recap", "Outro", "Preview", "Commercial"].contains(seg.type)
         }
         if let current, !skippedSegments.contains(current.id) {
-            let auto = (current.type == "Intro" && settings.autoSkipIntro)
-                || (current.type == "Recap" && settings.autoSkipRecap)
-                || (current.type == "Outro" && settings.autoSkipOutro && upNext == nil)
-                || (current.type == "Commercial")
-            if auto {
+            let action = settings.segmentAction(current.type)
+            // As in the desktop client: skipping credits with another episode queued goes straight to it.
+            if (action == "skip" || (action == "skipOnce" && !skippedSegments.contains("type:\(current.type)"))) {
+                skippedSegments.insert("type:\(current.type)")
                 skip(current)
                 return
             }
         }
-        activeSegment = settings.showSkipButtons ? current.flatMap { skippedSegments.contains($0.id) ? nil : $0 } : nil
+        activeSegment = current.flatMap { seg in
+            skippedSegments.contains(seg.id) || settings.segmentAction(seg.type) == "none" ? nil : seg
+        }
         // Credits with another episode queued: offer it now (Netflix-style).
         if let current, current.type == "Outro", upNext != nil, settings.autoPlayNext, upNextCountdown == nil, !askStillWatching {
             beginCountdown()

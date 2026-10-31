@@ -298,12 +298,21 @@ struct PlayerSettingsView: View {
                 }
             } header: { Text("Next episode") }
             Section {
-                Toggle("Show skip buttons", isOn: $s.showSkipButtons)
-                Toggle("Skip intros automatically", isOn: $s.autoSkipIntro)
-                Toggle("Skip recaps automatically", isOn: $s.autoSkipRecap)
-                Toggle("Skip credits automatically", isOn: $s.autoSkipOutro)
+                ForEach(AppSettings.segmentTypes, id: \.type) { seg in
+                    Picker(seg.label, selection: Binding(get: { s.segmentAction(seg.type) }, set: { v in
+                        var actions = s.segmentActions
+                        actions[seg.type] = v
+                        s.segmentActions = actions
+                    })) {
+                        Text("Show a skip button").tag("ask")
+                        Text("Skip automatically").tag("skip")
+                        Text("Skip the first time").tag("skipOnce")
+                        Text("Never").tag("none")
+                    }
+                    .pickerStyle(.menu)
+                }
             } header: { Text("Intros & credits") } footer: {
-                Text("Uses your server's media segments (Jellyfin 10.10+, with an intro-detection plugin).")
+                Text("Intro and credits times come from your server's media segments (e.g. the Intro Skipper plugin or chapter names).")
             }
             Section("Controls") {
                 Picker("Time on the right", selection: $s.timestampStyle) {
@@ -312,6 +321,12 @@ struct PlayerSettingsView: View {
                 Toggle("Chapter marks on the timeline", isOn: $s.showChaptersOnSlider)
                 Toggle("Thumbnail previews while scrubbing", isOn: $s.trickplayPreviews)
                 Toggle("Start in landscape", isOn: $s.startInLandscape)
+                Picker("Default picture", selection: $s.defaultAspect) {
+                    Text("Fit").tag("fit")
+                    Text("Fill").tag("fill")
+                    Text("Stretch").tag("stretch")
+                }
+                .pickerStyle(.menu)
             }
             Section("Background") {
                 Toggle("Picture in Picture when leaving the app", isOn: $s.pipAutomatically)
@@ -371,10 +386,22 @@ struct SubtitleAudioSettingsView: View {
                     Text("Vertical position: \(s.subtitlePosition)%")
                     Slider(value: Binding(get: { Double(s.subtitlePosition) }, set: { s.subtitlePosition = Int($0) }), in: 50...100, step: 1)
                 }
-                Toggle("Override styled (ASS) subtitles", isOn: $s.overrideASSStyles)
+                if s.subtitleBackground == .outline {
+                    VStack(alignment: .leading) {
+                        Text("Outline: \(String(format: "%g", s.subtitleOutlineSize))")
+                        Slider(value: $s.subtitleOutlineSize, in: 0...6, step: 0.5)
+                    }
+                }
+                Picker("Styled subtitles (ASS, anime typesetting)", selection: $s.subtitleASSMode) {
+                    Text("Keep their own styling").tag("no")
+                    Text("Keep styling, use my size").tag("scale")
+                    Text("Force my style").tag("force")
+                    Text("Plain text").tag("strip")
+                }
+                .pickerStyle(.menu)
                 subtitlePreview(s)
             } header: { Text("Subtitle look") } footer: {
-                Text("Styled ASS/SSA subtitles (typical for anime) keep their own fonts and positions unless you override them.")
+                Text("Styled ASS/SSA subtitles (typical for anime) keep their own fonts, colours and positions unless you choose Force my style or Plain text.")
             }
             Section("Audio output") {
                 Toggle("Downmix to stereo", isOn: $s.stereoDownmix)

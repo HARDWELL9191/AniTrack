@@ -193,6 +193,25 @@ final class AppSettings {
     var autoSkipRecap: Bool { didSet { save(autoSkipRecap, "autoSkipRecap") } }
     var autoSkipOutro: Bool { didSet { save(autoSkipOutro, "autoSkipOutro") } }
     var showSkipButtons: Bool { didSet { save(showSkipButtons, "showSkipButtons") } }
+    /// What to do in each media segment, as in the desktop client: "ask" (skip button),
+    /// "skip" (automatically), "skipOnce" (the first time in a playback), "none".
+    var segmentActions: [String: String] {
+        didSet {
+            save(segmentActions, "segmentActions")
+            // Older builds and the desktop's iPhone sync read these.
+            if !isApplyingRemote {
+                autoSkipIntro = segmentActions["Intro"] == "skip"
+                autoSkipRecap = segmentActions["Recap"] == "skip"
+                autoSkipOutro = segmentActions["Outro"] == "skip"
+            }
+        }
+    }
+    static let segmentTypes: [(type: String, label: String)] = [
+        ("Intro", "Intro"), ("Recap", "Recap"), ("Outro", "Credits"), ("Preview", "Preview"), ("Commercial", "Ads"),
+    ]
+    func segmentAction(_ type: String) -> String { segmentActions[type] ?? "none" }
+    /// Default picture: "fit", "fill" or "stretch".
+    var defaultAspect: String { didSet { save(defaultAspect, "defaultAspect") } }
     var timestampStyle: TimestampStyle { didSet { save(timestampStyle.rawValue, "timestampStyle") } }
     var showChaptersOnSlider: Bool { didSet { save(showChaptersOnSlider, "showChaptersOnSlider") } }
     var trickplayPreviews: Bool { didSet { save(trickplayPreviews, "trickplayPreviews") } }
@@ -219,6 +238,15 @@ final class AppSettings {
     var subtitleBold: Bool { didSet { save(subtitleBold, "subtitleBold") } }
     var subtitlePosition: Int { didSet { save(subtitlePosition, "subtitlePosition") } } // 0...100 (mpv sub-pos)
     var overrideASSStyles: Bool { didSet { save(overrideASSStyles, "overrideASSStyles") } }
+    /// mpv's sub-ass-override for styled (ASS/SSA) subtitles: "no", "scale", "force" or "strip".
+    var subtitleASSMode: String {
+        didSet {
+            save(subtitleASSMode, "subtitleASSMode")
+            if !isApplyingRemote { overrideASSStyles = subtitleASSMode == "force" }
+        }
+    }
+    /// Outline thickness for plain text subtitles (mpv sub-border-size).
+    var subtitleOutlineSize: Double { didSet { save(subtitleOutlineSize, "subtitleOutlineSize") } }
     var stereoDownmix: Bool { didSet { save(stereoDownmix, "stereoDownmix") } }
 
     /// Direct play always comes first; only if the iPhone can't play a file is the server asked to convert it.
@@ -303,6 +331,22 @@ final class AppSettings {
         autoSkipRecap = b("autoSkipRecap", false)
         autoSkipOutro = b("autoSkipOutro", false)
         showSkipButtons = b("showSkipButtons", true)
+        do {
+            // Desktop defaults; earlier builds' toggles carry over.
+            let ask = b("showSkipButtons", true) ? "ask" : "none"
+            var actions: [String: String] = [
+                "Intro": b("autoSkipIntro", false) ? "skip" : ask,
+                "Recap": b("autoSkipRecap", false) ? "skip" : ask,
+                "Outro": b("autoSkipOutro", false) ? "skip" : ask,
+                "Preview": ask,
+                "Commercial": "skip",
+            ]
+            if let saved = d.dictionary(forKey: "segmentActions") as? [String: String] {
+                for (k, v) in saved where ["ask", "skip", "skipOnce", "none"].contains(v) { actions[k] = v }
+            }
+            segmentActions = actions
+        }
+        defaultAspect = { let v = s("defaultAspect", "fit"); return ["fit", "fill", "stretch"].contains(v) ? v : "fit" }()
         timestampStyle = e("timestampStyle", TimestampStyle.remaining)
         showChaptersOnSlider = b("showChaptersOnSlider", true)
         trickplayPreviews = b("trickplayPreviews", true)
@@ -327,6 +371,9 @@ final class AppSettings {
         subtitleBold = b("subtitleBold", true)
         subtitlePosition = i("subtitlePosition", 100)
         overrideASSStyles = b("overrideASSStyles", false)
+        subtitleASSMode = { let v = s("subtitleASSMode", b("overrideASSStyles", false) ? "force" : "scale")
+            return ["no", "scale", "force", "strip"].contains(v) ? v : "scale" }()
+        subtitleOutlineSize = db("subtitleOutlineSize", 3)
         stereoDownmix = b("stereoDownmix", false)
 
         transcodeFallback = b("transcodeFallback", true)
@@ -364,6 +411,7 @@ final class AppSettings {
         "doubleTap", "longPress", "pinchToFill", "preferredAudioLanguage", "preferredSubtitleLanguage",
         "subtitlesByDefault", "preferSignsAndSongs", "subtitleSize", "subtitleColor", "subtitleBackground",
         "subtitleBold", "subtitlePosition", "overrideASSStyles", "stereoDownmix", "transcodeFallback",
+        "segmentActions", "defaultAspect", "subtitleASSMode", "subtitleOutlineSize",
         "useOnDeviceAI", "recoSource", "includeWatchingAsLiked",
     ]
 
@@ -404,6 +452,7 @@ final class AppSettings {
         autoPlayNext = fresh.autoPlayNext; nextUpCountdown = fresh.nextUpCountdown; stillWatchingAfter = fresh.stillWatchingAfter
         autoSkipIntro = fresh.autoSkipIntro; autoSkipRecap = fresh.autoSkipRecap; autoSkipOutro = fresh.autoSkipOutro
         showSkipButtons = fresh.showSkipButtons; timestampStyle = fresh.timestampStyle
+        segmentActions = fresh.segmentActions; defaultAspect = fresh.defaultAspect
         showChaptersOnSlider = fresh.showChaptersOnSlider; trickplayPreviews = fresh.trickplayPreviews
         startInLandscape = fresh.startInLandscape; pipAutomatically = fresh.pipAutomatically
         backgroundAudio = fresh.backgroundAudio
@@ -415,6 +464,7 @@ final class AppSettings {
         subtitleSize = fresh.subtitleSize; subtitleColor = fresh.subtitleColor; subtitleBackground = fresh.subtitleBackground
         subtitleBold = fresh.subtitleBold; subtitlePosition = fresh.subtitlePosition
         overrideASSStyles = fresh.overrideASSStyles; stereoDownmix = fresh.stereoDownmix
+        subtitleASSMode = fresh.subtitleASSMode; subtitleOutlineSize = fresh.subtitleOutlineSize
         transcodeFallback = fresh.transcodeFallback
         useOnDeviceAI = fresh.useOnDeviceAI; recoSource = fresh.recoSource; includeWatchingAsLiked = fresh.includeWatchingAsLiked
 
@@ -438,7 +488,8 @@ final class AppSettings {
                     "startInLandscape", "pipAutomatically", "backgroundAudio", "gestureLeftVertical",
                     "gestureRightVertical", "gestureHorizontal", "doubleTap", "longPress", "pinchToFill",
                     "subtitleSize", "subtitleColor", "subtitleBackground", "subtitleBold", "subtitlePosition",
-                    "overrideASSStyles", "stereoDownmix"] {
+                    "overrideASSStyles", "stereoDownmix", "segmentActions", "defaultAspect", "subtitleASSMode",
+                    "subtitleOutlineSize"] {
             d.removeObject(forKey: key)
         }
         let fresh = AppSettings()
@@ -456,5 +507,7 @@ final class AppSettings {
         subtitleBackground = fresh.subtitleBackground; subtitleBold = fresh.subtitleBold
         subtitlePosition = fresh.subtitlePosition; overrideASSStyles = fresh.overrideASSStyles
         stereoDownmix = fresh.stereoDownmix
+        segmentActions = fresh.segmentActions; defaultAspect = fresh.defaultAspect
+        subtitleASSMode = fresh.subtitleASSMode; subtitleOutlineSize = fresh.subtitleOutlineSize
     }
 }
