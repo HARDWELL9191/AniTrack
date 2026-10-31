@@ -25,6 +25,6 @@ The **Build JellyReco** workflow runs on every push to the `jellyfin` branch:
 
 **AltStore source:** every build also updates `source.json` on the `altstore` branch. Add this source in AltStore and new builds show up as updates (the version is `1.0.<run number>`, so each build is newer than the last):
 
-`https://raw.githubusercontent.com/HARDWELL9191/anitrack/altstore/source.json`
+`https://raw.githubusercontent.com/HARDWELL9191/AniTrack/altstore/source.json`
 
 Add `custom-icon.png` to the repo root to use your own icon.

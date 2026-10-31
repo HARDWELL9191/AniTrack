@@ -28,7 +28,7 @@ source = {
     "subtitle": "A Jellyfin player for iPhone with AI picks from your own library.",
     "description": "Official source for JellyReco. Add it in AltStore to install JellyReco and get every new build as an update.",
     "iconURL": f"{raw_base}/icon.png",
-    "website": "https://github.com/HARDWELL9191/anitrack/tree/jellyfin",
+    "website": "https://github.com/HARDWELL9191/AniTrack/tree/jellyfin",
     "tintColor": "#3D99FF",
     "nsfw": False,
     "featuredApps": [bundle_id],
