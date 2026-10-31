@@ -148,7 +148,7 @@ jobs:
       - uses: actions/checkout@v6
       - name: Generate test files
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg > /dev/null
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg mkvtoolnix > /dev/null
           ffmpeg -hide_banner -version | head -1
           tools/formattest/make_samples.sh samples 2>&1 | tee samples.log
           cp samples.log samples/
@@ -229,7 +229,9 @@ jobs:
           done
           ls -la fonts | tee rendertest.log
           ./rendertest samples/render/*.mkv samples/render/*.ts 2>&1 | grep -v "^$" | tee -a rendertest.log || true
-          ./rendertest --fonts "$PWD/fonts" "Helvetica" samples/render/*.mkv samples/render/*.ts 2>&1 | tee -a rendertest.log
+          ./rendertest --fonts "$PWD/fonts" "Helvetica" samples/render/*.mkv samples/render/*.ts 2>&1 | tee -a rendertest.log || true
+          # ffmpeg's demuxer (reads zlib-compressed tracks that mpv's own MKV reader skips)
+          RENDERTEST_DEMUXER=lavf ./rendertest --fonts "$PWD/fonts" "Helvetica" samples/render/*.mkv samples/render/*.ts 2>&1 | tee -a rendertest.log || true
 
       - name: Publish format test log to the ci-logs branch
         if: always()

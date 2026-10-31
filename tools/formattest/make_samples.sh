@@ -34,5 +34,10 @@ printf '[Script Info]\nScriptType: v4.00+\nPlayResX: 1280\nPlayResY: 720\n\n[V4+
 make render_pgs.mkv $VB -i subs.sup -map 0 -map 1 -c:v libx264 -preset ultrafast -c:s copy
 make render_dvb.ts $VB -i subs.sup -map 0 -map 1 -c:v mpeg2video -c:s dvbsub
 make render_srt.mkv $VB -i subs.srt -map 0 -map 1 -c:v libx264 -preset ultrafast -c:s srt
+# Like real Blu-ray rips muxed with MKVToolNix: PGS stored zlib-compressed (mkvmerge's default).
+if command -v mkvmerge >/dev/null; then
+  mkvmerge -q -o render_pgs_zlib.mkv render_pgs.mkv && echo "made render_pgs_zlib.mkv"
+  mkvinfo render_pgs_zlib.mkv | grep -i -A2 "compression" | head -4
+fi
 make render_ass_colored.mkv $VB -i colored.ass -map 0 -map 1 -c:v libx264 -preset ultrafast -c:s ass
 ls -la

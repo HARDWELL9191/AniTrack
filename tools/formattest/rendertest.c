@@ -9,9 +9,16 @@
 #include <string.h>
 #include <unistd.h>
 
+static void print_log(mpv_event *e) {
+    if (e->event_id != MPV_EVENT_LOG_MESSAGE) return;
+    mpv_event_log_message *m = e->data;
+    printf("    [%s] %s", m->prefix, m->text);
+}
+
 static int wait_for(mpv_handle *h, mpv_event_id id, double seconds) {
     for (double t = 0; t < seconds; t += 0.05) {
         mpv_event *e = mpv_wait_event(h, 0.05);
+        print_log(e);
         if (e->event_id == id) return 1;
         if (e->event_id == MPV_EVENT_END_FILE) return 0;
     }
@@ -22,7 +29,9 @@ int main(int argc, char **argv) {
     const char *fontsDir = NULL, *family = NULL;
     int first = 1, failures = 0;
     if (argc > 3 && strcmp(argv[1], "--fonts") == 0) { fontsDir = argv[2]; family = argv[3]; first = 4; }
-    printf("Subtitle render test (%s)\n", fontsDir ? "with the app's fonts" : "no fonts given");
+    const char *demuxer = getenv("RENDERTEST_DEMUXER");
+    printf("Subtitle render test (%s%s%s)\n", fontsDir ? "with the app's fonts" : "no fonts given",
+           demuxer ? ", demuxer=" : "", demuxer ? demuxer : "");
     for (int i = first; i < argc; i++) {
         const char *file = argv[i];
         mpv_handle *h = mpv_create();
@@ -38,6 +47,8 @@ int main(int argc, char **argv) {
         mpv_set_option_string(h, "sub-font-size", "52");
         mpv_set_option_string(h, "sub-border-style", "outline-and-shadow");
         mpv_set_option_string(h, "sub-border-size", "3");
+        if (demuxer) mpv_set_option_string(h, "demuxer", demuxer);
+        mpv_request_log_messages(h, "warn");
         if (fontsDir) {
             mpv_set_option_string(h, "sub-fonts-dir", fontsDir);
             mpv_set_option_string(h, "sub-font", family);
@@ -56,7 +67,7 @@ int main(int argc, char **argv) {
         // Play from the start like a viewer would (a TS seek can skip a subtitle's only packet),
         // then pause inside the subtitle's display time.
         for (int n = 0; n < 200; n++) {
-            mpv_wait_event(h, 0.05);
+            print_log(mpv_wait_event(h, 0.05));
             mpv_render_context_update(ctx);
             double pos = 0;
             if (mpv_get_property(h, "time-pos", MPV_FORMAT_DOUBLE, &pos) >= 0 && pos >= 1.5) break;
