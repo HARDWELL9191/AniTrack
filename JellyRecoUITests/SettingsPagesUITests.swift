@@ -78,9 +78,13 @@ final class SettingsPagesUITests: XCTestCase {
 
         // Switch the dropdown to NVENC, like a finger: the page follows the type.
         toTop(app)
-        let picker = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Hardware acceleration'")).firstMatch
+        let picker = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Hardware acceleration' OR label CONTAINS 'Quicksync' OR value CONTAINS 'Quicksync'")).firstMatch
         XCTAssertTrue(picker.waitForExistence(timeout: 5), "acceleration dropdown")
-        print("RESULT dropdown label: \(picker.label) value: \(picker.value as? String ?? "")")
+        let title = app.staticTexts["Hardware acceleration"].firstMatch
+        print("RESULT dropdown label: \(picker.label) value: \(picker.value as? String ?? "") frame \(picker.frame) title frame \(title.frame)")
+        // Apple's layout: the value sits on the title's line, on the right.
+        XCTAssertTrue(title.exists && abs(picker.frame.midY - title.frame.midY) < 30 && picker.frame.minX > title.frame.minX,
+                      "dropdown value beside its title")
         picker.tap()
         shot(app, "transcoding-dropdown-open")
         let nvenc = app.buttons["Nvidia NVENC"]

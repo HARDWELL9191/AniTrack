@@ -785,6 +785,23 @@ struct ConfigFieldRow: View {
             }
         case .publishedURIs:
             PublishedURIsEditor(editor: editor, store: field.store, key: field.key)
+        case .select(let source, let emptyAs):
+            let options = source(editor)
+            let selection = editor.option(field.store, field.key, emptyAs: emptyAs)
+            MenuPickerRow(title: field.label, help: field.footer, selection: selection) {
+                if !options.contains(where: { $0.value == selection.wrappedValue }) {
+                    Text(selection.wrappedValue == .null ? "Not set" : "\(selection.wrappedValue.raw)").tag(selection.wrappedValue)
+                }
+                ForEach(options.indices, id: \.self) { i in Text(options[i].label).tag(options[i].value) }
+            }
+        case .choice(let options):
+            let selection = editor.choice(field.store, field.key)
+            MenuPickerRow(title: field.label, help: field.footer, selection: selection) {
+                if !selection.wrappedValue.isEmpty && !options.contains(where: { $0.value == selection.wrappedValue }) {
+                    Text(selection.wrappedValue).tag(selection.wrappedValue)
+                }
+                ForEach(options.indices, id: \.self) { i in Text(options[i].label).tag(options[i].value) }
+            }
         default:
             VStack(alignment: .leading, spacing: 4) {
                 control
@@ -845,24 +862,8 @@ struct ConfigFieldRow: View {
                     .lineLimit(2...10).font(.callout.monospaced())
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
             }
-        case .choice(let options):
-            Picker(field.label, selection: editor.choice(field.store, field.key)) {
-                let current = editor.choice(field.store, field.key).wrappedValue
-                if !current.isEmpty && !options.contains(where: { $0.value == current }) {
-                    Text(current).tag(current)
-                }
-                ForEach(options.indices, id: \.self) { i in Text(options[i].label).tag(options[i].value) }
-            }
-        case .select(let source, let emptyAs):
-            let options = source(editor)
-            let selection = editor.option(field.store, field.key, emptyAs: emptyAs)
-            Picker(field.label, selection: selection) {
-                if !options.contains(where: { $0.value == selection.wrappedValue }) {
-                    Text(selection.wrappedValue == .null ? "Not set" : "\(selection.wrappedValue.raw)").tag(selection.wrappedValue)
-                }
-                ForEach(options.indices, id: \.self) { i in Text(options[i].label).tag(options[i].value) }
-            }
-            .pickerStyle(.menu)
+        case .choice, .select:
+            EmptyView()
         case .switches:
             EmptyView()
         case .tags(let numeric, let placeholder):

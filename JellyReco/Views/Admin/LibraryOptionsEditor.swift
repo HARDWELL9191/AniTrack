@@ -275,16 +275,16 @@ struct LibraryOptionsSections: View {
                 Text("Server default").tag("")
                 ForEach(Array(cultureOptions(threeLetter: false).enumerated()), id: \.offset) { _, c in Text(c.name).tag(c.code) }
             }
-            .pickerStyle(.menu)
+            .pickerStyle(.menu).tint(Color.secondary)
             Picker("Country/region", selection: model.string("MetadataCountryCode")) {
                 Text("Server default").tag("")
                 ForEach(Array(countryOptions.enumerated()), id: \.offset) { _, c in Text(c.name).tag(c.code) }
             }
-            .pickerStyle(.menu)
+            .pickerStyle(.menu).tint(Color.secondary)
             Picker("Automatically refresh metadata from the internet", selection: refreshDays) {
                 ForEach(refreshChoices, id: \.self) { d in Text(d == 0 ? "Never" : "Every \(d) days").tag(d) }
             }
-            .pickerStyle(.menu)
+            .pickerStyle(.menu).tint(Color.secondary)
             if embedded {
                 row("Prefer embedded titles over filenames", "Uses the title stored inside the file, if there is one.", model.bool("EnableEmbeddedTitles"))
                 if (model.value("EnableEmbeddedTitles") as? Bool) == true {
@@ -326,7 +326,7 @@ struct LibraryOptionsSections: View {
                     Text("Allow image").tag("AllowImage")
                     Text("Allow none").tag("AllowNone")
                 }
-                .pickerStyle(.menu)
+                .pickerStyle(.menu).tint(Color.secondary)
                 NavigationLink {
                     LanguageChecklist(model: model, cultures: cultureOptions(threeLetter: true))
                 } label: {

@@ -48,7 +48,7 @@ struct SettingsView: View {
     }
 
     private func link<D: View>(_ title: String, _ symbol: String, @ViewBuilder _ destination: @escaping () -> D) -> some View {
-        NavigationLink { destination() } label: { Label(title, systemImage: symbol) }
+        NavigationLink { destination() } label: { MenuLabel(title, symbol) }
     }
 }
 
@@ -315,7 +315,7 @@ struct DisplaySettingsView: View {
         Form {
             Section("Display") {
                 Picker("Theme", selection: $s.appearance) { ForEach(AppearanceMode.allCases) { Text($0.label).tag($0) } }
-                    .pickerStyle(.menu)
+                    .pickerStyle(.menu).tint(Color.secondary)
                 Toggle("Titles under posters", isOn: $s.showPosterLabels)
                 Toggle("Match % on posters", isOn: $s.showRatingBadges)
                 Toggle(isOn: $s.hideSpoilers) {
@@ -336,9 +336,9 @@ struct DisplaySettingsView: View {
                     Text("Grid").tag(LibraryLayout.grid)
                     Text("List").tag(LibraryLayout.list)
                 }
-                .pickerStyle(.menu)
+                .pickerStyle(.menu).tint(Color.secondary)
                 Picker("Posters", selection: $s.libraryPosterStyle) { ForEach(PosterStyle.allCases) { Text($0.label).tag($0) } }
-                    .pickerStyle(.menu)
+                    .pickerStyle(.menu).tint(Color.secondary)
                 Stepper("Columns: \(s.gridColumns)", value: $s.gridColumns, in: 2...6)
                 Toggle("Remember layout per library", isOn: $s.rememberLayoutPerLibrary)
                 Toggle("A–Z scrubber", isOn: $s.showLetterPicker)
@@ -375,7 +375,7 @@ struct HomeSettingsView: View {
                     })) {
                         ForEach(choices) { Text($0.label).tag($0) }
                     }
-                    .pickerStyle(.menu)
+                    .pickerStyle(.menu).tint(Color.secondary)
                 }
             } header: { Text("Home sections") } footer: {
                 Text("Saved on your server, the same as Jellyfin web → Settings → Home.")
@@ -416,7 +416,7 @@ struct HomeSettingsView: View {
                     ForEach([7, 14, 30, 60, 90, 180, 365], id: \.self) { Text("\($0) days").tag($0) }
                     Text("No limit").tag(0)
                 }
-                .pickerStyle(.menu)
+                .pickerStyle(.menu).tint(Color.secondary)
                 Toggle("Rewatching in Next Up", isOn: $s.nextUpRewatching)
             } header: { Text("Next Up (this device)") } footer: {
                 Text("Like Jellyfin web, these are per device. Jellyfin's default is 365 days.")
@@ -482,21 +482,21 @@ struct PlaybackSettingsView: View {
         @Bindable var s = model.settings
         Form {
             Section {
-                Picker("Preferred audio language", selection: configString(\.audioLanguagePreference, key: "AudioLanguagePreference")) {
-                    Text("Any (the file's default)").tag("")
-                    ForEach(languages, id: \.self) { Text($0.name).tag($0.code) }
-                }
-                .pickerStyle(.menu)
-                Toggle("Play the default audio track whatever its language", isOn: configBool(\.playDefaultAudioTrack, key: "PlayDefaultAudioTrack", fallback: true))
-                Picker("Preferred subtitle language", selection: configString(\.subtitleLanguagePreference, key: "SubtitleLanguagePreference")) {
+                Picker("Audio language", selection: configString(\.audioLanguagePreference, key: "AudioLanguagePreference")) {
                     Text("Any").tag("")
                     ForEach(languages, id: \.self) { Text($0.name).tag($0.code) }
                 }
-                .pickerStyle(.menu)
+                .pickerStyle(.menu).tint(Color.secondary)
+                Toggle("Play default audio track", isOn: configBool(\.playDefaultAudioTrack, key: "PlayDefaultAudioTrack", fallback: true))
+                Picker("Subtitle language", selection: configString(\.subtitleLanguagePreference, key: "SubtitleLanguagePreference")) {
+                    Text("Any").tag("")
+                    ForEach(languages, id: \.self) { Text($0.name).tag($0.code) }
+                }
+                .pickerStyle(.menu).tint(Color.secondary)
                 Picker("Subtitles", selection: Binding(get: { config?.subtitleMode ?? "Default" }, set: { saveConfig("SubtitleMode", $0) })) {
                     ForEach(subtitleModes, id: \.0) { Text($0.1).tag($0.0) }
                 }
-                .pickerStyle(.menu)
+                .pickerStyle(.menu).tint(Color.secondary)
                 Toggle("Remember my audio choices per show", isOn: configBool(\.rememberAudioSelections, key: "RememberAudioSelections", fallback: true))
                 Toggle("Remember my subtitle choices per show", isOn: configBool(\.rememberSubtitleSelections, key: "RememberSubtitleSelections", fallback: true))
                 Toggle("Play the next episode automatically", isOn: Binding(
@@ -512,7 +512,7 @@ struct PlaybackSettingsView: View {
                         Text("Never").tag(0)
                         ForEach([2, 3, 4, 5, 6, 8], id: \.self) { Text("After \($0) episodes").tag($0) }
                     }
-                    .pickerStyle(.menu)
+                    .pickerStyle(.menu).tint(Color.secondary)
                 }
                 ForEach(AppSettings.segmentTypes, id: \.type) { seg in
                     Picker(seg.label, selection: Binding(get: { s.segmentAction(seg.type) }, set: { v in
@@ -525,7 +525,7 @@ struct PlaybackSettingsView: View {
                         Text("Skip the first time").tag("skipOnce")
                         Text("Never").tag("none")
                     }
-                    .pickerStyle(.menu)
+                    .pickerStyle(.menu).tint(Color.secondary)
                 }
             } header: { Text("Next episode & skipping") } footer: {
                 Text("Intro and credits times come from your server's media segments (e.g. the Intro Skipper plugin or chapter names).")
@@ -535,11 +535,11 @@ struct PlaybackSettingsView: View {
                 Picker("Jump back", selection: $s.jumpBackward) {
                     ForEach([5, 10, 15, 30, 45, 60], id: \.self) { Text("\($0) s").tag($0) }
                 }
-                .pickerStyle(.menu)
+                .pickerStyle(.menu).tint(Color.secondary)
                 Picker("Jump forward", selection: $s.jumpForward) {
                     ForEach([5, 10, 15, 30, 45, 60, 90], id: \.self) { Text("\($0) s").tag($0) }
                 }
-                .pickerStyle(.menu)
+                .pickerStyle(.menu).tint(Color.secondary)
             }
             Section {
                 Toggle("Server conversion as a fallback", isOn: $s.transcodeFallback)
@@ -604,7 +604,7 @@ struct PlayerSettingsView: View {
                     Text("Fill").tag("fill")
                     Text("Stretch").tag("stretch")
                 }
-                .pickerStyle(.menu)
+                .pickerStyle(.menu).tint(Color.secondary)
                 Toggle("Thumbnail previews on the timeline", isOn: $s.trickplayPreviews)
                 Toggle("Chapter marks on the timeline", isOn: $s.showChaptersOnSlider)
             }
@@ -613,13 +613,13 @@ struct PlayerSettingsView: View {
                 Picker("Default speed", selection: $s.defaultSpeed) {
                     ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0], id: \.self) { Text(String(format: "%g×", $0)).tag($0) }
                 }
-                .pickerStyle(.menu)
+                .pickerStyle(.menu).tint(Color.secondary)
             }
             Section("Controls") {
                 Picker("Time on the right", selection: $s.timestampStyle) {
                     ForEach(TimestampStyle.allCases) { Text($0.label).tag($0) }
                 }
-                .pickerStyle(.menu)
+                .pickerStyle(.menu).tint(Color.secondary)
                 Toggle("Start in landscape", isOn: $s.startInLandscape)
                 Toggle("Picture in Picture when leaving the app", isOn: $s.pipAutomatically)
                 Toggle("Keep playing audio in the background", isOn: $s.backgroundAudio)
@@ -654,9 +654,9 @@ struct SubtitleSettingsView: View {
                 }
                 Toggle("Bold", isOn: $s.subtitleBold)
                 Picker("Text color", selection: $s.subtitleColor) { ForEach(SubtitleColor.allCases) { Text($0.label).tag($0) } }
-                    .pickerStyle(.menu)
+                    .pickerStyle(.menu).tint(Color.secondary)
                 Picker("Background", selection: $s.subtitleBackground) { ForEach(SubtitleBackground.allCases) { Text($0.label).tag($0) } }
-                    .pickerStyle(.menu)
+                    .pickerStyle(.menu).tint(Color.secondary)
                 if s.subtitleBackground == .outline {
                     VStack(alignment: .leading) {
                         Text("Outline: \(String(format: "%g", s.subtitleOutlineSize))")
@@ -669,15 +669,15 @@ struct SubtitleSettingsView: View {
                 }
             } header: { Text("Subtitle style") }
             Section {
-                Picker("Styled subtitles (ASS, anime typesetting)", selection: $s.subtitleASSMode) {
+                Picker("Styled subtitles", selection: $s.subtitleASSMode) {
                     Text("Keep their own styling").tag("no")
                     Text("Keep styling, use my size").tag("scale")
                     Text("Force my style").tag("force")
                     Text("Plain text").tag("strip")
                 }
-                .pickerStyle(.menu)
+                .pickerStyle(.menu).tint(Color.secondary)
             } footer: {
-                Text("Styled ASS/SSA subtitles (typical for anime) keep their own fonts, colours and positions unless you choose Force my style or Plain text.")
+                Text("Styled subtitles are ASS/SSA (typical for anime typesetting). They keep their own fonts, colours and positions unless you choose Force my style or Plain text.")
             }
         }
         .navigationTitle("Subtitles")

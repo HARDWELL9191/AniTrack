@@ -129,6 +129,42 @@ struct KeyboardDismissOnTapOutside: UIViewRepresentable {
     }
 }
 
+// MARK: - Settings rows (Apple's Settings look)
+
+/// A dropdown row like Apple's Settings: title (and help) on the left, the grey value with its
+/// chevrons on the right — never a value wrapped onto its own line.
+struct MenuPickerRow<Value: Hashable, Options: View>: View {
+    let title: String
+    var help: String? = nil
+    @Binding var selection: Value
+    @ViewBuilder let options: () -> Options
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                if let help { Text(help).font(.caption).foregroundStyle(.secondary) }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Picker(title, selection: $selection, content: options)
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .tint(Color.secondary)
+                .layoutPriority(1)
+        }
+    }
+}
+
+/// A menu entry with a white icon (Apple's style), not the accent colour.
+struct MenuLabel: View {
+    let title: String
+    let symbol: String
+    init(_ title: String, _ symbol: String) { self.title = title; self.symbol = symbol }
+    var body: some View {
+        Label { Text(title) } icon: { Image(systemName: symbol).foregroundStyle(.primary) }
+    }
+}
+
 // MARK: - Green switches (like the PC version)
 
 /// Every switch in the app is green when on. Applied once at the root; all toggles inherit it.

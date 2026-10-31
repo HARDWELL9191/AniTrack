@@ -6,13 +6,13 @@ struct AdminDashboardView: View {
     var body: some View {
         List {
             Section("Server") {
-                NavigationLink { DashboardOverviewView() } label: { Label("Dashboard", systemImage: "gauge.with.dots.needle.67percent") }
+                NavigationLink { DashboardOverviewView() } label: { MenuLabel("Dashboard", "gauge.with.dots.needle.67percent") }
                 page(ServerSettingsCatalog.general)
                 page(ServerSettingsCatalog.branding)
-                NavigationLink { UsersAdminView() } label: { Label("Users", systemImage: "person.3.fill") }
+                NavigationLink { UsersAdminView() } label: { MenuLabel("Users", "person.3.fill") }
             }
             Section("Libraries") {
-                NavigationLink { AdminLibrariesView() } label: { Label("Libraries", systemImage: "books.vertical.fill") }
+                NavigationLink { AdminLibrariesView() } label: { MenuLabel("Libraries", "books.vertical.fill") }
                 page(ServerSettingsCatalog.display)
                 page(ServerSettingsCatalog.metadata)
                 page(ServerSettingsCatalog.nfo)
@@ -24,31 +24,31 @@ struct AdminDashboardView: View {
                 page(ServerSettingsCatalog.trickplay)
             }
             Section("Devices") {
-                NavigationLink { DevicesView() } label: { Label("Devices", systemImage: "iphone.gen3") }
-                NavigationLink { ActivityLogView() } label: { Label("Activity", systemImage: "list.bullet.rectangle") }
+                NavigationLink { DevicesView() } label: { MenuLabel("Devices", "iphone.gen3") }
+                NavigationLink { ActivityLogView() } label: { MenuLabel("Activity", "list.bullet.rectangle") }
             }
             Section("Live TV") {
-                NavigationLink { LiveTVSetupView() } label: { Label("Live TV", systemImage: "antenna.radiowaves.left.and.right") }
+                NavigationLink { LiveTVSetupView() } label: { MenuLabel("Live TV", "antenna.radiowaves.left.and.right") }
                 page(ServerSettingsCatalog.dvr)
             }
             Section("Plugins") {
-                NavigationLink { PluginsView() } label: { Label("My plugins", systemImage: "puzzlepiece.extension.fill") }
-                NavigationLink { PluginCatalogView() } label: { Label("Catalog", systemImage: "square.and.arrow.down.fill") }
-                NavigationLink { PluginRepositoriesView() } label: { Label("Repositories", systemImage: "link") }
+                NavigationLink { PluginsView() } label: { MenuLabel("My plugins", "puzzlepiece.extension.fill") }
+                NavigationLink { PluginCatalogView() } label: { MenuLabel("Catalog", "square.and.arrow.down.fill") }
+                NavigationLink { PluginRepositoriesView() } label: { MenuLabel("Repositories", "link") }
             }
             Section("Advanced") {
                 page(ServerSettingsCatalog.networking)
-                NavigationLink { APIKeysView() } label: { Label("API keys", systemImage: "key.horizontal.fill") }
-                NavigationLink { BackupsView() } label: { Label("Backups", systemImage: "archivebox.fill") }
-                NavigationLink { ServerLogsView() } label: { Label("Logs", systemImage: "terminal.fill") }
-                NavigationLink { ScheduledTasksView() } label: { Label("Scheduled tasks", systemImage: "clock.arrow.2.circlepath") }
+                NavigationLink { APIKeysView() } label: { MenuLabel("API keys", "key.horizontal.fill") }
+                NavigationLink { BackupsView() } label: { MenuLabel("Backups", "archivebox.fill") }
+                NavigationLink { ServerLogsView() } label: { MenuLabel("Logs", "terminal.fill") }
+                NavigationLink { ScheduledTasksView() } label: { MenuLabel("Scheduled tasks", "clock.arrow.2.circlepath") }
             }
         }
         .navigationTitle("Dashboard")
     }
 
     private func page(_ p: ConfigPage) -> some View {
-        NavigationLink { ConfigPageView(page: p) } label: { Label(p.title, systemImage: p.symbol) }
+        NavigationLink { ConfigPageView(page: p) } label: { MenuLabel(p.title, p.symbol) }
     }
 }
 
@@ -601,7 +601,7 @@ struct UserAdminDetail: View {
                 Picker("Section", selection: $tab) {
                     ForEach(Tab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                 }
-                .pickerStyle(.menu)
+                .pickerStyle(.menu).tint(Color.secondary)
             }
             if flag("IsDisabled").wrappedValue {
                 Section {
@@ -686,7 +686,7 @@ struct UserAdminDetail: View {
                     Text("Allow joining groups").tag("JoinGroups")
                     Text("No access").tag("None")
                 }
-                .pickerStyle(.menu)
+                .pickerStyle(.menu).tint(Color.secondary)
                 Text("Watching together in sync with other devices.").font(.caption).foregroundStyle(.secondary)
             }
         }
@@ -750,7 +750,7 @@ struct UserAdminDetail: View {
                 Text("No limit").tag(-1)
                 ForEach(ratings.indices, id: \.self) { i in Text(ratings[i].label).tag(i) }
             }
-            .pickerStyle(.menu)
+            .pickerStyle(.menu).tint(Color.secondary)
         } header: { Text("Maximum allowed parental rating") } footer: { Text("Titles rated higher are hidden from this user.") }
         Section("Block items with no or unrecognized rating") {
             ForEach(Self.unrated, id: \.0) { t in Toggle(t.1, isOn: member("BlockUnratedItems", t.0)) }
@@ -822,7 +822,7 @@ struct UserAdminDetail: View {
             Picker(label, selection: text(key)) {
                 ForEach(options, id: \.self) { Text($0.name).tag($0.id) }
             }
-            .pickerStyle(.menu)
+            .pickerStyle(.menu).tint(Color.secondary)
             Text(help).font(.caption).foregroundStyle(.secondary)
         }
     }
@@ -836,15 +836,15 @@ struct UserAdminDetail: View {
         Picker("Day", selection: Binding(get: { sc["DayOfWeek"] as? String ?? "Sunday" }, set: { updateSchedule(i, "DayOfWeek", $0) })) {
             ForEach(Self.days, id: \.self) { Text(Self.dayLabel($0)).tag($0) }
         }
-        .pickerStyle(.menu)
+        .pickerStyle(.menu).tint(Color.secondary)
         Picker("From", selection: Binding(get: { start }, set: { updateSchedule(i, "StartHour", $0) })) {
             ForEach((0..<48).map { Double($0) / 2 }.filter { $0 < end }, id: \.self) { Text(Self.hourLabel($0)).tag($0) }
         }
-        .pickerStyle(.menu)
+        .pickerStyle(.menu).tint(Color.secondary)
         Picker("To", selection: Binding(get: { end }, set: { updateSchedule(i, "EndHour", $0) })) {
             ForEach((1...48).map { Double($0) / 2 }.filter { $0 > start }, id: \.self) { Text($0 == 24 ? "24:00" : Self.hourLabel($0)).tag($0) }
         }
-        .pickerStyle(.menu)
+        .pickerStyle(.menu).tint(Color.secondary)
         Button(role: .destructive) {
             var list = schedules
             guard list.indices.contains(i) else { return }
