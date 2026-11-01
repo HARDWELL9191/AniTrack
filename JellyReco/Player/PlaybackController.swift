@@ -98,12 +98,18 @@ final class PlaybackController {
                                                                   output: .sampleBuffer))   // renderer is automatic (see open())
         player.setDiagnosticsEnabled(true)
         attachLog()
-        appliedSubtitleProperties = ["sub-ass-override": model.settings.subtitleASSMode]
+        appliedSubtitleProperties = ["sub-ass-override": model.settings.subtitleASSMode, "sub-ass-style-overrides": ""]
     }
 
     private func attachLog() {
         player.logHandler = { [weak self] msg in
             guard let self else { return }
+            // Info messages only carry the ASS header the app asks mpv to print (see
+            // requestASSHeader); Playback info keeps showing warnings and errors as before.
+            if msg.level == .info {
+                self.collectASSHeader(msg)
+                return
+            }
             let line = JellyfinClient.redacted("[\(msg.prefix)] \(msg.message.trimmingCharacters(in: .whitespacesAndNewlines))")
             self.noteSkippedTrack(msg.message)
             self.diagnostics.append(line)
@@ -159,7 +165,7 @@ final class PlaybackController {
             dolbyVisionPolicy: .strict,
             hardwareDecoding: settings.hardwareDecoding ? .automatic : .disabled,
             initialBufferDuration: .seconds(1),
-            logLevel: .warning,
+            logLevel: .info,   // info: for the ASS header the app reads (only warnings are shown)
             networkCacheDuration: .seconds(30),
             playbackRate: settings.defaultSpeed,
             videoOutput: output
@@ -476,7 +482,7 @@ final class PlaybackController {
         checkAudioSync()
         updateSegments()
         checkSubtitleRendering()
-        if didApplyTracks, primarySubtitleKind != layoutKind { applySubtitleLayout() }
+        if didApplyTracks, currentLayoutKey != layoutKind { applySubtitleLayout() }
 
         if state == .ended { await handleEnded() }
 
@@ -514,8 +520,9 @@ final class PlaybackController {
     private func rebuildPlayer(output: MPVPlayerConfiguration.VideoOutput) {
         player.stop()
         player = MPVPlayer(configuration: Self.configuration(settings: settings, output: output))
-        appliedSubtitleProperties = ["sub-ass-override": settings.subtitleASSMode]
+        appliedSubtitleProperties = ["sub-ass-override": settings.subtitleASSMode, "sub-ass-style-overrides": ""]
         layoutKind = nil
+        assHeaderRequested = nil
         player.pictureInPicture.allowsAutomaticStartFromInline = settings.pipAutomatically
         player.setDiagnosticsEnabled(true)
         attachLog()
@@ -622,6 +629,23 @@ final class PlaybackController {
                     }
                 default: break
                 }
+            }
+        })
+        // Leaving the app while paused: iOS suspends it and may hand the audio hardware to other
+        // apps, after which mpv's audio output stayed silent. Restart it when playback resumes.
+        interruptionObservers.append(center.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, !self.stopped else { return }
+                if self.player.isPaused || !self.settings.backgroundAudio {
+                    self.audioNeedsReload = true
+                    self.diagnostics.append("[JellyReco] App went to the background while paused")
+                }
+            }
+        })
+        interruptionObservers.append(center.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, !self.stopped, self.player.isPaused else { return }
+                self.audioNeedsReload = true
             }
         })
         // The phone's media services restarted: every audio output has to be set up again.
@@ -870,7 +894,9 @@ final class PlaybackController {
         if Self.isPictureSubtitle(codec) { return .picture }
         return ["ass", "ssa"].contains(codec) ? .styled : .text
     }
-    @ObservationIgnored private var layoutKind: SubtitleKind?
+    /// The subtitle (kind and track) the layout was last worked out for.
+    @ObservationIgnored private var layoutKind: String?
+    private var currentLayoutKey: String { "\(primarySubtitleKind)|\(assTrackKey)" }
     /// What was last given to mpv (changing sub-ass-override reloads the subtitles, so only on change).
     @ObservationIgnored private var appliedSubtitleProperties: [String: String] = [:]
 
@@ -894,27 +920,134 @@ final class PlaybackController {
     ///   cancels the zoom: same fonts, colours and look.
     private func applySubtitleLayout() {
         let kind = primarySubtitleKind
-        layoutKind = kind
+        layoutKind = currentLayoutKey
         let base = Double(settings.subtitlePosition)
         let visible = 1 - 2 * fillHidden
-        var scale = settings.subtitleSize / fillScale
+        let filled = fillHidden > 0.001
+        // In Fill the subtitles zoom with the picture: same size relative to it and the same
+        // line breaks as in Fit (only moved into the part that stays on screen).
+        let scale = settings.subtitleSize
         var override = settings.subtitleASSMode
         let pos: Double
+        var marginY = 22.0                       // mpv's default gap above / below text lines (720 lines)
+        var styleOverrides = ""
         switch kind {
         case .picture:
-            let fillNeed = max(0, fillHidden * 100 - 4)          // disc subtitles keep ~5 % below them
+            // Disc subtitles keep ~5 % below them: lifted only by what's cut off beyond that.
+            let fillNeed = max(0, fillHidden * 100 - 4)
             pos = 100 - fillNeed - (100 - base) * visible
-        default:
+        case .text, .none:
+            // Top and bottom lines both move in by the cropped strip; the position setting on top.
+            marginY += fillHidden * 720
             let wanted = base > 100 ? 100 + min(base - 100, Self.textLoweringLimit) : base
-            pos = fillHidden * 100 + wanted * visible
-        }
-        if kind == .styled, override == "no", fillHidden > 0 || base != 100 {
-            override = "scale"
-            scale = 1 / fillScale
+            pos = 100 - (100 - wanted) * visible
+        case .styled:
+            let wanted = base > 100 ? 100 + min(base - 100, Self.textLoweringLimit) : base
+            pos = 100 - (100 - wanted) * visible
+            // "Keep their own styling" ignores any repositioning in mpv: while something has to
+            // move, it runs as "keep styling" at the normal size (same fonts, colours, look).
+            if override == "no", filled || base != 100 { override = "scale" }
+            // Top and bottom lines (\an8 / \an2 without an exact position) move in by the cropped
+            // strip: every style's own top/bottom margin plus that strip, in the file's units.
+            if filled {
+                if let header = assHeader, header.trackKey == assTrackKey {
+                    styleOverrides = header.marginOverrides(adding: fillHidden)
+                } else {
+                    requestASSHeader()
+                }
+            }
         }
         setSubtitleProperty("sub-ass-override", override)
+        setSubtitleProperty("sub-ass-style-overrides", styleOverrides)   // reloads the subtitles when it changes
+        setSubtitleProperty("sub-margin-y", String(Int(marginY.rounded())))
         setSubtitleProperty("sub-pos", String(format: "%.1f", min(150, max(0, pos))))
         setSubtitleProperty("sub-scale", String(format: "%.3f", scale))
+    }
+
+    // MARK: ASS header (the file's own resolution and style margins, for Fill)
+
+    /// An ASS file's PlayResY and each style's vertical margin, as written in its header.
+    struct ASSHeader {
+        let trackKey: String
+        let playResY: Double
+        let margins: [(style: String, marginV: Double)]
+
+        /// mpv's sub-ass-style-overrides value: each style's margin grown by `fraction` of the
+        /// picture height (only styles whose names mpv's list syntax can carry).
+        func marginOverrides(adding fraction: Double) -> String {
+            let extra = fraction * playResY
+            return margins
+                .filter { !$0.style.contains(",") && !$0.style.contains("=") && !$0.style.contains("\\") }
+                .map { "\($0.style).MarginV=\(Int(($0.marginV + extra).rounded()))" }
+                .joined(separator: ",")
+        }
+
+        static func parse(_ text: String, trackKey: String) -> ASSHeader? {
+            var playResX: Double?, playResY: Double?
+            var format: [String] = []
+            var margins: [(style: String, marginV: Double)] = []
+            var inStyles = false
+            for raw in text.split(whereSeparator: \.isNewline) {
+                let line = raw.trimmingCharacters(in: .whitespaces)
+                if line.hasPrefix("[") { inStyles = line.lowercased().contains("styles"); continue }
+                let lower = line.lowercased()
+                if lower.hasPrefix("playresx:") { playResX = Double(line.dropFirst(9).trimmingCharacters(in: .whitespaces)) }
+                if lower.hasPrefix("playresy:") { playResY = Double(line.dropFirst(9).trimmingCharacters(in: .whitespaces)) }
+                guard inStyles else { continue }
+                if lower.hasPrefix("format:") {
+                    format = line.dropFirst(7).split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces).lowercased() }
+                } else if lower.hasPrefix("style:"), let n = format.firstIndex(of: "name"), let m = format.firstIndex(of: "marginv") {
+                    let fields = line.dropFirst(6).split(separator: ",", omittingEmptySubsequences: false)
+                        .map { $0.trimmingCharacters(in: .whitespaces) }
+                    guard fields.count == format.count, let margin = Double(fields[m]), !fields[n].isEmpty else { continue }
+                    margins.append((style: fields[n], marginV: margin))
+                }
+            }
+            // libass: without PlayResY it's 288, or PlayResX × 3/4 when only that is given.
+            let resY = playResY ?? playResX.map { $0 * 3 / 4 } ?? 288
+            guard resY > 0, !margins.isEmpty else { return nil }
+            return ASSHeader(trackKey: trackKey, playResY: resY, margins: margins)
+        }
+    }
+
+    @ObservationIgnored private var assHeader: ASSHeader?
+    @ObservationIgnored private var assHeaderRequested: String?
+    @ObservationIgnored private var assHeaderLines: [String]?
+    private static let assHeaderStart = "JRASS-BEGIN", assHeaderEnd = "JRASS-END"
+
+    /// The selected primary subtitle track of this file.
+    private var assTrackKey: String {
+        "\(loadGeneration):\(player.selectedSubtitle()?.mpvID ?? -1)"
+    }
+
+    /// The playback library can't read mpv properties, so mpv prints the selected ASS track's
+    /// header into its log, between two markers, and the log handler collects it.
+    private func requestASSHeader() {
+        let key = assTrackKey
+        guard assHeaderRequested != key else { return }
+        assHeaderRequested = key
+        player.executeCommand("expand-properties", arguments: [
+            "print-text", "\(Self.assHeaderStart)\n${sub-ass-extradata}\n\(Self.assHeaderEnd)",
+        ])
+    }
+
+    private func collectASSHeader(_ msg: MPVLogMessage) {
+        let line = msg.message.trimmingCharacters(in: .newlines)
+        if line == Self.assHeaderStart { assHeaderLines = []; return }
+        guard var lines = assHeaderLines else { return }
+        if line == Self.assHeaderEnd {
+            assHeaderLines = nil
+            guard let key = assHeaderRequested,
+                  let header = ASSHeader.parse(lines.joined(separator: "\n"), trackKey: key) else {
+                diagnostics.append("[JellyReco] Couldn't read this subtitle's styles; top lines may be cut in Fill")
+                return
+            }
+            assHeader = header
+            applySubtitleLayout()
+            return
+        }
+        lines.append(line)
+        assHeaderLines = lines.count > 4000 ? nil : lines
     }
 
     func setFill(_ on: Bool) { aspectMode = on ? .fill : .fit }
