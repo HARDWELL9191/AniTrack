@@ -295,6 +295,9 @@ export class PlayerController {
     const base = this.state.queue[index];
     if (!base) return;
     this.clearUpNext();
+    // The previous episode's "next" (often this very episode) must not carry over: on the last
+    // episode nothing comes next and no pop-up may appear.
+    if (this.state.upNext) this.patch({ upNext: null });
     this.skippedSegments.clear();
     this.reportedStart = false;
     this.upNextDismissed = false;
@@ -585,15 +588,19 @@ export class PlayerController {
 
   private async findUpNext() {
     const st = this.state;
-    const next = st.queue[st.index + 1] ?? null;
-    if (next) { this.patch({ upNext: next }); return; }
+    const token = this.loadToken;
     const item = st.item;
+    const next = st.queue[st.index + 1] ?? null;
+    if (next && next.Id !== item?.Id) { this.patch({ upNext: next }); return; }
+    this.patch({ upNext: null });
     if (item?.Type === "Episode" && item.SeriesId) {
       try {
         const r = await this.api.episodes(item.SeriesId, { adjacentTo: item.Id, limit: 3 });
+        // A late answer for an episode that's no longer playing is dropped.
+        if (token !== this.loadToken || this.state.item?.Id !== item.Id) return;
         const i = r.Items.findIndex((e) => e.Id === item.Id);
         const after = i >= 0 ? r.Items[i + 1] : undefined;
-        if (after && after.LocationType !== "Virtual") {
+        if (after && after.Id !== item.Id && after.LocationType !== "Virtual") {
           this.patch({ queue: [...this.state.queue, after], upNext: after });
         }
       } catch { /* no next */ }
