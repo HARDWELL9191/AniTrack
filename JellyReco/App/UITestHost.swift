@@ -83,6 +83,10 @@ struct UITestHost: View {
 /// UI test only: plays a test file (black picture, one white picture-subtitle caption from 0.5 s
 /// to 5 s) with the app's own player configuration on the chosen renderer, selects the subtitle
 /// and pauses inside the caption, so the test can count the caption's pixels on screen.
+@MainActor private final class LogBox {
+    var lines: [String] = []
+}
+
 private struct SubtitleRenderHost: View {
     let settings: AppSettings
     @State private var player: MPVPlayer?
@@ -107,10 +111,10 @@ private struct SubtitleRenderHost: View {
         let output: MPVPlayerConfiguration.VideoOutput = env["JELLYRECO_OUTPUT"] == "metal" ? .metal : .sampleBuffer
         let p = MPVPlayer(configuration: PlaybackController.configuration(settings: settings, output: output))
         player = p
-        var log: [String] = []
+        let log = LogBox()
         p.logHandler = { msg in
-            log.append("[\(msg.prefix)] \(msg.message.trimmingCharacters(in: .whitespacesAndNewlines))")
-            if log.count > 12 { log.removeFirst() }
+            log.lines.append("[\(msg.prefix)] \(msg.message.trimmingCharacters(in: .whitespacesAndNewlines))")
+            if log.lines.count > 12 { log.lines.removeFirst() }
         }
         p.load(url, playAutomatically: true, startTime: nil)
         for _ in 0..<150 where p.subtitleTracks.isEmpty || p.duration <= .zero {
@@ -142,7 +146,7 @@ private struct SubtitleRenderHost: View {
         }
         p.pause()
         status = "READY output=\(output == .metal ? "metal" : "native") codec=\(sub.codec ?? "?") "
-            + "nativeSubtitles=\(native.availability.rawValue) at=\(p.position)\(frame) log=\(log.joined(separator: " || "))"
+            + "nativeSubtitles=\(native.availability.rawValue) at=\(p.position)\(frame) log=\(log.lines.joined(separator: " || "))"
     }
 
     /// Bright pixels in the frame the native layer displays ("brightpx:N"), or why there's none.
