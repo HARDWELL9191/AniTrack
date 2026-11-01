@@ -542,6 +542,27 @@ final class PlaybackController {
         }
     }
 
+    @ObservationIgnored private var interruptionObservers: [NSObjectProtocol] = []
+    @ObservationIgnored private var audioNeedsReload = false
+    @ObservationIgnored private var audioInterrupted = false
+    @ObservationIgnored private var resumeAfterInterruption = false
+    @ObservationIgnored private var pausedAt: Date?
+
+    /// Takes the audio session back and restarts mpv's audio output (no 15 s limit).
+    private func restoreAudio(reason: String) {
+        do {
+            try AVAudioSession.sharedInstance().setActive(true)
+            audioNeedsReload = false
+        } catch {
+            // Still busy (a call in progress): try again on the next resume.
+            diagnostics.append("[JellyReco] Audio session: \(error.localizedDescription)")
+        }
+        lastAudioReload = Date()
+        driftStrikes = 0
+        player.executeCommand("ao-reload")
+        diagnostics.append("[JellyReco] Restarted audio output (\(reason))")
+    }
+
     func reloadAudio(reason: String) {
         guard Date().timeIntervalSince(lastAudioReload) > 15 else { return }
         lastAudioReload = Date()
@@ -557,11 +578,54 @@ final class PlaybackController {
                 guard let self else { return }
                 Task { @MainActor in
                     try? await Task.sleep(nanoseconds: 700_000_000)
+                    // During a call the session isn't ours: restarting the output then left it
+                    // dead. While paused or interrupted, restart it when playback resumes instead.
+                    if self.audioInterrupted || self.player.isPaused {
+                        self.audioNeedsReload = true
+                        return
+                    }
                     self.lastAudioReload = .distantPast
                     self.reloadAudio(reason: "audio route changed")
                 }
             }
         }
+        let center = NotificationCenter.default
+        // Calls, Siri, alarms, other apps: Apple leaves interruptions to the app (MPVUI says so too).
+        interruptionObservers.append(center.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] note in
+            let info = note.userInfo ?? [:]
+            let type = (info[AVAudioSessionInterruptionTypeKey] as? UInt).flatMap(AVAudioSession.InterruptionType.init(rawValue:))
+            let options = AVAudioSession.InterruptionOptions(rawValue: info[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0)
+            let suspended = (info[AVAudioSessionInterruptionReasonKey] as? UInt).flatMap(AVAudioSession.InterruptionReason.init(rawValue:)) == .appWasSuspended
+            MainActor.assumeIsolated {
+                guard let self, !self.stopped else { return }
+                switch type {
+                case .began:
+                    self.audioInterrupted = true
+                    self.audioNeedsReload = true
+                    // A stale notice for while the app was suspended isn't a reason to resume later.
+                    self.resumeAfterInterruption = !suspended && !self.player.isPaused
+                    self.pause()
+                    self.diagnostics.append("[JellyReco] Audio interrupted")
+                case .ended:
+                    self.audioInterrupted = false
+                    let resume = self.resumeAfterInterruption && options.contains(.shouldResume)
+                    self.resumeAfterInterruption = false
+                    Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 300_000_000)
+                        guard !self.stopped else { return }
+                        if resume { self.play() }   // restarts the audio output first
+                    }
+                default: break
+                }
+            }
+        })
+        // The phone's media services restarted: every audio output has to be set up again.
+        interruptionObservers.append(center.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, !self.stopped else { return }
+                if self.player.isPaused { self.audioNeedsReload = true } else { self.restoreAudio(reason: "media services were reset") }
+            }
+        })
     }
 
     /// Picture-based subtitles (Blu-ray PGS, DVD VobSub, DVB). The native layer draws them into the
@@ -728,8 +792,27 @@ final class PlaybackController {
     // MARK: Controls
 
     func togglePlay() {
-        player.togglePlayback()
+        if player.isPaused { play() } else { pause() }
         autoplayStreak = 0
+    }
+
+    /// Resumes with working sound: after a call, Siri, an alarm or another app's audio, or a long
+    /// pause, iOS may have taken the audio session away; mpv's audio output is then restarted
+    /// first (it otherwise stayed silent until the video was reopened).
+    func play() {
+        let pausedFor = pausedAt.map { Date().timeIntervalSince($0) } ?? 0
+        if audioNeedsReload || pausedFor > 20 {
+            restoreAudio(reason: audioNeedsReload ? "audio was interrupted" : "resumed after a pause")
+        } else {
+            try? AVAudioSession.sharedInstance().setActive(true)
+        }
+        pausedAt = nil
+        player.play()
+    }
+
+    func pause() {
+        if !player.isPaused { pausedAt = Date() }
+        player.pause()
     }
 
     func seek(to s: Double) {
@@ -862,7 +945,7 @@ final class PlaybackController {
     private func beginCountdown() {
         if settings.stillWatchingAfter > 0 && autoplayStreak >= settings.stillWatchingAfter {
             askStillWatching = true
-            player.pause()
+            pause()
             return
         }
         countdownTask?.cancel()
@@ -987,6 +1070,8 @@ final class PlaybackController {
         clearNowPlaying()
         if let routeObserver { NotificationCenter.default.removeObserver(routeObserver) }
         routeObserver = nil
+        interruptionObservers.forEach { NotificationCenter.default.removeObserver($0) }
+        interruptionObservers = []
         try? FileManager.default.removeItem(at: Self.subtitleDirectory)
         let ids = playedIds
         Task { [model = self.model] in
@@ -1049,9 +1134,9 @@ final class PlaybackController {
         guard !remoteCommandsInstalled else { return }
         remoteCommandsInstalled = true
         let center = MPRemoteCommandCenter.shared()
-        center.playCommand.addTarget { [weak self] _ in self?.player.play(); return .success }
-        center.pauseCommand.addTarget { [weak self] _ in self?.player.pause(); return .success }
-        center.togglePlayPauseCommand.addTarget { [weak self] _ in self?.player.togglePlayback(); return .success }
+        center.playCommand.addTarget { [weak self] _ in self?.play(); return .success }
+        center.pauseCommand.addTarget { [weak self] _ in self?.pause(); return .success }
+        center.togglePlayPauseCommand.addTarget { [weak self] _ in self?.togglePlay(); return .success }
         center.skipForwardCommand.preferredIntervals = [NSNumber(value: settings.jumpForward)]
         center.skipBackwardCommand.preferredIntervals = [NSNumber(value: settings.jumpBackward)]
         center.skipForwardCommand.addTarget { [weak self] _ in

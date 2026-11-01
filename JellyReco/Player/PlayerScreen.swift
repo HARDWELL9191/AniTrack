@@ -44,7 +44,7 @@ struct PlayerScreen: View {
             guard let c = controller else { return }
             if phase == .background && !model.settings.backgroundAudio && !c.player.pictureInPicture.isActive
                 && !(model.settings.pipAutomatically && c.usesNativeOutput) {
-                c.player.pause()
+                c.pause()
             }
         }
     }
