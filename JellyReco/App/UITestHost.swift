@@ -116,7 +116,7 @@ private struct SubtitleRenderHost: View {
         try? await Task.sleep(for: .milliseconds(300))
         // Like a viewer turning subtitles on and then skipping: a seek makes the player read the
         // subtitle packets again even if playback was already past them when it was selected.
-        p.seek(to: .seconds(1.0))
+        p.seek(to: .seconds(0.2))   // before the caption's packets (0.5 s), whatever the keyframe spacing
         let native = p.videoFeatureCapabilities.nativeSubtitles
         var frame = ""
         if output == .metal {
@@ -125,7 +125,7 @@ private struct SubtitleRenderHost: View {
             // While it plays through the caption (0.5–5 s), read back the frames the native layer
             // shows (the simulator's screenshots leave that layer out) and keep the brightest.
             var best = -1, sample = "none", seen: [Int] = []
-            for _ in 0..<30 {
+            for _ in 0..<40 {
                 try? await Task.sleep(for: .milliseconds(100))
                 let r = Self.displayedFramePixels()
                 let n = r.range(of: #"brightpx:(\d+)"#, options: .regularExpression).map { Int(r[$0].dropFirst(9)) ?? -1 } ?? -1
