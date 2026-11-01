@@ -112,6 +112,9 @@ final class PlaybackController {
             }
             let line = JellyfinClient.redacted("[\(msg.prefix)] \(msg.message.trimmingCharacters(in: .whitespacesAndNewlines))")
             self.noteSkippedTrack(msg.message)
+            self.noteDecodeError(msg.message)
+            // A message repeating every frame would push everything else out of Playback info.
+            if self.diagnostics.suffix(4).contains(line) { return }
             self.diagnostics.append(line)
             if self.diagnostics.count > 40 { self.diagnostics.removeFirst(self.diagnostics.count - 40) }
         }
@@ -192,6 +195,11 @@ final class PlaybackController {
         playingSince = nil
         externalSubs = []
         loadGeneration &+= 1
+        // A decoder fallback for the previous file doesn't carry over.
+        if decoderRecoveries > 0 {
+            decoderRecoveries = 0
+            player.setProperty("hwdec", to: settings.hardwareDecoding ? "auto-safe" : "no")
+        }
         skippedEmbedded = []
         pendingSubtitleSelection = nil
         skippedSegments = []
@@ -633,19 +641,29 @@ final class PlaybackController {
         })
         // Leaving the app while paused: iOS suspends it and may hand the audio hardware to other
         // apps, after which mpv's audio output stayed silent. Restart it when playback resumes.
+        // iOS also ends the hardware video decoder's session in the background (outside Picture in
+        // Picture): back in the app every frame then failed to decode ("hevc: No frame decoded?"),
+        // the picture froze and the sound with it. Coming back, both are started fresh.
         interruptionObservers.append(center.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self, !self.stopped else { return }
                 if self.player.isPaused || !self.settings.backgroundAudio {
                     self.audioNeedsReload = true
-                    self.diagnostics.append("[JellyReco] App went to the background while paused")
+                }
+                if !self.player.pictureInPicture.isActive {
+                    self.videoNeedsRefresh = true
+                    self.diagnostics.append("[JellyReco] App went to the background")
                 }
             }
         })
         interruptionObservers.append(center.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
-                guard let self, !self.stopped, self.player.isPaused else { return }
-                self.audioNeedsReload = true
+                guard let self, !self.stopped else { return }
+                if self.player.isPaused {
+                    self.audioNeedsReload = true            // restarted with the video when play is pressed
+                } else if self.videoNeedsRefresh {
+                    self.refreshAfterBackground()          // still playing (background audio): now
+                }
             }
         })
         // The phone's media services restarted: every audio output has to be set up again.
@@ -830,7 +848,9 @@ final class PlaybackController {
     /// first (it otherwise stayed silent until the video was reopened).
     func play() {
         let pausedFor = pausedAt.map { Date().timeIntervalSince($0) } ?? 0
-        if audioNeedsReload || pausedFor > 20 {
+        if videoNeedsRefresh {
+            refreshAfterBackground()
+        } else if audioNeedsReload || pausedFor > 20 {
             restoreAudio(reason: audioNeedsReload ? "audio was interrupted" : "resumed after a pause")
         } else {
             try? AVAudioSession.sharedInstance().setActive(true)
@@ -842,6 +862,47 @@ final class PlaybackController {
     func pause() {
         if !player.isPaused { pausedAt = Date() }
         player.pause()
+    }
+
+    @ObservationIgnored private var videoNeedsRefresh = false
+    @ObservationIgnored private var hardwareErrors: [Date] = []
+    @ObservationIgnored private var decoderRecoveries = 0
+    @ObservationIgnored private var lastDecoderRecovery = Date.distantPast
+
+    /// Back in the app after the background: the audio output is restarted and the picture is
+    /// re-read from the keyframe before the current spot (the decoder starts a fresh session there).
+    private func refreshAfterBackground() {
+        videoNeedsRefresh = false
+        hardwareErrors = []
+        restoreAudio(reason: "back in the app")
+        player.seek(to: .seconds(max(0, currentSeconds)))
+        diagnostics.append("[JellyReco] Restarted video decoding (back in the app)")
+    }
+
+    /// The hardware decoder failing frame after frame (its session is gone): restart it by
+    /// briefly decoding in software, then hardware again from the keyframe before this spot.
+    /// At most twice per file; after that mpv stays on software decoding, which always works.
+    private func noteDecodeError(_ message: String) {
+        guard message.contains("Error while decoding frame (hardware decoding)") else { return }
+        let now = Date()
+        hardwareErrors = hardwareErrors.filter { now.timeIntervalSince($0) < 4 } + [now]
+        guard hardwareErrors.count >= 15, now.timeIntervalSince(lastDecoderRecovery) > 20 else { return }
+        hardwareErrors = []
+        lastDecoderRecovery = now
+        decoderRecoveries += 1
+        player.setProperty("hwdec", to: "no")
+        guard decoderRecoveries <= 2, settings.hardwareDecoding else {
+            diagnostics.append("[JellyReco] Hardware decoding keeps failing: using software decoding")
+            return
+        }
+        diagnostics.append("[JellyReco] Hardware decoding failed: restarting it")
+        let generation = loadGeneration
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            guard let self, !self.stopped, self.loadGeneration == generation else { return }
+            self.player.setProperty("hwdec", to: "auto-safe")
+            self.player.seek(to: .seconds(max(0, self.currentSeconds)))
+        }
     }
 
     func seek(to s: Double) {
