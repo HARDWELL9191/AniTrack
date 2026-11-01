@@ -59,7 +59,7 @@ struct SearchView: View {
                 await search(term)
             }
             .task { await loadGenres() }
-            .appDestinations(zoom: zoom)
+            .appDestinations(zoom: zoom, path: $path)
             .environment(\.zoomNamespace, zoom)
         }
     }

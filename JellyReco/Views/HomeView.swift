@@ -62,7 +62,7 @@ struct HomeView: View {
             }
             .refreshable { await load() }
             .task(id: model.contentVersion) { await load() }
-            .appDestinations(zoom: zoom)
+            .appDestinations(zoom: zoom, path: $path)
             .environment(\.zoomNamespace, zoom)
         }
     }

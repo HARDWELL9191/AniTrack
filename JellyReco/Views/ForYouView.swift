@@ -6,6 +6,7 @@ import SwiftUI
 struct ForYouView: View {
     @Environment(AppModel.self) private var model
     @Namespace private var zoom
+    @State private var path = NavigationPath()
     @State private var genre: String?
     @State private var index = 0
     @State private var handled = 0
@@ -16,7 +17,7 @@ struct ForYouView: View {
     private var list: [ExternalPick] { discovery.visiblePicks(for: sourceId, genre: genre) }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             ScrollView {
                 VStack(spacing: 14) {
                     filterBar
@@ -51,7 +52,7 @@ struct ForYouView: View {
                 }
             }
             .sheet(item: $detail) { ExternalDetailSheet(title: $0) }
-            .appDestinations(zoom: zoom)
+            .appDestinations(zoom: zoom, path: $path)
             .environment(\.zoomNamespace, zoom)
         }
     }

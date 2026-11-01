@@ -40,6 +40,8 @@ struct GenreLink: Hashable {
 
 extension EnvironmentValues {
     @Entry var zoomNamespace: Namespace.ID? = nil
+    /// Opens an item's page on the current tab's stack (nil where there's no such stack).
+    @Entry var openDetails: ((BaseItem) -> Void)? = nil
 }
 
 extension View {
@@ -48,33 +50,43 @@ extension View {
         if let namespace { matchedTransitionSource(id: id, in: namespace) } else { self }
     }
 
-    /// Every tab's NavigationStack gets the same destinations (with the cover → page zoom).
-    func appDestinations(zoom: Namespace.ID) -> some View {
-        self
+    /// Every tab's NavigationStack gets the same destinations (with the cover → page zoom), and
+    /// the long-press menu's "Details" / "Go to show" push onto that tab's stack.
+    func appDestinations(zoom: Namespace.ID, path: Binding<NavigationPath>) -> some View {
+        let open: (BaseItem) -> Void = { path.wrappedValue.append(ItemLink(item: $0)) }
+        return self
+            .environment(\.openDetails, open)
             .navigationDestination(for: ItemLink.self) { link in
                 ItemDetailView(item: link.item)
                     .navigationTransition(.zoom(sourceID: link.item.id, in: zoom))
+                    .environment(\.openDetails, open)
             }
             .navigationDestination(for: LibraryLink.self) { link in
-                if link.library.collectionType == "livetv" {
-                    LiveTVView()
-                } else if FolderBrowserView.isFolderLibrary(link.library) {
-                    FolderBrowserView(folder: link.library)
-                } else {
-                    LibraryView(library: link.library, initialSort: link.sort)
+                Group {
+                    if link.library.collectionType == "livetv" {
+                        LiveTVView()
+                    } else if FolderBrowserView.isFolderLibrary(link.library) {
+                        FolderBrowserView(folder: link.library)
+                    } else {
+                        LibraryView(library: link.library, initialSort: link.sort)
+                    }
                 }
+                .environment(\.openDetails, open)
             }
             .navigationDestination(for: ScreenLink.self) { screen in
-                switch screen {
-                case .favorites: FavoritesView()
-                case .collections: CollectionsBrowser()
-                case .myList: MyListView()
-                case .notForMe: NotForMeView()
-                case .liveTV: LiveTVView()
+                Group {
+                    switch screen {
+                    case .favorites: FavoritesView()
+                    case .collections: CollectionsBrowser()
+                    case .myList: MyListView()
+                    case .notForMe: NotForMeView()
+                    case .liveTV: LiveTVView()
+                    }
                 }
+                .environment(\.openDetails, open)
             }
-            .navigationDestination(for: PersonLink.self) { PersonView(personId: $0.id, name: $0.name) }
-            .navigationDestination(for: GenreLink.self) { GenreItemsView(genre: $0.name, parentId: $0.parentId) }
+            .navigationDestination(for: PersonLink.self) { PersonView(personId: $0.id, name: $0.name).environment(\.openDetails, open) }
+            .navigationDestination(for: GenreLink.self) { GenreItemsView(genre: $0.name, parentId: $0.parentId).environment(\.openDetails, open) }
     }
 }
 
@@ -421,6 +433,7 @@ struct Shelf: View {
 
 struct ItemActionsMenu: ViewModifier {
     @Environment(AppModel.self) private var model
+    @Environment(\.openDetails) private var openDetails
     let item: BaseItem
 
     func body(content: Content) -> some View {
@@ -431,6 +444,17 @@ struct ItemActionsMenu: ViewModifier {
                     if (model.userData(for: item)?.playbackPositionTicks ?? 0) > 0 {
                         Button("Play from beginning", systemImage: "arrow.counterclockwise") { model.play(item, from: 0) }
                     }
+                }
+                if let openDetails {
+                    // An episode or season card: straight to its show's page.
+                    if [.episode, .season].contains(item.kind), let seriesId = item.seriesId {
+                        Button("Go to show", systemImage: "tv") {
+                            Task {
+                                if let show = try? await model.client?.item(seriesId) { openDetails(show) }
+                            }
+                        }
+                    }
+                    Button("Details", systemImage: "info.circle") { openDetails(item) }
                 }
                 Button(model.isPlayed(item) ? "Mark as unwatched" : "Mark as watched",
                        systemImage: model.isPlayed(item) ? "eye.slash" : "checkmark.circle") {

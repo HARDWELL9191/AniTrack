@@ -314,6 +314,21 @@ private struct PlayerContent: View {
         .glassEffect(.regular.interactive(), in: .circle)
     }
 
+    private func episodeButton(_ symbol: String, label: String, action: @escaping () -> Void) -> some View {
+        Button {
+            action()
+            scheduleHide()
+        } label: {
+            Image(systemName: symbol)
+                .font(.system(size: 17, weight: .semibold))
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.white)
+        .accessibilityLabel(label)
+    }
+
     private var bottomBar: some View {
         VStack(alignment: .leading, spacing: 5) {   // 15 pt from the buttons to the bar, as on Apple TV
             HStack(alignment: .bottom, spacing: 12) {
@@ -327,22 +342,20 @@ private struct PlayerContent: View {
                 Spacer()
                 // Like Apple's player: the buttons share one glass capsule (not a circle each).
                 HStack(spacing: 10) {
-                    // Next episode where the speed button was (speed is in the ⋯ menu now).
+                    // Previous / next episode where the speed button was (speed is in the ⋯ menu
+                    // now). Each one is only there when that episode exists: no previous on the
+                    // show's first episode, no next on the last episode of its last season.
                     if controller.item.kind == .episode {
-                        Button {
-                            Task { await controller.playNext(auto: false) }
-                            scheduleHide()
-                        } label: {
-                            Image(systemName: "forward.end.fill")
-                                .font(.system(size: 17, weight: .semibold))
-                                .frame(width: 44, height: 44)
-                                .contentShape(Rectangle())
+                        if controller.previousEpisode != nil {
+                            episodeButton("backward.end.fill", label: "Previous episode") {
+                                Task { await controller.playPrevious() }
+                            }
                         }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(.white)
-                        .disabled(controller.upNext == nil)
-                        .opacity(controller.upNext == nil ? 0.4 : 1)
-                        .accessibilityLabel("Next episode")
+                        if controller.upNext != nil {
+                            episodeButton("forward.end.fill", label: "Next episode") {
+                                Task { await controller.playNext(auto: false) }
+                            }
+                        }
                     }
                     audioMenu
                     subtitleMenu

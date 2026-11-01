@@ -41,6 +41,8 @@ final class PlaybackController {
     private(set) var segments: [MediaSegment] = []
     private(set) var activeSegment: MediaSegment?
     private(set) var upNext: BaseItem?
+    /// The episode before this one in the whole series (across seasons), nil on the very first.
+    private(set) var previousEpisode: BaseItem?
     private(set) var upNextCountdown: Int?
     private(set) var askStillWatching = false
     private(set) var statusNote: String?
@@ -193,6 +195,7 @@ final class PlaybackController {
         // The previous episode's intro / credits times and lock-screen picture don't carry over.
         segments = []
         nowPlayingArtwork = nil
+        previousEpisode = nil
         let resumeSeconds: Double = {
             if let start { return start }
             let ticks = model.userData(for: target)?.playbackPositionTicks ?? target.resumeTicks
@@ -268,6 +271,8 @@ final class PlaybackController {
                 guard let self, self.loadGeneration == generation else { return }
                 self.segments = found
             }
+
+            if full.kind == .episode { findNeighbours(of: full, generation: generation) }
 
             await client.reportStart(report())
             lastReport = Date()
@@ -900,12 +905,31 @@ final class PlaybackController {
         await open(next, start: 0, fallback: false)
     }
 
+    /// The episode before this one (for the previous button), and more episodes ahead when the
+    /// queue has run out (it reaches 50 episodes ahead, which long series outlast with autoplay).
+    private func findNeighbours(of episode: BaseItem, generation: Int) {
+        guard let sid = episode.seriesId else { return }
+        Task { [weak self, client] in
+            var around = (try? await client.episodes(seriesId: sid, adjacentTo: episode.id)) ?? []
+            var i = around.firstIndex(where: { $0.id == episode.id })
+            // The neighbour is a missing (virtual) episode: look further back in the whole list.
+            if i == nil || (i! > 0 && around[i! - 1].locationType == "Virtual") {
+                around = (try? await client.episodes(seriesId: sid)) ?? []
+                i = around.firstIndex(where: { $0.id == episode.id })
+            }
+            guard let self, self.loadGeneration == generation, let i else { return }
+            self.previousEpisode = around[..<i].last { $0.locationType != "Virtual" && $0.id != episode.id }
+            if self.queue.isEmpty {
+                let more = await self.model.episodesAfter(episode)
+                guard self.loadGeneration == generation, self.queue.isEmpty, !more.isEmpty else { return }
+                self.queue = more
+                self.upNext = more.first
+            }
+        }
+    }
+
     func playPrevious() async {
-        guard let sid = item.seriesId else { return }
-        // Just the neighbours of this episode, not the whole series.
-        var around = (try? await client.episodes(seriesId: sid, adjacentTo: item.id)) ?? []
-        if !around.contains(where: { $0.id == item.id }) { around = (try? await client.episodes(seriesId: sid)) ?? [] }
-        guard let i = around.firstIndex(where: { $0.id == item.id }), i > 0 else { return }
+        guard let previous = previousEpisode else { return }
         countdownTask?.cancel()
         upNextCountdown = nil
         endSession()
@@ -915,7 +939,7 @@ final class PlaybackController {
         request.mediaSourceId = nil
         triedMetal = false
         triedTranscode = false
-        await open(around[i - 1], start: 0, fallback: false)
+        await open(previous, start: 0, fallback: false)
     }
 
     /// Another episode chosen from the Episodes panel (the player stays open).
@@ -933,7 +957,7 @@ final class PlaybackController {
         await open(episode, start: nil, fallback: false)
     }
 
-    var hasPrevious: Bool { item.kind == .episode && (item.indexNumber ?? 1) > 1 }
+    var hasPrevious: Bool { previousEpisode != nil }
 
     // MARK: Retry / stop
 

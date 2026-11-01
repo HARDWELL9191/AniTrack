@@ -111,6 +111,7 @@ struct MyListView: View {
                 }
                 .buttonStyle(PressStyle())
                 .cardContextMenu {
+                    Button("Details", systemImage: "info.circle") { detail = ext }
                     Button("Remove from My List", systemImage: "bookmark.slash", role: .destructive) {
                         Task { await model.removeFromMyList(entry) }
                     }
@@ -198,6 +199,7 @@ struct NotForMeView: View {
                         Button { detail = t } label: { ExternalPosterCard(title: t, width: 104) }
                             .buttonStyle(PressStyle())
                             .cardContextMenu {
+                                Button("Details", systemImage: "info.circle") { detail = t }
                                 Button(tab == 0 ? "Undo Not for me" : "Undo Already seen", systemImage: "arrow.uturn.backward") {
                                     Task { tab == 0 ? await model.markExternalNotForMe(t, false) : await model.unmarkSeen(t) }
                                 }

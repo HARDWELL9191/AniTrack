@@ -6,9 +6,10 @@ import UIKit
 struct LibrariesView: View {
     @Environment(AppModel.self) private var model
     @Namespace private var zoom
+    @State private var path = NavigationPath()
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             ScrollView {
                 LazyVGrid(columns: [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)], spacing: 14) {
                     ForEach(model.libraries) { lib in
@@ -39,7 +40,7 @@ struct LibrariesView: View {
             .navigationTitle("Library")
             .toolbarTitleDisplayMode(.inlineLarge)
             .refreshable { await model.refreshSession() }
-            .appDestinations(zoom: zoom)
+            .appDestinations(zoom: zoom, path: $path)
             .environment(\.zoomNamespace, zoom)
         }
     }
