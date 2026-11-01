@@ -98,6 +98,7 @@ final class PlaybackController {
                                                                   output: .sampleBuffer))   // renderer is automatic (see open())
         player.setDiagnosticsEnabled(true)
         attachLog()
+        appliedSubtitleProperties = ["sub-ass-override": model.settings.subtitleASSMode]
     }
 
     private func attachLog() {
@@ -122,7 +123,7 @@ final class PlaybackController {
             "sub-scale": String(format: "%.2f", settings.subtitleSize),
             "sub-color": settings.subtitleColor.mpvHex,
             "sub-bold": settings.subtitleBold ? "yes" : "no",
-            "sub-pos": "\(settings.subtitlePosition)",
+            "sub-pos": "\(min(settings.subtitlePosition, 100))",   // the exact place is set per subtitle once it's known
             "sub-font-size": "52",
             "demuxer-readahead-secs": "30",
             "embeddedfonts": "yes",
@@ -196,6 +197,7 @@ final class PlaybackController {
         segments = []
         nowPlayingArtwork = nil
         previousEpisode = nil
+        layoutKind = nil
         let resumeSeconds: Double = {
             if let start { return start }
             let ticks = model.userData(for: target)?.playbackPositionTicks ?? target.resumeTicks
@@ -260,7 +262,7 @@ final class PlaybackController {
             guard let url else { throw JellyfinError.message("Couldn't build the stream address.") }
 
             player.load(url, playAutomatically: true, startTime: resumeSeconds > 1 ? .seconds(resumeSeconds) : nil)
-            if fillHidden > 0 || fillScale != 1 { applySubtitleLayout() }
+            applySubtitleLayout()
             player.setPlaybackRate(settings.defaultSpeed)
             loadExternalSubtitles(itemId: full.id, source: src)
             prepareTrickplay(full, source: src)
@@ -474,6 +476,7 @@ final class PlaybackController {
         checkAudioSync()
         updateSegments()
         checkSubtitleRendering()
+        if didApplyTracks, primarySubtitleKind != layoutKind { applySubtitleLayout() }
 
         if state == .ended { await handleEnded() }
 
@@ -511,6 +514,8 @@ final class PlaybackController {
     private func rebuildPlayer(output: MPVPlayerConfiguration.VideoOutput) {
         player.stop()
         player = MPVPlayer(configuration: Self.configuration(settings: settings, output: output))
+        appliedSubtitleProperties = ["sub-ass-override": settings.subtitleASSMode]
+        layoutKind = nil
         player.pictureInPicture.allowsAutomaticStartFromInline = settings.pipAutomatically
         player.setDiagnosticsEnabled(true)
         attachLog()
@@ -846,9 +851,9 @@ final class PlaybackController {
     @ObservationIgnored private var fillHidden: Double = 0
     @ObservationIgnored private var fillScale: Double = 1
 
-    /// While the video is zoomed to fill, part of the picture is off screen: lift subtitles into
-    /// the visible area and scale them back to their normal size (text subtitles; styled ASS
-    /// keeps its own placement, like in Infuse).
+    /// While the video is zoomed to fill, part of the picture is off screen (the native layer
+    /// draws subtitles into the picture, so they're cropped with it): lift subtitles into the
+    /// visible area and scale them back to their normal size.
     func applyFill(hiddenFraction: Double, scale: Double) {
         fillHidden = hiddenFraction
         fillScale = max(scale, 1)
@@ -857,11 +862,59 @@ final class PlaybackController {
 
     func applySubtitleScale() { applySubtitleLayout() }
 
+    /// What the primary subtitle is, as far as placing it goes.
+    enum SubtitleKind: Equatable { case none, text, styled, picture }
+    private var primarySubtitleKind: SubtitleKind {
+        guard let sub = player.selectedSubtitle() else { return .none }
+        let codec = (stream(for: sub)?.codec ?? sub.codec ?? "").lowercased()
+        if Self.isPictureSubtitle(codec) { return .picture }
+        return ["ass", "ssa"].contains(codec) ? .styled : .text
+    }
+    @ObservationIgnored private var layoutKind: SubtitleKind?
+    /// What was last given to mpv (changing sub-ass-override reloads the subtitles, so only on change).
+    @ObservationIgnored private var appliedSubtitleProperties: [String: String] = [:]
+
+    private func setSubtitleProperty(_ name: String, _ value: String) {
+        guard appliedSubtitleProperties[name] != value else { return }
+        appliedSubtitleProperties[name] = value
+        player.setProperty(name, to: value)
+    }
+
+    /// Lowest text / ASS lines may go below their normal place (% of the picture): about the
+    /// usual bottom margin, so they reach the edge without being cut.
+    static let textLoweringLimit = 2.5
+
+    /// Where subtitles sit (mpv sub-pos: 100 = their normal place, less = higher, more = lower).
+    /// - Text and styled ASS: the Vertical position setting, relative to what's visible.
+    /// - Picture subtitles (PGS, VobSub, DVB) already sit above the bottom on the disc: in Fill
+    ///   they're lifted only by the part cut off below them (not the whole strip), and above
+    ///   100 % they move down, never past the picture's bottom edge (mpv stops them there).
+    /// - "Keep their own styling" ASS ignores any repositioning in mpv, so while it has to move
+    ///   (Fill, or a position other than 100 %) it runs as "keep styling" with a size that only
+    ///   cancels the zoom: same fonts, colours and look.
     private func applySubtitleLayout() {
-        let base = Double(settings.subtitlePosition)               // % of the picture height
-        let pos = fillHidden * 100 + base * (1 - 2 * fillHidden)
-        player.setProperty("sub-pos", to: String(Int(pos.rounded())))
-        player.setProperty("sub-scale", to: String(format: "%.3f", settings.subtitleSize / fillScale))
+        let kind = primarySubtitleKind
+        layoutKind = kind
+        let base = Double(settings.subtitlePosition)
+        let visible = 1 - 2 * fillHidden
+        var scale = settings.subtitleSize / fillScale
+        var override = settings.subtitleASSMode
+        let pos: Double
+        switch kind {
+        case .picture:
+            let fillNeed = max(0, fillHidden * 100 - 4)          // disc subtitles keep ~5 % below them
+            pos = 100 - fillNeed - (100 - base) * visible
+        default:
+            let wanted = base > 100 ? 100 + min(base - 100, Self.textLoweringLimit) : base
+            pos = fillHidden * 100 + wanted * visible
+        }
+        if kind == .styled, override == "no", fillHidden > 0 || base != 100 {
+            override = "scale"
+            scale = 1 / fillScale
+        }
+        setSubtitleProperty("sub-ass-override", override)
+        setSubtitleProperty("sub-pos", String(format: "%.1f", min(150, max(0, pos))))
+        setSubtitleProperty("sub-scale", String(format: "%.3f", scale))
     }
 
     func setFill(_ on: Bool) { aspectMode = on ? .fill : .fit }

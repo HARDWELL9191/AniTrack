@@ -663,9 +663,11 @@ struct SubtitleSettingsView: View {
                 }
                 VStack(alignment: .leading) {
                     Text("Vertical position: \(s.subtitlePosition)%")
-                    Slider(value: Binding(get: { Double(s.subtitlePosition) }, set: { s.subtitlePosition = Int($0) }), in: 50...100, step: 1)
+                    Slider(value: Binding(get: { Double(s.subtitlePosition) }, set: { s.subtitlePosition = Int($0) }), in: 50...110, step: 1)
                 }
-            } header: { Text("Subtitle style") }
+            } header: { Text("Subtitle style") } footer: {
+                Text("100% is where subtitles normally sit. Lower numbers move them up; above 100% moves them down, as far as the bottom edge (Blu-ray and DVD picture subtitles can go further, since they start higher).")
+            }
             Section {
                 Picker("Styled subtitles", selection: $s.subtitleASSMode) {
                     Text("Keep their own styling").tag("no")
@@ -681,20 +683,82 @@ struct SubtitleSettingsView: View {
         .navigationTitle("Subtitles")
     }
 
+    /// The player's subtitle look, drawn the way mpv draws it: same colour, weight, outline /
+    /// drop shadow / dark box, outline thickness, size and vertical position (mpv sizes are at a
+    /// 720-line picture, font size 52; the preview is a 16:9 picture of the row's width).
     private func preview(_ s: AppSettings) -> some View {
-        ZStack(alignment: .bottom) {
-            LinearGradient(colors: [.indigo, .black], startPoint: .top, endPoint: .bottom)
-            Text("The quick brown fox jumps.")
-                .font(.system(size: 17 * s.subtitleSize, weight: s.subtitleBold ? .bold : .regular))
-                .foregroundStyle(s.subtitleColor.color)
-                .shadow(color: .black, radius: s.subtitleBackground == .shadow ? 3 : 1)
-                .padding(.horizontal, 6)
-                .background { if s.subtitleBackground == .box { Color.black.opacity(0.6) } }
-                .padding(.bottom, 12)
+        GeometryReader { geo in
+            let h = geo.size.height
+            let unit = h / 720                                   // one mpv pixel at 720 lines
+            let fontSize = 52 * unit * s.subtitleSize
+            let border: CGFloat = {
+                switch s.subtitleBackground {
+                case .outline: return s.subtitleOutlineSize * unit * s.subtitleSize
+                case .shadow: return 1 * unit * s.subtitleSize
+                case .box: return 0
+                }
+            }()
+            let shadow: CGFloat = s.subtitleBackground == .box ? 0
+                : (s.subtitleBackground == .shadow ? 3 : 1) * unit * s.subtitleSize
+            let pos = Double(s.subtitlePosition)
+            let lowered = pos > 100 ? min(pos - 100, PlaybackController.textLoweringLimit) : 0
+            // mpv's bottom margin (22 at 720 lines), moved up by (100 − position) % of the picture.
+            let bottom = max(0, 22 * unit + h * CGFloat(max(0, 100 - pos)) / 100 - h * CGFloat(lowered) / 100)
+            ZStack(alignment: .bottom) {
+                LinearGradient(colors: [.indigo, .black], startPoint: .top, endPoint: .bottom)
+                SubtitlePreviewText(text: "The quick brown fox jumps.", size: fontSize, bold: s.subtitleBold,
+                                    color: s.subtitleColor.color, border: border, shadow: shadow,
+                                    box: s.subtitleBackground == .box ? 3 * unit * s.subtitleSize : nil)
+                    .padding(.horizontal, 8)
+                    .padding(.bottom, bottom)
+            }
         }
-        .frame(height: 110)
+        .aspectRatio(16 / 9, contentMode: .fit)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .listRowInsets(EdgeInsets())
+        .animation(.snappy, value: s.subtitlePosition)
+    }
+}
+
+/// One subtitle line styled like mpv's: a black outline of the given width (drawn as copies of
+/// the text around it), a black drop shadow offset down-right, or a translucent dark box.
+private struct SubtitlePreviewText: View {
+    let text: String
+    let size: CGFloat
+    let bold: Bool
+    let color: Color
+    let border: CGFloat
+    let shadow: CGFloat
+    let box: CGFloat?
+
+    private func label(_ c: Color) -> some View {
+        Text(text).font(.system(size: size, weight: bold ? .bold : .regular)).foregroundStyle(c)
+            .multilineTextAlignment(.center)
+    }
+
+    var body: some View {
+        ZStack {
+            if shadow > 0 { outlined(.black).offset(x: shadow, y: shadow) }
+            outlined(.black)
+            label(color)
+        }
+        .padding(.horizontal, box ?? 0)
+        .padding(.vertical, (box ?? 0) / 2)
+        .background { if box != nil { Color.black.opacity(0.6) } }
+    }
+
+    /// The text's outline: copies around it in 16 directions, `border` points away.
+    @ViewBuilder private func outlined(_ c: Color) -> some View {
+        if border > 0.05 {
+            ZStack {
+                ForEach(0..<16, id: \.self) { i in
+                    let a = Double(i) / 16 * 2 * .pi
+                    label(c).offset(x: border * cos(a), y: border * sin(a))
+                }
+            }
+        } else {
+            label(.clear)
+        }
     }
 }
 
