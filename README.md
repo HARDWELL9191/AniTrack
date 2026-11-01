@@ -1,76 +1,40 @@
-# AniReco
+# JellyReco
 
-A personal AniList client for iPhone (iOS 26+, built against the iOS 27 SDK).
+**A Jellyfin player for iPhone, Windows and Linux** that plays every file directly, looks like Apple's own apps (Liquid Glass), and recommends what to watch next from your own library.
 
-- **Home**: what you're watching, what's ready to watch, airing countdowns, one-tap **+1 episode**
-- **Discover**: search (optionally within a category), category browsing with sorting, trending, this season, next season, all-time top
-- **For You**: "Ask Hoshi" personal picks, one card at a time, filterable by category (Isekai, Romance, Ecchi…), and endless: more picks load as you reach the end
-- **Home**: built for discovery: picked for you, best matches this season, which planned show fits you best, trending
-- **Match %**: every show gets a personal match next to its score (genres/tags instantly, refined by on-device AI; most AI work happens while charging)
-- **Lists**: Watching / Planning / Completed / Paused / Dropped / Rewatching, with filter and sorting
-- **Details**: synopsis, info, tags (spoilers hidden), related shows, fan recommendations, edit status / progress / score
-- Syncs both ways with your AniList account
+| | Download |
+|---|---|
+| **iPhone** (iOS 26+) | AltStore source: `https://raw.githubusercontent.com/HARDWELL9191/AniTrack/altstore/source.json` · or the IPA from [JellyReco (latest build)](https://github.com/HARDWELL9191/AniTrack/releases/tag/jellyreco-latest) |
+| **Windows** (ARM64, e.g. Snapdragon) | `JellyReco-Setup-arm64.exe` from [JellyReco PC (latest build)](https://github.com/HARDWELL9191/AniTrack/releases/tag/jellyreco-pc-latest) |
+| **Linux** (x86_64) | `JellyReco-x86_64.AppImage` from [JellyReco PC (latest build)](https://github.com/HARDWELL9191/AniTrack/releases/tag/jellyreco-pc-latest) |
 
-## How For You works
+## What it does
 
-1. Builds a taste profile from your list: high scores pull toward a show's genres and tags, dropped and low scores push away.
-2. Collects AniList fan recommendations from your ~30 favorite shows, weighted by how much you liked each one.
-3. Explores your top tags and genres to find shows nobody linked yet.
-4. **On-device AI re-rank:** Apple's Natural Language contextual embedding model turns each synopsis into a meaning vector on your iPhone and compares it to a "taste vector" made from your favorites. iOS runs this with hardware acceleration (on recent iPhones, the Neural Engine when iOS chooses it; apps can't force it).
-5. **"Why would I like this?"** uses Apple's on-device Foundation Models (Apple Intelligence) to write a 2-sentence reason, only when you tap it.
+- **Plays everything on the device:** mpv-based player for MKV, MP4, AVI, TS/M2TS, WebM…; H.264, HEVC 10-bit, AV1, VP9 and more; DTS, TrueHD, AC3/E-AC3 (Atmos), FLAC, Opus; ASS/SSA with embedded fonts, PGS, VobSub, DVB, SRT, WebVTT. Server transcoding only as a last resort.
+- **A player that feels like Apple's:** skip intro and credits, next-episode countdown, previous/next episode, trickplay previews, chapters, audio and subtitle sync, playback speed. On iPhone also Picture in Picture, AirPlay, Dolby Vision / HDR, two subtitles at once and fit/fill.
+- **For You:** AI picks from your own library, ranked by what you finished, favourited, gave up on or marked *Not for me*, plus titles you don't own yet (TMDB) with age ratings.
+- **Your whole library:** Home, Continue Watching, Next Up, My List, libraries, collections, search, Live TV, item pages with seasons, cast and extras.
+- **Synced through your server:** My List, Not for me and settings are stored on your Jellyfin account, so a new device picks them up when you sign in.
+- **Server dashboard for admins:** sessions, scheduled tasks, users and permissions, libraries, logs, plugins.
 
-Battery: embeddings are cached on disk (each show is processed once), picks are saved and only rebuilt when your list changes or after 3 days, the model is unloaded after each run, and nothing runs in the background.
+## Branches
 
----
+| Branch | What's in it | Workflow |
+|---|---|---|
+| `jellyfin` | JellyReco for iPhone | **JellyReco iOS**: builds the IPA, publishes it and updates the AltStore source (`altstore` branch) on every push |
+| `jellyreco` | JellyReco PC (Tauri + mpv) | **JellyReco PC**: builds Windows and Linux together and publishes both |
+| `main` | AniReco (side app) | **Build IPA** |
 
-## Setup (once, ~10 minutes)
-
-### 1. Register an AniList API client
-
-1. Go to <https://anilist.co/settings/developer> and click **Create New Client**.
-2. Name: `AniReco`. Redirect URL: **`anireco://auth`**
-3. Save, then copy the **Client ID** (a number). You'll enter it in the app.
-
-### 2. Build the IPA on GitHub (no Mac needed)
-
-1. Create a new repository on GitHub (public builds are free; private repos use your Actions minutes, and macOS minutes count extra).
-2. Upload **everything in this folder**, including the hidden `.github` folder.
-   Easiest: on the empty repo page choose *uploading an existing file* and drag the whole folder in, or use `git push`.
-3. Open the **Actions** tab. The **Build IPA** workflow runs on every push to `main` (or click *Run workflow*).
-4. When it's green (about 5–10 min), open the run and download **AniReco-ipa**. It's a zip containing `AniReco.ipa`.
-
-If the build fails, download **build-log** from the failed run and send it to Claude to fix.
-
-### 3. Install on your iPhone
-
-The IPA is unsigned; a sideloading tool signs it with your Apple ID. With a free Apple ID the app works for **7 days**, then needs a refresh (the tools do this in one tap or automatically). Free accounts allow 3 sideloaded apps.
-
-First, on the iPhone: **Settings → Privacy & Security → Developer Mode → On** (restart when asked).
-
-**Option A – from your PC: [Sideloadly](https://sideloadly.io)**
-1. Install Sideloadly (and iTunes / Apple Devices on Windows), connect the iPhone by cable.
-2. Drag in `AniReco.ipa`, enter your Apple ID, click **Start**.
-3. On the iPhone: **Settings → General → VPN & Device Management → trust your developer certificate**.
-4. Turn on Sideloadly's auto-refresh, or re-run it within 7 days.
-
-**Option B – on the iPhone only: SideStore**
-Install SideStore (the official SideStore guides, or SideInstaller for an on-device setup on iOS 27), then open `AniReco.ipa` in SideStore. SideStore refreshes the app over Wi-Fi.
-
-Only download these tools from their official sites; you're typing your Apple ID into them.
-
-### 4. First launch
-
-Enter your Client ID, tap **Log in with AniList**, approve, and you're in.
-Or choose **Just browse with my username** for read-only mode (no editing).
-
-For AI explanations, Apple Intelligence must be on: **Settings → Apple Intelligence & Siri**.
+Each iPhone build is version `1.0.<build number>`, so AltStore offers it as an update automatically.
 
 ---
 
-Unofficial; not affiliated with AniList.co. Data from the public AniList API.
+## AniReco (side app)
 
-## Custom app icon
+A personal **AniList** client for iPhone: your lists, airing countdowns, discovery, and AI-ranked "For You" picks with a personal match % for every show. It syncs both ways with your AniList account.
 
-Want your own icon? Add a square image (ideally 1024×1024) named `custom-icon.png` (or `.jpg`)
-to the root of this repository. The next build uses it automatically; delete it to go back to
-the default katana icon.
+Setup, building and installation: see **[ANIRECO.md](ANIRECO.md)**.
+
+---
+
+Unofficial; not affiliated with Jellyfin, AniList or TMDB.
