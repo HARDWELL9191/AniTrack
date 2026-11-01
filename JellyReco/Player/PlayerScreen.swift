@@ -152,8 +152,12 @@ private struct PlayerContent: View {
 
     var body: some View {
         ZStack {
+            // Every layer has a fixed z order: without it SwiftUI draws a view that's fading out
+            // *below* the others, so the controls vanished at once over the video (the native
+            // video view covered them) while over the black bars they still faded out.
             VideoSurface(controller: controller, pinch: pinch)
                 .ignoresSafeArea()
+                .zIndex(0)
 
             TouchLayer(
                 onTap: { toggleControls() },
@@ -163,25 +167,26 @@ private struct PlayerContent: View {
                 isLocked: locked
             )
             .ignoresSafeArea()
+            .zIndex(1)
 
             if case .failed(let message) = controller.phase {
-                ErrorCard(message: message, controller: controller, close: close)
+                ErrorCard(message: message, controller: controller, close: close).zIndex(2)
             } else if isLoading && !(showControls || panel != nil || menuOpen) {
                 // Controls hidden: just Apple's spinner, no box.
-                ProgressView().controlSize(.large).tint(.white).allowsHitTesting(false)
+                ProgressView().controlSize(.large).tint(.white).allowsHitTesting(false).zIndex(2)
             }
 
             if locked {
-                lockedOverlay
+                lockedOverlay.zIndex(3)
             } else if showControls || panel != nil || menuOpen {
-                controls.transition(.opacity)
+                controls.transition(.opacity).zIndex(3)
                 if panel == nil {
                     // Centred on the screen itself (not between the bars), like Apple's player.
-                    transport.transition(.opacity)
+                    transport.transition(.opacity).zIndex(4)
                 }
             }
 
-            if !locked { cornerCards }
+            if !locked { cornerCards.zIndex(5) }
             // Episodes open as a panel on the right of the screen (a vertical list).
             if panel == .episodes && !locked {
                 EpisodesStrip(controller: controller) { withAnimation(.snappy) { panel = nil } }
@@ -189,6 +194,7 @@ private struct PlayerContent: View {
                     .padding(.trailing, 16)
                     .padding(.vertical, 16)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
+                    .zIndex(6)
             }
             if showInfo && !locked {
                 InfoCard(controller: controller) { withAnimation(.snappy) { showInfo = false } }
@@ -196,9 +202,10 @@ private struct PlayerContent: View {
                     .padding(.horizontal, 24)
                     .padding(.top, showControls || panel != nil || menuOpen ? 72 : 16)
                     .transition(.opacity)
+                    .zIndex(6)
             }
-            if let hud { HUDView(hud: hud).allowsHitTesting(false).transition(.opacity) }
-            if controller.askStillWatching { StillWatchingCard(controller: controller, close: close) }
+            if let hud { HUDView(hud: hud).allowsHitTesting(false).transition(.opacity).zIndex(7) }
+            if controller.askStillWatching { StillWatchingCard(controller: controller, close: close).zIndex(8) }
             VolumeViewHost(volume: volume).frame(width: 1, height: 1).opacity(0.01).allowsHitTesting(false)
         }
         .tint(.white)
