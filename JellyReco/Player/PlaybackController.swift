@@ -198,7 +198,8 @@ final class PlaybackController {
         // A decoder fallback for the previous file doesn't carry over.
         if decoderRecoveries > 0 {
             decoderRecoveries = 0
-            player.setProperty("hwdec", to: settings.hardwareDecoding ? "auto-safe" : "no")
+            hwdecAlternated = false
+            player.setProperty("hwdec", to: settings.hardwareDecoding ? hwdecValue : "no")
         }
         skippedEmbedded = []
         pendingSubtitleSelection = nil
@@ -529,6 +530,7 @@ final class PlaybackController {
         player.stop()
         player = MPVPlayer(configuration: Self.configuration(settings: settings, output: output))
         appliedSubtitleProperties = ["sub-ass-override": settings.subtitleASSMode, "sub-ass-style-overrides": ""]
+        hwdecAlternated = false
         layoutKind = nil
         assHeaderRequested = nil
         player.pictureInPicture.allowsAutomaticStartFromInline = settings.pipAutomatically
@@ -869,14 +871,28 @@ final class PlaybackController {
     @ObservationIgnored private var decoderRecoveries = 0
     @ObservationIgnored private var lastDecoderRecovery = Date.distantPast
 
-    /// Back in the app after the background: the audio output is restarted and the picture is
-    /// re-read from the keyframe before the current spot (the decoder starts a fresh session there).
+    /// The hardware-decoding setting mpv gets (the same as the player library's), and an
+    /// equivalent spelling of it: switching between the two makes mpv build a brand-new decoder
+    /// (VideoToolbox either way), which is how a decoder iOS ended in the background is replaced.
+    private var hwdecValue: String { usesNativeOutput ? "auto-safe" : "videotoolbox,auto-safe" }
+    private var hwdecAlternate: String { "videotoolbox" }
+    @ObservationIgnored private var hwdecAlternated = false
+
+    /// Back in the app after the background: a new video decoder (iOS ended the old one's session,
+    /// and mpv only gave up on it after ~10 s of failed frames, holding back the sound meanwhile),
+    /// the picture re-read from the keyframe before the current spot, and the audio output restarted.
     private func refreshAfterBackground() {
         videoNeedsRefresh = false
         hardwareErrors = []
         restoreAudio(reason: "back in the app")
-        player.seek(to: .seconds(max(0, currentSeconds)))
-        diagnostics.append("[JellyReco] Restarted video decoding (back in the app)")
+        if settings.hardwareDecoding {
+            // mpv rebuilds the decoder and itself re-reads the picture from this exact spot.
+            hwdecAlternated.toggle()
+            player.setProperty("hwdec", to: hwdecAlternated ? hwdecAlternate : hwdecValue)
+        } else {
+            player.seek(to: .seconds(max(0, currentSeconds)))
+        }
+        diagnostics.append("[JellyReco] New video decoder (back in the app)")
     }
 
     /// The hardware decoder failing frame after frame (its session is gone): restart it by
@@ -900,7 +916,8 @@ final class PlaybackController {
         Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 1_500_000_000)
             guard let self, !self.stopped, self.loadGeneration == generation else { return }
-            self.player.setProperty("hwdec", to: "auto-safe")
+            self.hwdecAlternated = false
+            self.player.setProperty("hwdec", to: self.hwdecValue)
             self.player.seek(to: .seconds(max(0, self.currentSeconds)))
         }
     }
