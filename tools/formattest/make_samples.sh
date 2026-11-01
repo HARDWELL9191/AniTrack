@@ -34,6 +34,13 @@ cp ../subs.srt ../subs.ass . 2>/dev/null
 printf '[Script Info]\nScriptType: v4.00+\nPlayResX: 1280\nPlayResY: 720\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,Arial,48,&H0000FFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,10,10,40,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:00.50,0:00:05.00,Default,,0,0,0,,{\\c&H00FF00&}Coloured {\\c&HFF00FF&}subtitle test\n' > colored.ass
 make render_pgs.mkv $VB -i subs.sup -map 0 -map 1 -c:v libx264 -preset ultrafast -c:s copy
 make render_dvb.ts $VB -i subs.sup -map 0 -map 1 -c:v mpeg2video -c:s dvbsub
+# DVD VobSub: ffmpeg drops the converted picture when it encodes next to a video stream, so the
+# subtitle is converted on its own first (shown from the start; the tests look at 2 s), then muxed.
+ffmpeg -nostdin -loglevel error -y -i subs.sup -c:s dvdsub vobsub_only.mkv
+# (no -shortest here: it drops that subtitle packet; the 6 s video input ends the file anyway)
+ffmpeg -nostdin -loglevel error -y $VB -i vobsub_only.mkv -map 0 -map 1 -c:v libx264 -preset ultrafast -c:s copy render_vobsub.mkv \
+  && echo "made render_vobsub.mkv" || echo "SKIPPED render_vobsub.mkv"
+rm -f vobsub_only.mkv
 make render_srt.mkv $VB -i subs.srt -map 0 -map 1 -c:v libx264 -preset ultrafast -c:s srt
 # Like real Blu-ray rips muxed with MKVToolNix: PGS stored zlib-compressed (mkvmerge's default).
 if command -v mkvmerge >/dev/null; then
