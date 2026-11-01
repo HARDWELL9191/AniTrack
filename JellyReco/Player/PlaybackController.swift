@@ -886,6 +886,12 @@ final class PlaybackController {
 
     func applySubtitleScale() { applySubtitleLayout() }
 
+    /// The picture's width / height (16:9 until the file says otherwise).
+    private var videoAspect: Double {
+        guard let d = player.mediaInformation.dimensions, d.width > 0, d.height > 0 else { return 16 / 9 }
+        return Double(d.width) / Double(d.height)
+    }
+
     /// What the primary subtitle is, as far as placing it goes.
     enum SubtitleKind: Equatable { case none, text, styled, picture }
     private var primarySubtitleKind: SubtitleKind {
@@ -924,12 +930,15 @@ final class PlaybackController {
         let base = Double(settings.subtitlePosition)
         let visible = 1 - 2 * fillHidden
         let filled = fillHidden > 0.001
-        // In Fill the subtitles zoom with the picture: same size relative to it and the same
-        // line breaks as in Fit (only moved into the part that stays on screen).
-        let scale = settings.subtitleSize
+        // In Fill the subtitles look exactly as in Fit: the same size on screen (the zoom is
+        // cancelled) and the same line breaks (the lines get proportionally narrower, by wider
+        // side margins), only moved into the part that stays on screen.
+        let zoom = filled ? fillScale : 1
+        let scale = settings.subtitleSize / zoom
         var override = settings.subtitleASSMode
         let pos: Double
         var marginY = 22.0                       // mpv's default gap above / below text lines (720 lines)
+        var marginX = 25.0                       // and to the sides
         var styleOverrides = ""
         switch kind {
         case .picture:
@@ -938,7 +947,11 @@ final class PlaybackController {
             pos = 100 - fillNeed - (100 - base) * visible
         case .text, .none:
             // Top and bottom lines both move in by the cropped strip; the position setting on top.
-            marginY += fillHidden * 720
+            marginY = 22 / zoom + fillHidden * 720
+            if filled {
+                let width = 720 * videoAspect             // the picture's width in mpv's 720-line units
+                marginX = (width - (width - 2 * 25) / zoom) / 2
+            }
             let wanted = base > 100 ? 100 + min(base - 100, Self.textLoweringLimit) : base
             pos = 100 - (100 - wanted) * visible
         case .styled:
@@ -951,7 +964,7 @@ final class PlaybackController {
             // strip: every style's own top/bottom margin plus that strip, in the file's units.
             if filled {
                 if let header = assHeader, header.trackKey == assTrackKey {
-                    styleOverrides = header.marginOverrides(adding: fillHidden)
+                    styleOverrides = header.marginOverrides(hidden: fillHidden, zoom: zoom)
                 } else {
                     requestASSHeader()
                 }
@@ -960,32 +973,43 @@ final class PlaybackController {
         setSubtitleProperty("sub-ass-override", override)
         setSubtitleProperty("sub-ass-style-overrides", styleOverrides)   // reloads the subtitles when it changes
         setSubtitleProperty("sub-margin-y", String(Int(marginY.rounded())))
+        setSubtitleProperty("sub-margin-x", String(Int(marginX.rounded())))
         setSubtitleProperty("sub-pos", String(format: "%.1f", min(150, max(0, pos))))
         setSubtitleProperty("sub-scale", String(format: "%.3f", scale))
     }
 
     // MARK: ASS header (the file's own resolution and style margins, for Fill)
 
-    /// An ASS file's PlayResY and each style's vertical margin, as written in its header.
+    /// An ASS file's resolution and each style's margins, as written in its header.
     struct ASSHeader {
         let trackKey: String
+        let playResX: Double
         let playResY: Double
-        let margins: [(style: String, marginV: Double)]
+        let margins: [(style: String, left: Double, right: Double, vertical: Double)]
 
-        /// mpv's sub-ass-style-overrides value: each style's margin grown by `fraction` of the
-        /// picture height (only styles whose names mpv's list syntax can carry).
-        func marginOverrides(adding fraction: Double) -> String {
-            let extra = fraction * playResY
-            return margins
+        /// mpv's sub-ass-style-overrides value for Fill (only styles whose names mpv's list syntax
+        /// can carry). With the font shrunk by `zoom` so lines look as in Fit on screen:
+        /// - top/bottom margin: the cropped strip (`hidden` of the height) plus the style's own
+        ///   margin as it looks in Fit;
+        /// - side margins: wider, so each line is `zoom` times narrower and breaks as in Fit.
+        func marginOverrides(hidden: Double, zoom: Double) -> String {
+            margins
                 .filter { !$0.style.contains(",") && !$0.style.contains("=") && !$0.style.contains("\\") }
-                .map { "\($0.style).MarginV=\(Int(($0.marginV + extra).rounded()))" }
+                .map { m in
+                    let width = max(0, playResX - m.left - m.right)
+                    let extra = (width - width / zoom) / 2
+                    return ["\(m.style).MarginL=\(Int((m.left + extra).rounded()))",
+                            "\(m.style).MarginR=\(Int((m.right + extra).rounded()))",
+                            "\(m.style).MarginV=\(Int((hidden * playResY + m.vertical / zoom).rounded()))"]
+                        .joined(separator: ",")
+                }
                 .joined(separator: ",")
         }
 
         static func parse(_ text: String, trackKey: String) -> ASSHeader? {
             var playResX: Double?, playResY: Double?
             var format: [String] = []
-            var margins: [(style: String, marginV: Double)] = []
+            var margins: [(style: String, left: Double, right: Double, vertical: Double)] = []
             var inStyles = false
             for raw in text.split(whereSeparator: \.isNewline) {
                 let line = raw.trimmingCharacters(in: .whitespaces)
@@ -996,17 +1020,22 @@ final class PlaybackController {
                 guard inStyles else { continue }
                 if lower.hasPrefix("format:") {
                     format = line.dropFirst(7).split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces).lowercased() }
-                } else if lower.hasPrefix("style:"), let n = format.firstIndex(of: "name"), let m = format.firstIndex(of: "marginv") {
+                } else if lower.hasPrefix("style:"), let n = format.firstIndex(of: "name"),
+                          let l = format.firstIndex(of: "marginl"), let r = format.firstIndex(of: "marginr"),
+                          let v = format.firstIndex(of: "marginv") {
                     let fields = line.dropFirst(6).split(separator: ",", omittingEmptySubsequences: false)
                         .map { $0.trimmingCharacters(in: .whitespaces) }
-                    guard fields.count == format.count, let margin = Double(fields[m]), !fields[n].isEmpty else { continue }
-                    margins.append((style: fields[n], marginV: margin))
+                    guard fields.count == format.count, !fields[n].isEmpty,
+                          let left = Double(fields[l]), let right = Double(fields[r]), let vertical = Double(fields[v]) else { continue }
+                    margins.append((style: fields[n], left: left, right: right, vertical: vertical))
                 }
             }
-            // libass: without PlayResY it's 288, or PlayResX × 3/4 when only that is given.
+            // libass: neither given = 384 × 288; only one given = the other at 4:3
+            // (PlayResY 1024 with no PlayResX = 1280, its special case).
             let resY = playResY ?? playResX.map { $0 * 3 / 4 } ?? 288
-            guard resY > 0, !margins.isEmpty else { return nil }
-            return ASSHeader(trackKey: trackKey, playResY: resY, margins: margins)
+            let resX = playResX ?? (playResY == 1024 ? 1280 : resY * 4 / 3)
+            guard resY > 0, resX > 0, !margins.isEmpty else { return nil }
+            return ASSHeader(trackKey: trackKey, playResX: resX, playResY: resY, margins: margins)
         }
     }
 
