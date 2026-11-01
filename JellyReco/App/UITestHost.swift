@@ -116,14 +116,26 @@ private struct SubtitleRenderHost: View {
         try? await Task.sleep(for: .milliseconds(300))
         // Like a viewer turning subtitles on and then skipping: a seek makes the player read the
         // subtitle packets again even if playback was already past them when it was selected.
-        p.seek(to: .seconds(1.5))
-        try? await Task.sleep(for: .milliseconds(1200))   // inside the caption (0.5–5 s)
-        p.pause()
-        try? await Task.sleep(for: .milliseconds(800))
+        p.seek(to: .seconds(1.0))
         let native = p.videoFeatureCapabilities.nativeSubtitles
-        // The simulator's screenshots don't include the native video layer, so read back the frame
-        // it is actually showing (the subtitle is drawn into those pixels).
-        let frame = output == .metal ? "" : " frame=\(Self.displayedFramePixels())"
+        var frame = ""
+        if output == .metal {
+            try? await Task.sleep(for: .milliseconds(1500))
+        } else {
+            // While it plays through the caption (0.5–5 s), read back the frames the native layer
+            // shows (the simulator's screenshots leave that layer out) and keep the brightest.
+            var best = -1, sample = "none", seen: [Int] = []
+            for _ in 0..<30 {
+                try? await Task.sleep(for: .milliseconds(100))
+                let r = Self.displayedFramePixels()
+                let n = r.range(of: #"brightpx:(\d+)"#, options: .regularExpression).map { Int(r[$0].dropFirst(9)) ?? -1 } ?? -1
+                seen.append(n)
+                if n > best { best = n; sample = r }
+                if best == -1 { sample = r }
+            }
+            frame = " frame=\(sample) best=brightpx:\(best) all=\(seen.map(String.init).joined(separator: "/"))"
+        }
+        p.pause()
         status = "READY output=\(output == .metal ? "metal" : "native") codec=\(sub.codec ?? "?") "
             + "nativeSubtitles=\(native.availability.rawValue) at=\(p.position)\(frame)"
     }

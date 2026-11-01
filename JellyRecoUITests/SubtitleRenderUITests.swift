@@ -44,7 +44,7 @@ final class SubtitleRenderUITests: XCTestCase {
                 let state = app.staticTexts["subrender-state"]
                 let pred = NSPredicate(format: "label BEGINSWITH 'READY' OR label BEGINSWITH 'FAIL'")
                 let done = expectation(for: pred, evaluatedWith: state)
-                wait(for: [done], timeout: 40)
+                wait(for: [done], timeout: 50)
                 let shot = XCUIScreen.main.screenshot()
                 let a = XCTAttachment(screenshot: shot)
                 a.name = "subrender-\(file)-\(output)"
@@ -55,8 +55,8 @@ final class SubtitleRenderUITests: XCTestCase {
                 // native video layer out, so the app reads back the frame that layer is showing.
                 let pixels: Int
                 if output == "native" {
-                    let n = label.range(of: #"brightpx:(\d+)"#, options: .regularExpression)
-                        .map { Int(label[$0].dropFirst(9)) ?? -1 } ?? -1
+                    let n = label.range(of: #"best=brightpx:(\d+)"#, options: .regularExpression)
+                        .map { Int(label[$0].dropFirst(14)) ?? -1 } ?? -1
                     pixels = n
                 } else {
                     pixels = captionPixels(shot)
