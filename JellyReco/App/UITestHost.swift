@@ -113,7 +113,11 @@ private struct SubtitleRenderHost: View {
         }
         guard let sub = p.subtitleTracks.first else { status = "FAIL no subtitle track (\(p.state))"; return }
         p.selectSubtitle(sub.id)
-        try? await Task.sleep(for: .seconds(2))      // into the caption (0.5–5 s)
+        try? await Task.sleep(for: .milliseconds(300))
+        // Like a viewer turning subtitles on and then skipping: a seek makes the player read the
+        // subtitle packets again even if playback was already past them when it was selected.
+        p.seek(to: .seconds(1.5))
+        try? await Task.sleep(for: .milliseconds(1200))   // inside the caption (0.5–5 s)
         p.pause()
         try? await Task.sleep(for: .milliseconds(800))
         let native = p.videoFeatureCapabilities.nativeSubtitles

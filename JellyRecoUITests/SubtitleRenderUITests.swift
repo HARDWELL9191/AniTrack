@@ -35,7 +35,7 @@ final class SubtitleRenderUITests: XCTestCase {
         }
         let files = ["render_pgs.mkv", "render_dvb.ts", "render_vobsub.mkv", "render_ass_colored.mkv"]
         for file in files {
-            for output in ["native", "metal"] {
+            for output in ["native"] {   // Metal is covered by the formats job (mpv drawing the same files)
                 let app = XCUIApplication()
                 app.launchEnvironment["JELLYRECO_UITEST"] = "subrender"
                 app.launchEnvironment["JELLYRECO_SAMPLE"] = "\(base)/\(file)"
