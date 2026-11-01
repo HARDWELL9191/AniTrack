@@ -148,6 +148,7 @@ private struct PlayerContent: View {
     private var player: MPVPlayer { controller.player }
     private var isLoading: Bool { controller.phase == .loading || player.state == .buffering || player.state == .loading }
     private var settings: AppSettings { model.settings }
+    private var uiVisible: Bool { showControls || panel != nil || menuOpen || showInfo }
 
     var body: some View {
         ZStack {
@@ -210,7 +211,9 @@ private struct PlayerContent: View {
             Color.clear.ignoresSafeArea()
                 .onGeometryChange(for: ScreenLayout.self) { ScreenLayout(landscape: $0.size.width > $0.size.height, safe: $0.safeAreaInsets) } action: { layout = $0 }
         }
-        .onAppear { scheduleHide() }
+        .onAppear { scheduleHide(); controller.controlsVisible = uiVisible }
+        // Battery: the controller ticks quickly only while something is on screen (or due).
+        .onChange(of: uiVisible) { _, visible in controller.controlsVisible = visible }
         .onChange(of: player.isPaused) { _, paused in if paused { hideTask?.cancel() } else { scheduleHide() } }
         .onChange(of: menuOpen) { _, open in if open { hideTask?.cancel() } else { scheduleHide() } }
     }

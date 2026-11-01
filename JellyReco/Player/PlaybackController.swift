@@ -230,10 +230,20 @@ final class PlaybackController {
             source = src
             streams = src.mediaStreams ?? full.mediaStreams ?? []
 
-            // Files with picture subtitles (PGS, VobSub, DVB) open on the renderer that is proven
-            // to draw them (CI render test), chosen before playback starts: never a switch mid-play.
-            if usesNativeOutput, streams.contains(where: { $0.isSubtitle && Self.isPictureSubtitle($0.codec) }) {
-                rebuildPlayer(output: .metal)
+            // Picture subtitles (PGS, VobSub, DVB) are drawn into the frame by the native layer, which
+            // uses far less battery than the Metal renderer. The one exception is native Dolby Vision,
+            // whose frames can't be drawn on: when such a file starts with a picture subtitle on, it
+            // opens on the Metal renderer straight away instead of switching a moment into playback.
+            let startSubtitle = request.subtitleIndex ?? src.defaultSubtitleStreamIndex ?? -1
+            let startsWithPictureSub = streams.contains { $0.isSubtitle && $0.index == startSubtitle && Self.isPictureSubtitle($0.codec) }
+            let dolbyVision = streams.contains { $0.isVideo && ($0.videoRangeType ?? "").uppercased().contains("DOVI") }
+            if !fallback, dolbyVision, startsWithPictureSub {
+                if usesNativeOutput { rebuildPlayer(output: .metal) }
+                metalForSubtitles = true
+            } else if metalForSubtitles, !usesNativeOutput, !triedMetal {
+                // The previous file only needed Metal for its subtitles: back to the native layer.
+                rebuildPlayer(output: .sampleBuffer)
+                metalForSubtitles = false
             }
 
             let url: URL?
@@ -376,15 +386,56 @@ final class PlaybackController {
 
     // MARK: Ticker (state, reporting, segments, next up, failures)
 
+    /// The player's controls (or a panel, menu or Playback info) are on screen: set by PlayerScreen.
+    /// Showing them, seeking or jumping wakes the ticker so it's back on the quick rhythm at once.
+    @ObservationIgnored var controlsVisible = true {
+        didSet { if controlsVisible && !oldValue { wakeTicker() } }
+    }
+
     private func startTicker() {
         ticker?.cancel()
         ticker = Task { [weak self] in
+            var interval: UInt64 = 500_000_000
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 500_000_000)
-                guard let self else { return }   // the player is gone: stop (it used to loop forever)
+                try? await Task.sleep(nanoseconds: interval)
+                guard let self, !Task.isCancelled else { return }   // the player is gone: stop
+                self.tickInProgress = true
                 await self.tick()
+                self.tickInProgress = false
+                // Battery: twice a second only while something can need it soon; otherwise
+                // every 2.5 s (progress reports, sync and failure checks don't need more).
+                interval = self.needsQuickTick ? 500_000_000 : 2_500_000_000
             }
         }
+    }
+
+    /// Restarts the ticker's wait (a seek may land right before an intro, for example). Never in the
+    /// middle of a tick: that may be opening a file (renderer fallback), which must not be cancelled.
+    @ObservationIgnored private var tickInProgress = false
+    private func wakeTicker() {
+        guard ticker != nil, !stopped, !tickInProgress else { return }
+        startTicker()
+    }
+
+    /// Whether the next tick should come after 0.5 s rather than 2.5 s.
+    private var needsQuickTick: Bool {
+        if controlsVisible || phase == .loading { return true }
+        switch player.state {
+        case .playing: break
+        case .paused, .ended, .failed: return false   // nothing moves (a failure is handled on the next tick)
+        default: return true                           // loading / buffering: catch the start quickly
+        }
+        if !didApplyTracks || pendingSubtitleSelection != nil || restoreTracks != nil { return true }
+        if activeSegment != nil || upNextCountdown != nil || askStillWatching || subtitleSwitchStarted { return true }
+        // Media time that passes in one slow tick (more at higher speeds), plus a margin.
+        let now = currentSeconds
+        let ahead = 2.5 * max(1, player.playbackRate) + 1
+        if segments.contains(where: { seg in
+            let a = Fmt.seconds(seg.startTicks), b = Fmt.seconds(seg.endTicks)
+            return (now >= a - ahead && now < b) })
+        { return true }
+        let duration = durationSeconds
+        return duration > 0 && duration - now < ahead
     }
 
     private func tick() async {
@@ -417,6 +468,7 @@ final class PlaybackController {
         }
         checkAudioSync()
         updateSegments()
+        checkSubtitleRendering()
 
         if state == .ended { await handleEnded() }
 
@@ -466,6 +518,7 @@ final class PlaybackController {
     /// mpv's own measurement of how far audio is from the picture (seconds).
     var audioVideoDrift: Double? { player.playbackDiagnostics.audioVideoDriftSeconds }
     @ObservationIgnored private var driftStrikes = 0
+    @ObservationIgnored private var driftSince: Date?
     @ObservationIgnored private var lastAudioReload = Date.distantPast
     @ObservationIgnored private var routeObserver: NSObjectProtocol?
 
@@ -473,9 +526,15 @@ final class PlaybackController {
     /// Do the same automatically when mpv measures drift for 2 s, and after the audio
     /// route changes (AirPods, AirPlay, speaker), whose latency differs.
     private func checkAudioSync() {
-        guard player.state == .playing, let drift = audioVideoDrift, drift.isFinite else { driftStrikes = 0; return }
-        driftStrikes = abs(drift) > 0.12 ? driftStrikes + 1 : 0
-        if driftStrikes >= 4 { reloadAudio(reason: String(format: "audio was %+.2f s off", drift)) }
+        guard player.state == .playing, let drift = audioVideoDrift, drift.isFinite else { driftStrikes = 0; driftSince = nil; return }
+        guard abs(drift) > 0.12 else { driftStrikes = 0; driftSince = nil; return }
+        driftStrikes += 1
+        if driftSince == nil { driftSince = Date() }
+        // Off for 2 s (measured by the clock, as the ticker's rhythm varies), seen at least twice.
+        if driftStrikes >= 2, let since = driftSince, Date().timeIntervalSince(since) >= 1.9 {
+            driftSince = nil
+            reloadAudio(reason: String(format: "audio was %+.2f s off", drift))
+        }
     }
 
     func reloadAudio(reason: String) {
@@ -500,8 +559,8 @@ final class PlaybackController {
         }
     }
 
-    /// Picture-based subtitles (Blu-ray PGS, DVD VobSub, DVB). mpv's Metal renderer always draws
-    /// these; the native video layer doesn't reliably, so they get the Metal renderer.
+    /// Picture-based subtitles (Blu-ray PGS, DVD VobSub, DVB). The native layer draws them into the
+    /// video frame like ASS; only native Dolby Vision frames can't take them (see below).
     static func isPictureSubtitle(_ codec: String?) -> Bool {
         let c = (codec ?? "").lowercased()
         return ["hdmv_pgs_subtitle", "pgssub", "pgs", "sup", "dvd_subtitle", "dvdsub", "vobsub", "dvb_subtitle",
@@ -526,16 +585,22 @@ final class PlaybackController {
         await open(item, start: at, fallback: method == .transcode)
     }
 
-    /// A picture subtitle selected while the native layer is in use: move to the Metal renderer
-    /// (same spot, same tracks) so it's actually drawn.
-    @ObservationIgnored private var subtitleCheckDone: Set<Int> = []
+    /// The native layer draws picture subtitles itself, except on native Dolby Vision frames (the
+    /// player library reports that as `nativeSubtitles` unavailable). Only then, with a picture
+    /// subtitle on, move to the Metal renderer at the same spot with the same tracks.
+    @ObservationIgnored private var metalForSubtitles = false
+    @ObservationIgnored private var subtitleSwitchStarted = false
     private func checkSubtitleRendering() {
-        guard usesNativeOutput, let sub = player.selectedSubtitle(), !subtitleCheckDone.contains(sub.mpvID) else { return }
-        subtitleCheckDone.insert(sub.mpvID)
-        let codec = stream(for: sub)?.codec ?? sub.codec
-        if Self.isPictureSubtitle(codec) {
-            statusNote = "Switching renderer for picture subtitles…"
-            Task { await switchRenderer(toMetal: true) }
+        guard usesNativeOutput, !subtitleSwitchStarted, phase == .playing,
+              player.videoFeatureCapabilities.nativeSubtitles.availability == .unavailable,
+              let sub = player.selectedSubtitle(),
+              Self.isPictureSubtitle(stream(for: sub)?.codec ?? sub.codec) else { return }
+        subtitleSwitchStarted = true
+        metalForSubtitles = true
+        statusNote = "Switching renderer for picture subtitles…"
+        Task {
+            await switchRenderer(toMetal: true)
+            subtitleSwitchStarted = false
         }
     }
 
@@ -615,7 +680,6 @@ final class PlaybackController {
             player.selectSubtitle(id, for: .secondary)
         } else if let id {
             player.selectSubtitle(id, for: .primary)
-            subtitleCheckDone.remove(id.mpvID)
         } else {
             player.disableTrack(.subtitle)
         }
@@ -635,7 +699,6 @@ final class PlaybackController {
                 player.selectTrack(t.id)
             }
             if let sid = restore.subtitle, let t = player.subtitleTracks.first(where: { $0.mpvID == sid }) {
-                subtitleCheckDone.insert(sid)        // already on the renderer that draws it
                 player.selectSubtitle(t.id)
             } else {
                 player.disableTrack(.subtitle)
@@ -667,10 +730,12 @@ final class PlaybackController {
     func seek(to s: Double) {
         player.seek(to: .seconds(max(0, s)))
         reportProgressInBackground()
+        wakeTicker()
     }
 
     func jump(_ delta: Double) {
         player.seek(by: .seconds(delta))
+        wakeTicker()
     }
 
     func setSpeed(_ rate: Double) { player.setPlaybackRate(rate) }

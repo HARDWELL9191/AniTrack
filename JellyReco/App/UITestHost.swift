@@ -1,4 +1,5 @@
 import SwiftUI
+import MPVUI
 
 /// Only used by the UI tests (launched with JELLYRECO_UITEST set): the real For You screen
 /// without a Jellyfin server, so the TMDB key flow can be reproduced in the simulator.
@@ -32,7 +33,9 @@ struct UITestHost: View {
     var body: some View {
         ZStack {
             Color.clear
-            if ready, mode == "transcoding" {
+            if mode == "subrender" {
+                SubtitleRenderHost(settings: model.settings)
+            } else if ready, mode == "transcoding" {
                 NavigationStack {
                     ConfigPageView(page: ServerSettingsCatalog.transcoding, preview: [
                         .encoding: (try? JSONSerialization.jsonObject(with: Data(Self.encodingJSON.utf8)) as? [String: Any]) ?? [:],
@@ -72,5 +75,48 @@ struct UITestHost: View {
             #endif
             ready = true
         }
+    }
+}
+
+
+/// UI test only: plays a test file (black picture, one white picture-subtitle caption from 0.5 s
+/// to 5 s) with the app's own player configuration on the chosen renderer, selects the subtitle
+/// and pauses inside the caption, so the test can count the caption's pixels on screen.
+private struct SubtitleRenderHost: View {
+    let settings: AppSettings
+    @State private var player: MPVPlayer?
+    @State private var status = "starting"
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            if let player { MPVVideoPlayer(player: player).ignoresSafeArea() }
+            VStack {
+                Text(status).font(.system(size: 9)).foregroundStyle(Color(white: 0.35))
+                    .accessibilityIdentifier("subrender-state")
+                Spacer()
+            }
+        }
+        .task { await run() }
+    }
+
+    private func run() async {
+        let env = ProcessInfo.processInfo.environment
+        guard let s = env["JELLYRECO_SAMPLE"], let url = URL(string: s) else { status = "FAIL no sample"; return }
+        let output: MPVPlayerConfiguration.VideoOutput = env["JELLYRECO_OUTPUT"] == "metal" ? .metal : .sampleBuffer
+        let p = MPVPlayer(configuration: PlaybackController.configuration(settings: settings, output: output))
+        player = p
+        p.load(url, playAutomatically: true, startTime: nil)
+        for _ in 0..<150 where p.subtitleTracks.isEmpty || p.duration <= .zero {
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        guard let sub = p.subtitleTracks.first else { status = "FAIL no subtitle track (\(p.state))"; return }
+        p.selectSubtitle(sub.id)
+        try? await Task.sleep(for: .seconds(2))      // into the caption (0.5–5 s)
+        p.pause()
+        try? await Task.sleep(for: .milliseconds(800))
+        let native = p.videoFeatureCapabilities.nativeSubtitles
+        status = "READY output=\(output == .metal ? "metal" : "native") codec=\(sub.codec ?? "?") "
+            + "nativeSubtitles=\(native.availability.rawValue) at=\(p.position)"
     }
 }
