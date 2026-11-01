@@ -50,8 +50,18 @@ final class SubtitleRenderUITests: XCTestCase {
                 a.name = "subrender-\(file)-\(output)"
                 a.lifetime = .keepAlways
                 add(a)
-                let pixels = captionPixels(shot)
-                print("RESULT subrender \(file) \(output): \(pixels) caption pixels | \(state.label)")
+                let label = state.label
+                // Metal: counted on the screenshot. Native: the simulator's screenshots leave the
+                // native video layer out, so the app reads back the frame that layer is showing.
+                let pixels: Int
+                if output == "native" {
+                    let n = label.range(of: #"brightpx:(\d+)"#, options: .regularExpression)
+                        .map { Int(label[$0].dropFirst(9)) ?? -1 } ?? -1
+                    pixels = n
+                } else {
+                    pixels = captionPixels(shot)
+                }
+                print("RESULT subrender \(file) \(output): \(pixels) caption pixels | \(label)")
                 // The fix under test: the native layer must draw picture subtitles itself.
                 if output == "native" {
                     XCTAssertGreaterThan(pixels, 1500, "\(file) on the native layer: no subtitle drawn")

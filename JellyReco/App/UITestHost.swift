@@ -1,5 +1,6 @@
 import SwiftUI
 import MPVUI
+import AVFoundation
 
 /// Only used by the UI tests (launched with JELLYRECO_UITEST set): the real For You screen
 /// without a Jellyfin server, so the TMDB key flow can be reproduced in the simulator.
@@ -116,7 +117,65 @@ private struct SubtitleRenderHost: View {
         p.pause()
         try? await Task.sleep(for: .milliseconds(800))
         let native = p.videoFeatureCapabilities.nativeSubtitles
+        // The simulator's screenshots don't include the native video layer, so read back the frame
+        // it is actually showing (the subtitle is drawn into those pixels).
+        let frame = output == .metal ? "" : " frame=\(Self.displayedFramePixels())"
         status = "READY output=\(output == .metal ? "metal" : "native") codec=\(sub.codec ?? "?") "
-            + "nativeSubtitles=\(native.availability.rawValue) at=\(p.position)"
+            + "nativeSubtitles=\(native.availability.rawValue) at=\(p.position)\(frame)"
+    }
+
+    /// Bright pixels in the frame the native layer displays ("brightpx:N"), or why there's none.
+    static func displayedFramePixels() -> String {
+        var layers: [AVSampleBufferDisplayLayer] = []
+        func walk(_ l: CALayer) {
+            if let d = l as? AVSampleBufferDisplayLayer { layers.append(d) }
+            l.sublayers?.forEach(walk)
+        }
+        for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
+            for window in scene.windows { walk(window.layer) }
+        }
+        guard !layers.isEmpty else { return "nolayer" }
+        var results: [String] = []
+        for layer in layers {
+            guard let pb = layer.sampleBufferRenderer.displayedPixelBuffer() else { results.append("noframe"); continue }
+            results.append(brightPixels(pb))
+        }
+        return results.joined(separator: ",")
+    }
+
+    private static func brightPixels(_ pb: CVPixelBuffer) -> String {
+        CVPixelBufferLockBaseAddress(pb, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(pb, .readOnly) }
+        let format = CVPixelBufferGetPixelFormatType(pb)
+        let fourCC = String(bytes: [24, 16, 8, 0].map { UInt8((format >> $0) & 0xFF) }, encoding: .ascii) ?? "\(format)"
+        var count = 0
+        if CVPixelBufferIsPlanar(pb) {
+            // Luma plane: 8-bit (420v/420f) or 16-bit containers for 10-bit (x420…, value in the high bits).
+            guard let base = CVPixelBufferGetBaseAddressOfPlane(pb, 0) else { return "nobase(\(fourCC))" }
+            let w = CVPixelBufferGetWidthOfPlane(pb, 0), h = CVPixelBufferGetHeightOfPlane(pb, 0)
+            let row = CVPixelBufferGetBytesPerRowOfPlane(pb, 0)
+            let wide = row >= w * 2
+            for y in 0..<h {
+                let line = base.advanced(by: y * row)
+                for x in 0..<w {
+                    let v: Int = wide ? Int(line.load(fromByteOffset: x * 2, as: UInt16.self) >> 8)
+                                      : Int(line.load(fromByteOffset: x, as: UInt8.self))
+                    if v > 150 { count += 1 }
+                }
+            }
+            return "brightpx:\(count)(\(fourCC) \(w)x\(h))"
+        }
+        guard let base = CVPixelBufferGetBaseAddress(pb) else { return "nobase(\(fourCC))" }
+        let w = CVPixelBufferGetWidth(pb), h = CVPixelBufferGetHeight(pb), row = CVPixelBufferGetBytesPerRow(pb)
+        let bpp = row / max(w, 1)
+        guard bpp == 4 else { return "unsupported(\(fourCC) bpp=\(bpp))" }
+        for y in 0..<h {
+            let line = base.advanced(by: y * row)
+            for x in 0..<w {
+                let px = line.advanced(by: x * 4).assumingMemoryBound(to: UInt8.self)
+                if max(px[0], px[1], px[2]) > 150 { count += 1 }
+            }
+        }
+        return "brightpx:\(count)(\(fourCC) \(w)x\(h))"
     }
 }
