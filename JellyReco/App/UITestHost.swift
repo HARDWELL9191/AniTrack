@@ -107,6 +107,11 @@ private struct SubtitleRenderHost: View {
         let output: MPVPlayerConfiguration.VideoOutput = env["JELLYRECO_OUTPUT"] == "metal" ? .metal : .sampleBuffer
         let p = MPVPlayer(configuration: PlaybackController.configuration(settings: settings, output: output))
         player = p
+        var log: [String] = []
+        p.logHandler = { msg in
+            log.append("[\(msg.prefix)] \(msg.message.trimmingCharacters(in: .whitespacesAndNewlines))")
+            if log.count > 12 { log.removeFirst() }
+        }
         p.load(url, playAutomatically: true, startTime: nil)
         for _ in 0..<150 where p.subtitleTracks.isEmpty || p.duration <= .zero {
             try? await Task.sleep(for: .milliseconds(100))
@@ -137,7 +142,7 @@ private struct SubtitleRenderHost: View {
         }
         p.pause()
         status = "READY output=\(output == .metal ? "metal" : "native") codec=\(sub.codec ?? "?") "
-            + "nativeSubtitles=\(native.availability.rawValue) at=\(p.position)\(frame)"
+            + "nativeSubtitles=\(native.availability.rawValue) at=\(p.position)\(frame) log=\(log.joined(separator: " || "))"
     }
 
     /// Bright pixels in the frame the native layer displays ("brightpx:N"), or why there's none.
