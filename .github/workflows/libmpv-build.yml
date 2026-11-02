@@ -1,0 +1,152 @@
+name: libmpv build
+
+# Builds MPVUI's native Libmpv.xcframework (GPL libmpv + FFmpeg) from source,
+# unchanged, at the pinned MPVUI release. Later steps can patch the sources.
+on:
+  push:
+    branches: [libmpv-build]
+    paths:
+      - ".github/workflows/libmpv-build.yml"
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish the zip as the libmpv-custom-0.8.0 prerelease"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+env:
+  MPVUI_REF: "0.8.0"
+  MPVUI_COMMIT: "0cb499c"
+  # Slices the app needs: iOS device + iOS simulator (arm64 and x86_64, like the published artifact).
+  MPV_SLICES: "ios,isimulator"
+  RELEASE_TAG: "libmpv-custom-0.8.0"
+
+jobs:
+  libmpv:
+    # Same image as the app workflow: macOS 27, Apple silicon, Xcode 27.1 (27A9275), which MPVUI 0.8.0 pins.
+    runs-on: xcode-27
+    timeout-minutes: 360
+    steps:
+      - name: Check out MPVUI ${{ env.MPVUI_REF }}
+        uses: actions/checkout@v6
+        with:
+          repository: LePips/MPVUI
+          ref: ${{ env.MPVUI_REF }}
+          path: mpvui
+
+      - name: Verify MPVUI commit
+        working-directory: mpvui
+        run: |
+          git log -1 --format='%H %s'
+          case "$(git rev-parse HEAD)" in "$MPVUI_COMMIT"*) ;; *) echo "::error::unexpected MPVUI commit"; exit 1;; esac
+
+      - name: Show toolchain
+        run: |
+          sw_vers
+          sysctl -n hw.ncpu hw.memsize machdep.cpu.brand_string || true
+          ls -d /Applications/Xcode*.app
+          xcode-select -p
+          xcodebuild -version
+          swiftc --version
+          clang --version | head -1
+          for s in iphoneos iphonesimulator macosx; do echo "$s $(xcrun --sdk $s --show-sdk-version) $(xcrun --sdk $s --show-sdk-build-version)"; done
+          python3 --version
+          git --version
+          make --version | head -1
+          zip -v | grep "This is Zip"
+          df -h .
+
+      - name: Install build tools (nasm, shaderc/glslc)
+        run: |
+          brew install nasm shaderc
+          nasm -v
+          glslc --version
+
+      - name: Restore download cache
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            mpvui/.build/mpvbuild/downloads
+            mpvui/.build/mpvbuild/git
+          key: mpvbuild-inputs-${{ hashFiles('mpvui/Build/Inputs.lock.json') }}
+
+      - name: Doctor and bootstrap (meson, ninja, pkgconf)
+        working-directory: mpvui
+        run: python3 Build/mpvbuild doctor --bootstrap
+
+      - name: Build Libmpv (${{ env.MPV_SLICES }})
+        working-directory: mpvui
+        run: |
+          set -o pipefail
+          START=$(date +%s)
+          make build ARGS="--slices $MPV_SLICES" 2>&1 | tee ../build.log
+          echo "Build took $(( ($(date +%s) - START) / 60 )) min"
+
+      - name: Save download cache
+        if: always()
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            mpvui/.build/mpvbuild/downloads
+            mpvui/.build/mpvbuild/git
+          key: mpvbuild-inputs-${{ hashFiles('mpvui/Build/Inputs.lock.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Collect artifact
+        run: |
+          set -e
+          CANDIDATE=$(grep -E '^Candidate: ' build.log | tail -1 | sed 's/^Candidate: //')
+          echo "Candidate: $CANDIDATE"
+          test -f "$CANDIDATE/Libmpv.xcframework.zip"
+          mkdir -p out
+          cp "$CANDIDATE/Libmpv.xcframework.zip" out/
+          cp "$CANDIDATE/Artifacts.lock.json" out/ 2>/dev/null || true
+          (cd out && shasum -a 256 Libmpv.xcframework.zip | tee Libmpv.xcframework.zip.sha256)
+          ls -la "$CANDIDATE" out
+          mkdir -p check && (cd check && unzip -q ../out/Libmpv.xcframework.zip)
+          ls check/Libmpv.xcframework
+          cp check/Libmpv.xcframework/build-record.json out/ || true
+          for d in check/Libmpv.xcframework/*/; do
+            bin=$(find "$d" -type f -name Libmpv -o -type f -name 'libmpv*.a' | head -1)
+            [ -n "$bin" ] || continue
+            echo "== $d"; lipo -info "$bin"; ls -la "$bin"
+          done
+          BIN=$(find check/Libmpv.xcframework/ios-arm64 -type f \( -name Libmpv -o -name '*.a' \) | head -1)
+          xcrun nm -gU "$BIN" 2>/dev/null | awk '$2=="T"{print $3}' | sort -u > out/ios-arm64-exported-T.txt
+          echo "Exported T symbols (ios-arm64): $(wc -l < out/ios-arm64-exported-T.txt)"
+          grep -c '^_mpv_' out/ios-arm64-exported-T.txt || true
+
+      - name: Upload Libmpv.xcframework.zip
+        uses: actions/upload-artifact@v7
+        with:
+          name: Libmpv.xcframework-${{ env.MPVUI_REF }}
+          path: out/
+          if-no-files-found: error
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: libmpv-build-logs
+          path: |
+            build.log
+            mpvui/.build/validation
+            mpvui/.build/mpvbuild/logs
+          if-no-files-found: ignore
+
+      - name: Publish prerelease ${{ env.RELEASE_TAG }}
+        if: github.event_name == 'push' || inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          NOTES="Libmpv.xcframework built from source on GitHub Actions from LePips/MPVUI ${MPVUI_REF} (${MPVUI_COMMIT}), unmodified. Slices: ${MPV_SLICES}. Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}. sha256: $(cut -d' ' -f1 out/Libmpv.xcframework.zip.sha256)"
+          if gh release view "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" out/* --clobber -R "$GITHUB_REPOSITORY"
+            gh release edit "$RELEASE_TAG" --notes "$NOTES" --prerelease -R "$GITHUB_REPOSITORY"
+          else
+            gh release create "$RELEASE_TAG" out/* --prerelease --target "$GITHUB_SHA" \
+              --title "Custom Libmpv (MPVUI ${MPVUI_REF})" --notes "$NOTES" -R "$GITHUB_REPOSITORY"
+          fi
