@@ -149,19 +149,55 @@ struct MenuPickerRow<Value: Hashable, Options: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .center, spacing: 12) {
-                Text(title)
-                    .fixedSize(horizontal: false, vertical: true)   // wrap, never "Hardware accel…"
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            LabelValueRowLayout(spacing: 12) {
+                Text(title)   // wraps onto more lines, never "Hardware accel…"
                 Picker(title, selection: $selection, content: options)
                     .labelsHidden()
                     .pickerStyle(.menu)
                     .tint(Color.secondary)
-                    .layoutPriority(1)
             }
             // Help spans the whole row underneath, like Apple's footnotes.
             if let help { Text(help).font(.caption).foregroundStyle(.secondary) }
         }
+    }
+}
+
+/// A title on the left and a value on the right. The value gets its full width while both fit
+/// side by side; when they don't, the title keeps at least `minLabelShare` of the row (and wraps)
+/// and the value is shortened, so a long value can't squeeze the title into a column one
+/// letter wide.
+private struct LabelValueRowLayout: Layout {
+    var spacing: CGFloat = 12
+    var minLabelShare: CGFloat = 0.4
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard subviews.count == 2 else { return .zero }
+        let label = subviews[0].sizeThatFits(.unspecified)
+        let value = subviews[1].sizeThatFits(.unspecified)
+        guard let width = proposal.width, width.isFinite else {
+            return CGSize(width: label.width + spacing + value.width, height: max(label.height, value.height))
+        }
+        let (labelWidth, valueWidth) = widths(in: width, label: label.width, value: value.width)
+        let labelHeight = subviews[0].sizeThatFits(ProposedViewSize(width: labelWidth, height: nil)).height
+        let valueHeight = subviews[1].sizeThatFits(ProposedViewSize(width: valueWidth, height: nil)).height
+        return CGSize(width: width, height: max(labelHeight, valueHeight))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard subviews.count == 2 else { return }
+        let (labelWidth, valueWidth) = widths(in: bounds.width,
+                                              label: subviews[0].sizeThatFits(.unspecified).width,
+                                              value: subviews[1].sizeThatFits(.unspecified).width)
+        subviews[0].place(at: CGPoint(x: bounds.minX, y: bounds.midY), anchor: .leading,
+                          proposal: ProposedViewSize(width: labelWidth, height: nil))
+        subviews[1].place(at: CGPoint(x: bounds.maxX, y: bounds.midY), anchor: .trailing,
+                          proposal: ProposedViewSize(width: valueWidth, height: nil))
+    }
+
+    private func widths(in width: CGFloat, label: CGFloat, value: CGFloat) -> (label: CGFloat, value: CGFloat) {
+        let available = max(0, width - spacing)
+        let valueWidth = min(value, max(available - label, available * (1 - minLabelShare)))
+        return (available - valueWidth, valueWidth)
     }
 }
 

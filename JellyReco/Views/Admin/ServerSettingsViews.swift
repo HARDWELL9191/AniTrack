@@ -54,28 +54,7 @@ final class ConfigEditor {
         dirty = []
     }
 
-    /// For objects that aren't one of the configuration stores (e.g. a library's options):
-    /// edit `object` under `.system` and save through `customSave`.
-    @ObservationIgnored var customSave: (([String: Any]) async throws -> Void)?
-    func inject(_ object: [String: Any]) {
-        values[.system] = object
-        dirty = []
-    }
-
     func save(client: JellyfinClient?) async {
-        if let customSave {
-            saving = true
-            defer { saving = false }
-            error = nil
-            do {
-                try await customSave(values[.system] ?? [:])
-                dirty = []
-                savedNote = "Saved to the server."
-            } catch {
-                self.error = error.localizedDescription
-            }
-            return
-        }
         guard let client else { return }
         saving = true
         defer { saving = false }
@@ -89,9 +68,16 @@ final class ConfigEditor {
                 self.error = "\(store.title): \(error.localizedDescription)"
                 return
             }
+            // Discard now goes back to what the server has (not to the values from before this save,
+            // which a later Save would post back); an edit made while saving stays unsaved.
+            original[store] = object
+            if Self.json(values[store]) == Self.json(object) { dirty.remove(store) }
         }
-        dirty = []
         savedNote = "Saved to the server."
+    }
+
+    private static func json(_ object: [String: Any]?) -> Data? {
+        object.flatMap { try? JSONSerialization.data(withJSONObject: $0, options: [.sortedKeys]) }
     }
 
     // Keys may be nested one level: "TrickplayOptions.Interval".
@@ -116,10 +102,6 @@ final class ConfigEditor {
         values[store] = root
         dirty.insert(store)
         savedNote = nil
-    }
-
-    func has(_ store: ConfigStore, _ key: String) -> Bool {
-        value(store, key) != nil
     }
 
     /// Values without a server (UI tests and previews).
@@ -148,60 +130,9 @@ final class ConfigEditor {
                 set: { self.set(store, key, $0) })
     }
 
-    func int(_ store: ConfigStore, _ key: String) -> Binding<String> {
-        Binding(get: {
-            if let n = self.value(store, key) as? NSNumber { return n.stringValue }
-            return ""
-        }, set: { text in
-            let digits = text.filter { $0.isNumber || $0 == "-" }
-            if digits.isEmpty { self.set(store, key, NSNull()) } else if let n = Int(digits) { self.set(store, key, n) }
-        })
-    }
-
-    func double(_ store: ConfigStore, _ key: String) -> Binding<String> {
-        Binding(get: { (self.value(store, key) as? NSNumber).map { "\($0.doubleValue)" } ?? "" },
-                set: { if let d = Double($0.replacingOccurrences(of: ",", with: ".")) { self.set(store, key, d) } })
-    }
-
     func text(_ store: ConfigStore, _ key: String) -> Binding<String> {
         Binding(get: { self.value(store, key) as? String ?? "" },
                 set: { self.set(store, key, $0) })
-    }
-
-    /// Enums come back as strings in Jellyfin's JSON.
-    func choice(_ store: ConfigStore, _ key: String) -> Binding<String> {
-        Binding(get: {
-            if let s = self.value(store, key) as? String { return s }
-            if let n = self.value(store, key) as? NSNumber { return n.stringValue }
-            return ""
-        }, set: { self.set(store, key, $0) })
-    }
-
-    /// String lists edited as one entry per line.
-    func list(_ store: ConfigStore, _ key: String) -> Binding<String> {
-        Binding(get: {
-            ((self.value(store, key) as? [Any]) ?? []).map { "\($0)" }.joined(separator: "\n")
-        }, set: { text in
-            let items = text.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-            // Keep numbers numbers (e.g. trickplay widths), strings strings.
-            let numeric = ((self.value(store, key) as? [Any]) ?? []).first is NSNumber
-            if numeric {
-                self.set(store, key, items.compactMap { Int($0) })
-            } else {
-                self.set(store, key, items)
-            }
-        })
-    }
-
-    /// Bits per second shown as Mbps (like jellyfin-web); empty / 0 = no limit.
-    func mbps(_ store: ConfigStore, _ key: String) -> Binding<String> {
-        Binding(get: {
-            let bits = (self.value(store, key) as? NSNumber)?.doubleValue ?? 0
-            return bits > 0 ? String(format: "%g", bits / 1_000_000) : ""
-        }, set: { text in
-            let mb = Double(text.replacingOccurrences(of: ",", with: ".")) ?? 0
-            self.set(store, key, Int(mb * 1_000_000))
-        })
     }
 }
 
@@ -255,8 +186,7 @@ struct ConfigField: Identifiable {
         var placeholder: String? = nil
     }
     enum Kind {
-        case toggle, int, double, text, multiline, secure, list, mbps
-        case choice([(value: String, label: String)])
+        case toggle, text, multiline, secure
         case number(NumberSpec)
         case select(options: @MainActor (ConfigEditor) -> [ConfigOption], emptyAs: ConfigValue?)
         case switches(@MainActor (ConfigEditor) -> [ConfigSwitch])
@@ -718,8 +648,10 @@ struct ConfigPageView: View {
                 Section { Text(error).foregroundStyle(.red).font(.footnote) }
             }
             if !editor.values.isEmpty {
+                // Fields without a `show` always appear: Jellyfin leaves null values (e.g. GuideDays = Auto)
+                // out of its JSON, so a missing key isn't a missing setting.
                 ForEach(page.sections.filter { $0.show?(editor) ?? true }) { section in
-                    let fields = section.fields.filter { ($0.show?(editor) ?? true) && fieldExists($0) }
+                    let fields = section.fields.filter { $0.show?(editor) ?? true }
                     if !fields.isEmpty {
                         Section {
                             ForEach(fields) { ConfigFieldRow(field: $0, editor: editor) }
@@ -753,15 +685,14 @@ struct ConfigPageView: View {
                 editor.preload(preview)
                 return
             }
+            // The task runs again whenever the page reappears (another tab, a pushed page);
+            // reloading then would silently throw away unsaved edits.
+            guard editor.dirty.isEmpty else { return }
             await editor.load(page.stores, client: model.client)
             await ServerSettingsCatalog.loadContext(page.context, into: editor, client: model.client)
         }
         .refreshable { await editor.load(page.stores, client: model.client) }
     }
-
-    /// Version-dependent fields carry their own `show: has(...)` check; everything else always shows,
-    /// because Jellyfin leaves null values (e.g. GuideDays = Auto) out of its JSON.
-    private func fieldExists(_ f: ConfigField) -> Bool { true }
 }
 
 struct ConfigFieldRow: View {

@@ -192,8 +192,8 @@ struct FlowLayout: Layout {
         for view in subviews {
             let size = view.sizeThatFits(.unspecified)
             if x + size.width > maxWidth, x > 0 { x = 0; y += rowHeight + spacing; rowHeight = 0 }
+            widest = max(widest, x + size.width)   // without the spacing after the last chip
             x += size.width + spacing
-            widest = max(widest, x)
             rowHeight = max(rowHeight, size.height)
         }
         return CGSize(width: min(widest, maxWidth), height: y + rowHeight)
@@ -597,22 +597,42 @@ struct SelectableText: UIViewRepresentable {
     }
 
     func updateUIView(_ view: UITextView, context: Context) {
-        context.coordinator.onTap = onTap
-        context.coordinator.single?.isEnabled = onTap != nil
-        var font = UIFont.preferredFont(forTextStyle: style)
-        if weight != .regular || italic {
-            var traits = font.fontDescriptor.symbolicTraits
-            if italic { traits.insert(.traitItalic) }
-            var descriptor = font.fontDescriptor.addingAttributes([.traits: [UIFontDescriptor.TraitKey.weight: weight]])
-            if italic, let slanted = descriptor.withSymbolicTraits(traits) { descriptor = slanted }
-            font = UIFontMetrics(forTextStyle: style).scaledFont(for: UIFont(descriptor: descriptor, size: 0))
-        }
-        if view.text != text { view.text = text }
-        if view.font != font { view.font = font }
+        let coordinator = context.coordinator
+        coordinator.onTap = onTap
+        coordinator.single?.isEnabled = onTap != nil
+        let font = coordinator.font(style: style, weight: weight, italic: italic,
+                                    category: view.traitCollection.preferredContentSizeCategory)
+        var changed = false
+        if view.font != font { view.font = font; changed = true }
         if view.textColor != color { view.textColor = color }
-        view.textContainer.maximumNumberOfLines = lineLimit ?? 0
-        view.textContainer.lineBreakMode = lineLimit == nil ? .byWordWrapping : .byTruncatingTail
-        view.invalidateIntrinsicContentSize()
+        if view.text != text { view.text = text; changed = true }
+        let lines = lineLimit ?? 0
+        if view.textContainer.maximumNumberOfLines != lines {
+            view.textContainer.maximumNumberOfLines = lines
+            view.textContainer.lineBreakMode = lines == 0 ? .byWordWrapping : .byTruncatingTail
+            changed = true
+        }
+        if changed { view.invalidateIntrinsicContentSize() }
+    }
+
+    /// `weight: .regular` keeps the text style's own weight (a headline stays semibold), like
+    /// SwiftUI's `.font(.headline)`; another weight is applied at the default text size and then
+    /// scaled once for the reader's Dynamic Type size (scaling the already scaled preferred font
+    /// made larger sizes grow twice).
+    static func makeFont(style: UIFont.TextStyle, weight: UIFont.Weight, italic: Bool) -> UIFont {
+        if weight == .regular {
+            let font = UIFont.preferredFont(forTextStyle: style)
+            guard italic, let slanted = font.fontDescriptor.withSymbolicTraits(font.fontDescriptor.symbolicTraits.union(.traitItalic))
+            else { return font }
+            return UIFont(descriptor: slanted, size: 0)
+        }
+        let base = UIFont.preferredFont(forTextStyle: style,
+                                        compatibleWith: UITraitCollection(preferredContentSizeCategory: .large)).pointSize
+        var font = UIFont.systemFont(ofSize: base, weight: weight)
+        if italic, let slanted = font.fontDescriptor.withSymbolicTraits(font.fontDescriptor.symbolicTraits.union(.traitItalic)) {
+            font = UIFont(descriptor: slanted, size: base)
+        }
+        return UIFontMetrics(forTextStyle: style).scaledFont(for: font)
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
@@ -627,6 +647,21 @@ struct SelectableText: UIViewRepresentable {
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         var onTap: (() -> Void)?
         weak var single: UITapGestureRecognizer?
+
+        /// The font is only rebuilt when its inputs change, not on every update.
+        private var fontKey: (style: UIFont.TextStyle, weight: UIFont.Weight, italic: Bool, category: UIContentSizeCategory)?
+        private var cachedFont: UIFont?
+
+        func font(style: UIFont.TextStyle, weight: UIFont.Weight, italic: Bool, category: UIContentSizeCategory) -> UIFont {
+            if let key = fontKey, let cachedFont, key.style == style, key.weight == weight, key.italic == italic,
+               key.category == category {
+                return cachedFont
+            }
+            let font = SelectableText.makeFont(style: style, weight: weight, italic: italic)
+            fontKey = (style, weight, italic, category)
+            cachedFont = font
+            return font
+        }
 
         @objc func tapped() { onTap?() }
 

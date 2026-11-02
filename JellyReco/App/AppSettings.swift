@@ -429,8 +429,22 @@ final class AppSettings {
               let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
         isApplyingRemote = true
         defer { isApplyingRemote = false }
-        for (key, value) in dict where Self.syncedKeys.contains(key) { d.set(value, forKey: key) }
+        // Only values UserDefaults can hold: a null (or anything else another writer put there)
+        // made UserDefaults throw and crashed the app.
+        for (key, value) in dict where Self.syncedKeys.contains(key)
+            && PropertyListSerialization.propertyList(value, isValidFor: .binary) {
+            d.set(value, forKey: key)
+        }
         reloadFromDefaults()
+    }
+
+    /// A value that comes from the Jellyfin account itself (Jellyfin's own setting), applied
+    /// without counting as a change made here, so it doesn't trigger a settings upload.
+    func applyFromAccount(autoPlayNext value: Bool) {
+        guard autoPlayNext != value else { return }
+        isApplyingRemote = true
+        defer { isApplyingRemote = false }
+        autoPlayNext = value
     }
 
     /// Re-reads every property from UserDefaults (after importing).
@@ -467,7 +481,6 @@ final class AppSettings {
         subtitleASSMode = fresh.subtitleASSMode; subtitleOutlineSize = fresh.subtitleOutlineSize
         transcodeFallback = fresh.transcodeFallback
         useOnDeviceAI = fresh.useOnDeviceAI; recoSource = fresh.recoSource; includeWatchingAsLiked = fresh.includeWatchingAsLiked
-
     }
 
     func layout(for libraryId: String) -> LibraryLayout {

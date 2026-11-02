@@ -45,7 +45,6 @@ final class PlaybackController {
     private(set) var previousEpisode: BaseItem?
     private(set) var upNextCountdown: Int?
     private(set) var askStillWatching = false
-    private(set) var statusNote: String?
     private(set) var audioDelay: Double = 0
     private(set) var subtitleDelay: Double = 0
     /// Fill instead of fit (the surface is scaled up to cover the screen, like Apple's player).
@@ -85,6 +84,9 @@ final class PlaybackController {
     /// carry the start position, so a file that failed to open doesn't reset your resume point to 0.
     @ObservationIgnored private var openedAt: Double = 0
     @ObservationIgnored private var hasPlayed = false
+    /// A file is being looked up on the server: the player still shows the previous one (or
+    /// nothing), so the ticker leaves its state alone until the new file is loaded.
+    @ObservationIgnored private var opening = false
 
     var settings: AppSettings { model.settings }
 
@@ -196,11 +198,24 @@ final class PlaybackController {
     /// Asks the server for the file (direct play only, or conversion when falling back) and loads it.
     private func open(_ target: BaseItem, start: Double?, fallback: Bool) async {
         phase = .loading
-        statusNote = fallback ? "Your server is converting this file…" : nil
         didApplyTracks = false
         playingSince = nil
         externalSubs = []
         loadGeneration &+= 1
+        // A newer open (a second tap on Next, closing the player) makes this one give up after
+        // each server call, so it never loads its file over the newer one.
+        let generation = loadGeneration
+        opening = true
+        defer { if loadGeneration == generation { opening = false } }
+        // The previous session was ended by the caller; nothing runs on the server for this one yet.
+        playSessionId = nil
+        // mpv starts every file without audio / subtitle delay: the same file opened again
+        // (renderer switch, fallback, retry) keeps yours, another one starts at 0.
+        let sameFile = target.id == item.id
+        if !sameFile {
+            audioDelay = 0
+            subtitleDelay = 0
+        }
         // A decoder fallback for the previous file doesn't carry over.
         if decoderRecoveries > 0 {
             decoderRecoveries = 0
@@ -211,12 +226,17 @@ final class PlaybackController {
         pendingSubtitleSelection = nil
         skippedSegments = []
         activeSegment = nil
+        // A countdown left running would read the cleared value as "finished" and skip ahead.
+        countdownTask?.cancel()
         upNextCountdown = nil
         countdownDismissed = false
+        askStillWatching = false
+        upNext = queue.first
         hasPlayed = false
         // The previous episode's intro / credits times and lock-screen picture don't carry over.
         segments = []
         nowPlayingArtwork = nil
+        artworkItemId = nil
         previousEpisode = nil
         layoutKind = nil
         let resumeSeconds: Double = {
@@ -230,6 +250,7 @@ final class PlaybackController {
         do {
             // Full item (streams, chapters, trickplay) when the caller only had a list entry.
             let full = (target.mediaSources == nil || target.chapters == nil) ? ((try? await client.item(target.id)) ?? target) : target
+            guard loadGeneration == generation else { return }
             item = full
             let info = try await client.playbackInfo(itemId: full.id, JellyfinClient.PlaybackInfoRequest(
                 userId: client.userId ?? "",
@@ -248,6 +269,12 @@ final class PlaybackController {
                 autoOpenLiveStream: true,
                 alwaysBurnInSubtitleWhenTranscoding: nil
             ))
+            guard loadGeneration == generation else {
+                // A live TV tuner the server opened for this answer is let go again.
+                let live = (info.mediaSources ?? []).compactMap(\.liveStreamId)
+                if !live.isEmpty { Task { [client] in for id in live { await client.closeLiveStream(id) } } }
+                return
+            }
             playSessionId = info.playSessionId
             let sources = info.mediaSources ?? []
             guard let src = sources.first(where: { $0.id == request.mediaSourceId }) ?? sources.first else {
@@ -285,11 +312,15 @@ final class PlaybackController {
             guard let url else { throw JellyfinError.message("Couldn't build the stream address.") }
 
             player.load(url, playAutomatically: true, startTime: resumeSeconds > 1 ? .seconds(resumeSeconds) : nil)
+            opening = false   // the player is on this file now: the ticker may follow it
+            if sameFile {
+                if audioDelay != 0 { player.setAudioDelay(.milliseconds(Int(audioDelay * 1000))) }
+                if subtitleDelay != 0 { player.setSubtitleDelay(.milliseconds(Int(subtitleDelay * 1000))) }
+            }
             applySubtitleLayout()
             player.setPlaybackRate(settings.defaultSpeed)
             loadExternalSubtitles(itemId: full.id, source: src)
             prepareTrickplay(full, source: src)
-            let generation = loadGeneration
             Task { [weak self, client = self.client] in
                 let found = await client.mediaSegments(itemId: full.id)
                 // A late answer for an episode that's no longer playing is dropped.
@@ -299,13 +330,17 @@ final class PlaybackController {
 
             if full.kind == .episode { findNeighbours(of: full, generation: generation) }
 
+            if !playedIds.contains(full.id) { playedIds.append(full.id) }
+            // No progress report before the start report has gone out.
+            lastPaused = player.isPaused
+            lastReport = Date()
+            updateNowPlaying()
             await client.reportStart(report())
             lastReport = Date()
-            if !playedIds.contains(full.id) { playedIds.append(full.id) }
-            upNext = queue.first
-            updateNowPlaying()
         } catch {
-            if AppModel.isCancellation(error) { return }
+            guard loadGeneration == generation, !AppModel.isCancellation(error) else { return }
+            // The previous episode (still loaded after Next / an episode pick) stops with the error.
+            player.stop()
             phase = .failed(error.localizedDescription)
         }
     }
@@ -506,6 +541,10 @@ final class PlaybackController {
     }
 
     private func tick() async {
+        // The player still has the previous file while the next one is looked up (its "ended"
+        // started another countdown); after a final failure there's nothing left to follow.
+        if opening { return }
+        if case .failed = phase { return }
         let state = player.state
         if case .failed(let error) = state {
             await handleFailure(error)
@@ -513,7 +552,6 @@ final class PlaybackController {
         }
         if phase == .loading, state == .playing || state == .paused || (player.duration > .zero && state != .loading) {
             phase = .playing
-            statusNote = nil
         }
         if state == .playing && playingSince == nil { playingSince = Date() }
         if state == .playing { hasPlayed = true }
@@ -554,7 +592,6 @@ final class PlaybackController {
         // 2) Native layer can't show this file: same file, mpv's own renderer.
         if player.configuration.videoOutput == .sampleBuffer && !triedMetal {
             triedMetal = true
-            statusNote = "Switching to the high-quality renderer…"
             endSession(failed: true)
             rebuildPlayer(output: .metal)
             await open(item, start: at > 1 ? at : request.startSeconds, fallback: false)
@@ -572,6 +609,8 @@ final class PlaybackController {
     }
 
     private func rebuildPlayer(output: MPVPlayerConfiguration.VideoOutput) {
+        // The old player's last messages (decoder errors, skipped tracks) aren't about the new one.
+        player.logHandler = nil
         player.stop()
         player = MPVPlayer(configuration: Self.configuration(settings: settings, output: output))
         appliedSubtitleProperties = ["sub-ass-override": settings.subtitleASSMode, "sub-ass-style-overrides": ""]
@@ -644,6 +683,7 @@ final class PlaybackController {
                 guard let self else { return }
                 Task { @MainActor in
                     try? await Task.sleep(nanoseconds: 700_000_000)
+                    guard !self.stopped else { return }
                     // During a call the session isn't ours: restarting the output then left it
                     // dead. While paused or interrupted, restart it when playback resumes instead.
                     if self.audioInterrupted || self.player.isPaused {
@@ -721,8 +761,7 @@ final class PlaybackController {
         })
     }
 
-    /// Picture-based subtitles (Blu-ray PGS, DVD VobSub, DVB). The native layer draws them into the
-    /// video frame like ASS; only native Dolby Vision frames can't take them (see below).
+    /// Picture-based subtitles (Blu-ray PGS, DVD VobSub, DVB).
     static func isPictureSubtitle(_ codec: String?) -> Bool {
         let c = (codec ?? "").lowercased()
         return ["hdmv_pgs_subtitle", "pgssub", "pgs", "sup", "dvd_subtitle", "dvdsub", "vobsub", "dvb_subtitle",
@@ -763,7 +802,6 @@ final class PlaybackController {
               player.selectedSubtitle() != nil || player.selectedSubtitle(for: .secondary) != nil else { return }
         subtitleSwitchStarted = true
         metalForSubtitles = true
-        statusNote = "Switching renderer for subtitles…"
         Task {
             await switchRenderer(toMetal: true)
             subtitleSwitchStarted = false
@@ -859,8 +897,6 @@ final class PlaybackController {
                            isSelected: t.isSelected && (t.type != .subtitle || t.subtitleRole == .primary), isExternal: t.isExternal)
     }
 
-    var secondarySubtitle: MPVMediaTrack? { player.selectedSubtitle(for: .secondary) }
-
     func selectAudio(_ id: MPVMediaTrackIdentifier) {
         if id.mpvID >= Self.serverAudioBase {
             let index = id.mpvID - Self.serverAudioBase
@@ -878,7 +914,6 @@ final class PlaybackController {
         let at = currentSeconds
         request.audioIndex = audioIndex
         request.subtitleIndex = player.selectedSubtitle().flatMap { stream(for: $0)?.index } ?? -1
-        statusNote = "Switching audio…"
         endSession()
         await open(item, start: at, fallback: true)
     }
@@ -1079,8 +1114,8 @@ final class PlaybackController {
     @ObservationIgnored private var fillHidden: Double = 0
     @ObservationIgnored private var fillScale: Double = 1
 
-    /// While the video is zoomed to fill, part of the picture is off screen (the native layer
-    /// draws subtitles into the picture, so they're cropped with it): lift subtitles into the
+    /// While the video is zoomed to fill, part of the picture is off screen (subtitles are drawn
+    /// at the picture's size, so they're cropped with it): lift subtitles into the
     /// visible area and scale them back to their normal size.
     func applyFill(hiddenFraction: Double, scale: Double, textScale: Double) {
         guard hiddenFraction != fillHidden || max(scale, 1) != fillScale || textScale != self.textScale else { return }
@@ -1377,13 +1412,14 @@ final class PlaybackController {
             // As in the desktop client: skipping credits with another episode queued goes straight to it.
             if (action == "skip" || (action == "skipOnce" && !skippedSegments.contains("type:\(current.type)"))) {
                 skippedSegments.insert("type:\(current.type)")
-                skip(current)
+                skip(current, auto: true)
                 return
             }
         }
-        activeSegment = current.flatMap { seg in
+        let shown = current.flatMap { seg in
             skippedSegments.contains(seg.id) || settings.segmentAction(seg.type) == "none" ? nil : seg
         }
+        if shown != activeSegment { activeSegment = shown }   // every tick otherwise redraws the controls
         // Credits with another episode queued: offer it now (Netflix-style).
         if let current, current.type == "Outro", upNext != nil, settings.autoPlayNext, upNextCountdown == nil, !askStillWatching, !countdownDismissed {
             beginCountdown()
@@ -1514,8 +1550,6 @@ final class PlaybackController {
         autoplayStreak = 0
         await open(episode, start: nil, fallback: false)
     }
-
-    var hasPrevious: Bool { previousEpisode != nil }
 
     // MARK: Retry / stop
 

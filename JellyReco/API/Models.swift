@@ -60,7 +60,7 @@ enum JSONCoding {
 
     private static func lowerFirst(_ s: String) -> String {
         guard let first = s.first else { return s }
-        // "ID"-only keys stay as they are lowered fully ("Id" → "id").
+        // "ImageTags" → "imageTags", "Id" → "id".
         return first.lowercased() + s.dropFirst()
     }
 
@@ -692,7 +692,8 @@ struct ActivityLogEntry: Codable, Hashable, Identifiable {
 }
 
 struct VirtualFolderInfo: Codable, Hashable, Identifiable {
-    var id: String { itemId ?? name ?? UUID().uuidString }
+    /// Stable (a random fallback gave the row a new identity on every read, so lists redrew it).
+    var id: String { itemId ?? name ?? (locations ?? []).joined(separator: "|") }
     var name: String?
     var locations: [String]?
     var collectionType: String?

@@ -62,7 +62,6 @@ final class AppModel {
     private func updateHidden() {
         externalHidden = Set(myList.compactMap { $0.external?.id }).union(externalSeen.map(\.id)).union(externalNotForMe.map(\.id))
     }
-    @ObservationIgnored private var storage: DisplayPreferencesDto?
 
     /// The engines read your settings and library through this model. Connected once, here,
     /// so no sign-in route (password, Quick Connect, saved account, account switch) can leave
@@ -96,8 +95,6 @@ final class AppModel {
         let client = JellyfinClient(baseURL: url, token: token, userId: user.id)
         self.client = client
         phase = .ready
-        reco.attach(model: self)
-        discovery.attach(model: self)
         await refreshSession()
     }
 
@@ -120,10 +117,6 @@ final class AppModel {
             let me = try await client.me()
             guard client === self.client else { return }   // the account changed meanwhile
             user = me
-            // Autoplay of the next episode is a Jellyfin account setting: follow it.
-            if let auto = me.configuration?.enableNextEpisodeAutoPlay, settings.autoPlayNext != auto {
-                settings.autoPlayNext = auto
-            }
             if let sid = store.currentServerId { store.updateUser(me, on: sid) }
             async let views = client.userViews()
             async let info = try? client.get("/System/Info", as: SystemInfo.self)
@@ -133,6 +126,12 @@ final class AppModel {
             libraries = fetchedViews ?? libraries
             serverInfo = fetchedInfo
             await loadAccountStorage()
+            // Autoplay of the next episode is a Jellyfin account setting: follow it. Applied after
+            // the synced settings (they'd put an older value back) and not as a change made here
+            // (that skipped the import of the server's settings and uploaded this device's instead).
+            if client === self.client, let auto = me.configuration?.enableNextEpisodeAutoPlay {
+                settings.applyFromAccount(autoPlayNext: auto)
+            }
             await client.reportCapabilities()
         } catch JellyfinError.http(401, _) {
             guard client === self.client else { return }
@@ -148,12 +147,15 @@ final class AppModel {
     }
 
     private func switchToReachableAddress() async -> Bool {
-        guard let server = store.currentServer, server.urls.count > 1, let token = client?.token,
-              let userId = client?.userId else { return false }
+        guard let original = client, let server = store.currentServer, server.urls.count > 1,
+              let token = original.token, let userId = original.userId else { return false }
         for candidate in server.urls.dropFirst() {
             guard let url = URL(string: candidate) else { continue }
             let probe = JellyfinClient(baseURL: url)
-            if (try? await probe.publicInfo()) != nil {
+            let reachable = (try? await probe.publicInfo()) != nil
+            // An account switch or sign-out during the probe: never put this account's session back.
+            guard client === original else { return false }
+            if reachable {
                 var urls = server.urls
                 urls.removeAll { $0 == candidate }
                 urls.insert(candidate, at: 0)
@@ -179,8 +181,6 @@ final class AppModel {
         self.user = user
         phase = .ready
         selectedTab = .home
-        reco.attach(model: self)
-        discovery.attach(model: self)
         Task { await refreshSession() }
     }
 
@@ -207,12 +207,15 @@ final class AppModel {
         client = nil
         user = nil
         DiskCache.clearPersonal()
-        // Another saved account on any server: switch to it; otherwise back to sign-in.
-        if let server = store.servers.first(where: { !$0.users.isEmpty }), let next = server.users.first {
-            switchTo(server: server, user: next)
-        } else {
-            phase = .signedOut
+        // Another saved account (with a session) on any server: switch to it; otherwise back to
+        // sign-in (the app used to stay on an empty, signed-out screen when that switch failed).
+        for server in store.servers where server.url != nil {
+            if let next = server.users.first(where: { store.token(for: $0) != nil }) {
+                switchTo(server: server, user: next)
+                break
+            }
         }
+        if client == nil { phase = .signedOut }
     }
 
     /// Removing a saved server or account also signs those sessions out on the server (they used
@@ -250,11 +253,11 @@ final class AppModel {
         refreshTask?.cancel(); refreshTask = nil
         flushTask?.cancel(); flushTask = nil
         settingsSyncTask?.cancel(); settingsSyncTask = nil
+        playTask?.cancel(); playTask = nil   // a lookup for the previous account mustn't open its player
         playback = nil
         user = nil
         libraries = []
         userDataOverrides = [:]
-        storage = nil
         storageLoaded = false
         dirty = [:]
         myList = []; externalSeen = []; externalNotForMe = []
@@ -276,12 +279,14 @@ final class AppModel {
     func togglePlayed(_ item: BaseItem) async {
         guard let client else { return }
         let target = !isPlayed(item)
+        let previous = userDataOverrides[item.id]
         var optimistic = userData(for: item) ?? UserItemData()
         optimistic.played = target
         if target { optimistic.playbackPositionTicks = 0; optimistic.playedPercentage = nil }
         userDataOverrides[item.id] = optimistic
         do {
             let data = try await client.setPlayed(item.id, target)
+            guard client === self.client else { return }   // signed into another account meanwhile
             var merged = data
             merged.played = target
             userDataOverrides[item.id] = merged
@@ -291,26 +296,31 @@ final class AppModel {
             // show on the list, and ticking one episode mustn't remove the whole show.
             if target, [.movie, .series, .video].contains(item.kind), isOnMyList(item) { await toggleMyList(item) }
         } catch {
-            userDataOverrides[item.id] = item.userData
-            errorMessage = error.localizedDescription
+            guard client === self.client else { return }
+            // Back to what was shown before (an earlier change's override, not the stale item copy).
+            userDataOverrides[item.id] = previous
+            report(error)
         }
     }
 
     func toggleFavorite(_ item: BaseItem) async {
         guard let client else { return }
         let target = !isFavorite(item)
+        let previous = userDataOverrides[item.id]
         var optimistic = userData(for: item) ?? UserItemData()
         optimistic.isFavorite = target
         userDataOverrides[item.id] = optimistic
         do {
             var data = try await client.setFavorite(item.id, target)
+            guard client === self.client else { return }
             data.isFavorite = target
             if data.played == nil { data.played = optimistic.played }
             userDataOverrides[item.id] = data
             reco.listChanged()
         } catch {
-            userDataOverrides[item.id] = item.userData
-            errorMessage = error.localizedDescription
+            guard client === self.client else { return }
+            userDataOverrides[item.id] = previous
+            report(error)
         }
     }
 
@@ -323,13 +333,17 @@ final class AppModel {
     /// is on its way stays pending for the next one).
     @ObservationIgnored private var dirty: [String: Int] = [:]
     @ObservationIgnored private var flushTask: Task<Void, Never>?
+    /// Counts completed saves (so a read that started before one can tell it's out of date).
+    @ObservationIgnored private var storageSaves = 0
 
     /// For You lists and synced settings, from this account's storage on the server.
     /// A key with an unsaved change here keeps this device's value (it's the newer one).
     func loadAccountStorage() async {
         guard let client else { return }
-        if let prefs = try? await client.loadAppStorage(), client === self.client {
-            storage = prefs
+        let savesBefore = storageSaves
+        // A save that finished while this read was on its way: the read is older than what's here
+        // (applying it put the old list back, and the next change then saved that over the server's).
+        if let prefs = try? await client.loadAppStorage(), client === self.client, storageSaves == savesBefore {
             let custom = prefs.customPrefs ?? [:]
             let firstLoad = !storageLoaded
             func value(_ key: String) -> String? { custom[key] ?? nil }
@@ -431,7 +445,7 @@ final class AppModel {
             do {
                 try await client.saveAppStorage(prefs)
                 guard client === self.client else { return }
-                storage = prefs
+                storageSaves &+= 1
                 for (key, n) in pending where dirty[key] == n { dirty[key] = nil }
             } catch {
                 report(error)
@@ -523,10 +537,16 @@ final class AppModel {
             myList.remove(at: i)
         } else {
             myList.insert(MyListEntry(external: t), at: 0)
-            externalNotForMe.removeAll { $0.id == t.id }
-            externalSeen.removeAll { $0.id == t.id }
-            saveExternal(.notforme)
-            saveExternal(.seenelsewhere)
+            // Only lists that change are saved (saving an unchanged one put this device's copy over
+            // the server's, losing what another device added to it).
+            if externalNotForMe.contains(where: { $0.id == t.id }) {
+                externalNotForMe.removeAll { $0.id == t.id }
+                saveExternal(.notforme)
+            }
+            if externalSeen.contains(where: { $0.id == t.id }) {
+                externalSeen.removeAll { $0.id == t.id }
+                saveExternal(.seenelsewhere)
+            }
         }
         saveMyList()
     }
@@ -592,6 +612,7 @@ final class AppModel {
         reco.listChanged()
         do {
             var saved = try await client.setLikes(item.id, on ? false : nil)
+            guard client === self.client else { return }
             saved.likes = on ? false : nil
             userDataOverrides[item.id] = saved
         } catch {
@@ -622,7 +643,6 @@ final class AppModel {
         for id in itemIds { userDataOverrides[id] = nil }
         contentVersion &+= 1
         reco.listChanged(refreshing: itemIds)   // their watched state changed on the server
-
     }
 
     // MARK: Playback
@@ -645,7 +665,7 @@ final class AppModel {
                 q.mediaTypesVideo = true
                 q.limit = 1
                 guard let first = try? await client.items(q).items?.first else {
-                    errorMessage = "There's no video in this folder."
+                    if !Task.isCancelled { errorMessage = "There's no video in this folder." }
                     return
                 }
                 target = first
@@ -653,7 +673,7 @@ final class AppModel {
             // A series/season plays its next-up (or first) episode.
             if item.kind == .series || item.kind == .season {
                 guard let ep = await nextEpisode(for: item) else {
-                    errorMessage = "Nothing to play here yet."
+                    if !Task.isCancelled { errorMessage = "Nothing to play here yet." }
                     return
                 }
                 target = ep

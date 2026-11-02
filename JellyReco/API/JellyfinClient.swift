@@ -629,11 +629,12 @@ final class JellyfinClient: @unchecked Sendable {
         if let host = comps.host, host.lowercased() != (baseURL.host ?? "").lowercased() {
             return URL(string: relative)
         }
+        // Rebuilt only when the key is added (re-encoding a server URL it already has could alter it).
         var items = comps.queryItems ?? []
         if let token, !items.contains(where: { $0.name.lowercased() == "apikey" }) {
             items.append(URLQueryItem(name: "apikey", value: token))
+            comps.queryItems = items
         }
-        comps.queryItems = items
         let rel = comps.string ?? relative
         if rel.lowercased().hasPrefix("http") { return URL(string: rel) }
         var base = baseURL.absoluteString
