@@ -1173,11 +1173,24 @@ final class PlaybackController {
             } else {
                 scale = settings.subtitleSize * k / zoom   // your size, the same on every file
             }
+            // Force my style: mpv replaces the font, size, colours and outline but leaves each file's
+            // bold, gaps and outline scaling, so every show looked a little different. Those are set
+            // too: your Bold, the plain-text gaps (in the file's own units), scaled outlines.
+            let forced = override == "force"
             // Top and bottom lines (\an8 / \an2 without an exact position) move in by the cropped
-            // strip: every style's own top/bottom margin plus that strip, in the file's units.
-            if filled {
+            // strip in Fill: every style's top/bottom margin plus that strip, in the file's units.
+            if filled || forced {
                 if let header = assHeader, header.trackKey == assTrackKey {
-                    styleOverrides = header.marginOverrides(hidden: fillHidden, zoom: zoom)
+                    var parts: [String] = []
+                    if forced {
+                        parts.append("Bold=\(settings.subtitleBold ? -1 : 0)")
+                        parts.append("ScaledBorderAndShadow=yes")
+                    }
+                    let margins = header.marginOverrides(
+                        hidden: fillHidden, zoom: zoom,
+                        forced: forced ? (vertical: 22 * k, side: 25) : nil)
+                    if !margins.isEmpty { parts.append(margins) }
+                    styleOverrides = parts.joined(separator: ",")
                 } else {
                     requestASSHeader()
                 }
@@ -1200,20 +1213,26 @@ final class PlaybackController {
         let playResY: Double
         let margins: [(style: String, left: Double, right: Double, vertical: Double)]
 
-        /// mpv's sub-ass-style-overrides value for Fill (only styles whose names mpv's list syntax
-        /// can carry). With the font shrunk by `zoom` so lines look as in Fit on screen:
-        /// - top/bottom margin: the cropped strip (`hidden` of the height) plus the style's own
-        ///   margin as it looks in Fit;
+        /// mpv's sub-ass-style-overrides value for each style's margins (only styles whose names
+        /// mpv's list syntax can carry). The base margins are the style's own, or with Force my style
+        /// the plain-text ones (`forced`, in mpv's 720-line units) in this file's units. Then, with the
+        /// font shrunk by `zoom` in Fill so lines look as in Fit on screen:
+        /// - top/bottom margin: the cropped strip (`hidden` of the height) plus the base margin as
+        ///   it looks in Fit;
         /// - side margins: wider, so each line is `zoom` times narrower and breaks as in Fit.
-        func marginOverrides(hidden: Double, zoom: Double) -> String {
-            margins
+        func marginOverrides(hidden: Double, zoom: Double, forced: (vertical: Double, side: Double)?) -> String {
+            let unit = playResY / 720
+            return margins
                 .filter { !$0.style.contains(",") && !$0.style.contains("=") && !$0.style.contains("\\") }
                 .map { m in
-                    let width = max(0, playResX - m.left - m.right)
+                    let left = forced.map { $0.side * unit } ?? m.left
+                    let right = forced.map { $0.side * unit } ?? m.right
+                    let vertical = forced.map { $0.vertical * unit } ?? m.vertical
+                    let width = max(0, playResX - left - right)
                     let extra = (width - width / zoom) / 2
-                    return ["\(m.style).MarginL=\(Int((m.left + extra).rounded()))",
-                            "\(m.style).MarginR=\(Int((m.right + extra).rounded()))",
-                            "\(m.style).MarginV=\(Int((hidden * playResY + m.vertical / zoom).rounded()))"]
+                    return ["\(m.style).MarginL=\(Int((left + extra).rounded()))",
+                            "\(m.style).MarginR=\(Int((right + extra).rounded()))",
+                            "\(m.style).MarginV=\(Int((hidden * playResY + vertical / zoom).rounded()))"]
                         .joined(separator: ",")
                 }
                 .joined(separator: ",")
