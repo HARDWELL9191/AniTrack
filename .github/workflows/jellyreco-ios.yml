@@ -233,6 +233,9 @@ jobs:
       - name: Start Jellyfin and fetch subtitles like the app
         run: |
           mkdir -p media/zlib && cp samples/render/render_pgs_zlib.mkv "media/zlib/Zlib Test (2020).mkv"
+          if [ -f samples/render/render_vobsub_zlib.mkv ]; then mkdir -p media/vobzlib && cp samples/render/render_vobsub_zlib.mkv "media/vobzlib/Vobsub Zlib (2021).mkv"; fi
+          # An external .sup next to a video, as Jellyfin users keep them.
+          mkdir -p media/extsup && cp samples/render/render_srt.mkv "media/extsup/Ext Sup (2022).mkv" && cp samples/render/subs.sup "media/extsup/Ext Sup (2022).en.sup"
           docker run -d --name jf -p 8096:8096 -v "$PWD/media:/media" jellyfin/jellyfin:latest
           docker exec jf /jellyfin/jellyfin --version 2>/dev/null || true
           tools/jellyfintest/fetch_subs.sh media out 2>&1 | tee out.log
@@ -341,7 +344,8 @@ jobs:
             # The app's fix: wrap the served PGS in Matroska with the app's own Swift code.
             swiftc -O JellyReco/Player/PGSContainer.swift tools/formattest/sup2mks/main.swift -o sup2mks
             ./sup2mks "$SUB" jfsubs/wrapped.mks | tee -a rendertest.log
-            for u in "$PWD/jfsubs/wrapped.mks" "http://127.0.0.1:8765/wrapped.mks" "$PWD/samples/subs.srt" "$PWD/samples/subs.ass" "$PWD/samples/subs.vtt"; do
+            cp samples/render/subs.sup jfsubs/bare.sup 2>/dev/null || true
+            for u in "$PWD/jfsubs/wrapped.mks" "http://127.0.0.1:8765/wrapped.mks" "$PWD/samples/subs.srt" "$PWD/samples/subs.ass" "$PWD/samples/subs.vtt" "$PWD/jfsubs/bare.sup" "http://127.0.0.1:8765/bare.sup"; do
               echo "=== external subtitle: $u" | tee -a rendertest.log
               curl -s -o /dev/null -w "    (http check: %{http_code})\n" "$u" 2>/dev/null | tee -a rendertest.log || true
               RENDERTEST_LOG=v RENDERTEST_SUBURL="$u" ./rendertest --fonts "$PWD/fonts" "Helvetica" samples/render/render_pgs_zlib.mkv 2>&1 \

@@ -40,8 +40,8 @@ for i in $(seq 1 90); do
   # Wait until the scan has read the file's tracks (the item appears before its streams).
   echo "$ITEMS" | python3 -c "import json,sys
 items=json.load(sys.stdin)['Items']
-ok=any(s['Type']=='Subtitle' for it in items for s in (it.get('MediaSources') or [{}])[0].get('MediaStreams',[]))
-sys.exit(0 if ok else 1)" && break
+n=sum(1 for it in items if any(s['Type']=='Subtitle' for s in (it.get('MediaSources') or [{}])[0].get('MediaStreams',[])))
+sys.exit(0 if n >= $(ls -d "$media"/*/ | wc -l) else 1)" && break
   sleep 3
 done
 echo "$ITEMS" > "$out/items.json"
@@ -51,7 +51,7 @@ for it in json.load(sys.stdin)['Items']:
   for s in it['MediaSources'][0]['MediaStreams']:
     print(it['Name'], it['Id'], it['MediaSources'][0]['Id'], s['Index'], s['Type'], s.get('Codec'), s.get('IsExternal'))" | tee "$out/streams.txt"
 grep -i "Subtitle" "$out/streams.txt" | while read name id src idx type codec ext; do
-  for fmt in pgssub sup; do
+  for fmt in pgssub sup dvdsub sub idx mks srt; do
     code=$(curl -s -o "$out/$name.$idx.$fmt" -w "%{http_code}" "$J/Videos/$id/$src/Subtitles/$idx/0/Stream.$fmt?ApiKey=$TOKEN")
     size=$(stat -c %s "$out/$name.$idx.$fmt" 2>/dev/null || echo 0)
     magic=$(head -c 2 "$out/$name.$idx.$fmt" 2>/dev/null)

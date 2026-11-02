@@ -41,6 +41,13 @@ ffmpeg -nostdin -loglevel error -y -i subs.sup -c:s dvdsub vobsub_only.mkv
 ffmpeg -nostdin -loglevel error -y $VB -i vobsub_only.mkv -map 0 -map 1 -c:v libx264 -preset ultrafast -c:s copy render_vobsub.mkv \
   && echo "made render_vobsub.mkv" || echo "SKIPPED render_vobsub.mkv"
 rm -f vobsub_only.mkv
+# DVD VobSub muxed by mkvmerge: once with its default settings (does it zlib-compress VobSub?),
+# once explicitly zlib-compressed (what the app must cope with).
+if command -v mkvmerge >/dev/null; then
+  mkvmerge -q -o render_vobsub_mkvmerge.mkv render_vobsub.mkv && echo "made render_vobsub_mkvmerge.mkv"
+  echo "mkvmerge default compression for VobSub:"; mkvinfo render_vobsub_mkvmerge.mkv | grep -i -A2 "content compression\|compression" | head -6
+  mkvmerge -q -o render_vobsub_zlib.mkv --compression 1:zlib render_vobsub.mkv && echo "made render_vobsub_zlib.mkv"
+fi
 make render_srt.mkv $VB -i subs.srt -map 0 -map 1 -c:v libx264 -preset ultrafast -c:s srt
 # Like real Blu-ray rips muxed with MKVToolNix: PGS stored zlib-compressed (mkvmerge's default).
 if command -v mkvmerge >/dev/null; then
