@@ -266,12 +266,10 @@ private struct PlayerContent: View {
                 HStack(spacing: 12) {
                     glassCircle("xmark", size: 44, font: .title3, action: close)
                     if player.pictureInPicture.isSupported {
-                        // Always white like the close button (a disabled button was drawn grey while
-                        // iOS wasn't ready for PiP yet); a tap before then does nothing.
                         glassCircle(player.pictureInPicture.isActive ? "pip.exit" : "pip.enter", size: 44, font: .title3) {
-                            let pip = player.pictureInPicture
-                            if pip.isActive || pip.isPossible { pip.toggle() }
+                            player.pictureInPicture.toggle()
                         }
+                        .disabled(!player.pictureInPicture.isPossible)
                     }
                 }
             }
@@ -498,7 +496,6 @@ private struct PlayerContent: View {
     private func glassCircle(_ symbol: String, size: CGFloat, font: Font = .body, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .symbolRenderingMode(.monochrome)   // every part white (pip.enter's inner box was grey)
                 .font(font.weight(.semibold))
                 .frame(width: size, height: size)
                 .contentShape(Circle())
