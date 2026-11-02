@@ -155,6 +155,8 @@ struct MenuPickerRow<Value: Hashable, Options: View>: View {
                     .labelsHidden()
                     .pickerStyle(.menu)
                     .tint(Color.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)   // a shortened value keeps its end, e.g. "(YADIF)"
             }
             // Help spans the whole row underneath, like Apple's footnotes.
             if let help { Text(help).font(.caption).foregroundStyle(.secondary) }
