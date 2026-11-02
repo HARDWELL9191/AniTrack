@@ -256,14 +256,14 @@ final class PlaybackController {
             source = src
             streams = src.mediaStreams ?? full.mediaStreams ?? []
 
-            // Subtitles are drawn into the frame by the native layer, which uses far less battery than
-            // the Metal renderer. The one exception is native Dolby Vision, whose frames can't be
-            // drawn on (the player shows no subtitle at all there): when such a file starts with a
-            // subtitle on, it opens on the Metal renderer straight away instead of switching later.
+            // The native layer (far less battery than the Metal renderer) draws subtitles on their own
+            // layer above the video with JellyReco's libmpv, Dolby Vision included. Without that
+            // layer, native Dolby Vision frames can't be drawn on, so such a file starting with a
+            // subtitle on would open on the Metal renderer straight away.
             let startSubtitle = request.subtitleIndex ?? src.defaultSubtitleStreamIndex ?? -1
             let startsWithSubtitle = streams.contains { $0.isSubtitle && $0.index == startSubtitle }
             let dolbyVision = streams.contains { $0.isVideo && ($0.videoRangeType ?? "").uppercased().contains("DOVI") }
-            if !fallback, dolbyVision, startsWithSubtitle {
+            if !Self.nativeSubtitleLayer, !fallback, dolbyVision, startsWithSubtitle {
                 if usesNativeOutput { rebuildPlayer(output: .metal) }
                 metalForSubtitles = true
             } else if metalForSubtitles, !usesNativeOutput, !triedMetal {
@@ -752,9 +752,13 @@ final class PlaybackController {
     /// a subtitle on, move to the Metal renderer at the same spot with the same tracks.
     @ObservationIgnored private var metalForSubtitles = false
     @ObservationIgnored private var subtitleSwitchStarted = false
+    /// JellyReco's libmpv draws the native output's subtitles on a layer of their own above the
+    /// video (at screen resolution, on every video including Dolby Vision; into the frames only
+    /// during Picture in Picture), so no renderer switch is needed for them.
+    static let nativeSubtitleLayer = true
     private func checkSubtitleRendering() {
-        // Any subtitle: the native layer draws none of them onto Dolby Vision frames.
-        guard usesNativeOutput, !subtitleSwitchStarted, phase == .playing,
+        // Any subtitle: without the subtitle layer the native output draws none onto Dolby Vision frames.
+        guard !Self.nativeSubtitleLayer, usesNativeOutput, !subtitleSwitchStarted, phase == .playing,
               player.videoFeatureCapabilities.nativeSubtitles.availability == .unavailable,
               player.selectedSubtitle() != nil || player.selectedSubtitle(for: .secondary) != nil else { return }
         subtitleSwitchStarted = true

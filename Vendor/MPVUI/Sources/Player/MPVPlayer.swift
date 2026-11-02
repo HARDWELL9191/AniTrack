@@ -85,6 +85,11 @@ public final class MPVPlayer {
     private var storedPictureInPicture: MPVPictureInPictureController?
     @ObservationIgnored
     private var storedSampleBufferDisplayLayer: AVSampleBufferDisplayLayer?
+    // JellyReco: the layer above the video that the native output draws subtitles on.
+    @ObservationIgnored
+    private var storedSubtitleDisplayLayer: AVSampleBufferDisplayLayer?
+    @ObservationIgnored
+    private var subtitleLayerSent: (address: Int64, width: Int, height: Int, composite: Bool?) = (0, 0, 0, nil)
     @ObservationIgnored
     private var pictureInPictureSurfaceToken: UUID?
     @ObservationIgnored
@@ -656,6 +661,57 @@ extension MPVPlayer {
         case .idle, .stopped, .ended, .failed: true
         default: isPaused
         }
+    }
+
+    /// JellyReco: subtitles for the native output, drawn by libmpv at this layer's pixel size and
+    /// timed with the video (its patched vo_avfoundation). Sits right above the video layer.
+    var subtitleDisplayLayer: AVSampleBufferDisplayLayer {
+        if let storedSubtitleDisplayLayer {
+            return storedSubtitleDisplayLayer
+        }
+
+        let layer = AVSampleBufferDisplayLayer()
+        layer.videoGravity = .resize
+        layer.isOpaque = false
+        layer.backgroundColor = nil
+        storedSubtitleDisplayLayer = layer
+
+        return layer
+    }
+
+    /// Hands the subtitle layer and its size in pixels to libmpv. Large layers (Fill zoom) are
+    /// drawn at most 1600 pixels tall and scaled up by the layer.
+    func updateSubtitleLayer(pixelSize: CGSize) {
+        guard videoOutput == .sampleBuffer, pixelSize.width >= 1, pixelSize.height >= 1,
+              pixelSize.width.isFinite, pixelSize.height.isFinite else { return }
+
+        let layer = subtitleDisplayLayer
+        let address = Int64(Int(bitPattern: Unmanaged.passUnretained(layer).toOpaque()))
+        let shrink = min(1, 1600 / pixelSize.height)
+        let width = max(1, Int((pixelSize.width * shrink).rounded()))
+        let height = max(1, Int((pixelSize.height * shrink).rounded()))
+
+        if subtitleLayerSent.address != address {
+            subtitleLayerSent.address = address
+            engine?.performPropertySet("avfoundation-osd-layer", value: String(address))
+        }
+        if subtitleLayerSent.width != width || subtitleLayerSent.height != height {
+            subtitleLayerSent.width = width
+            subtitleLayerSent.height = height
+            engine?.performPropertySet("avfoundation-osd-layer-w", value: String(width))
+            engine?.performPropertySet("avfoundation-osd-layer-h", value: String(height))
+        }
+        if subtitleLayerSent.composite == nil {
+            setSubtitleCompositing(false)
+        }
+    }
+
+    /// Subtitles drawn into the video frames (Picture in Picture shows only the video layer) or
+    /// on the subtitle layer.
+    func setSubtitleCompositing(_ composite: Bool) {
+        guard videoOutput == .sampleBuffer, subtitleLayerSent.composite != composite else { return }
+        subtitleLayerSent.composite = composite
+        engine?.performPropertySet("avfoundation-composite-osd", value: composite ? "yes" : "no")
     }
 
     var sampleBufferDisplayLayer: AVSampleBufferDisplayLayer {

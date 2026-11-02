@@ -251,6 +251,8 @@ public final class MPVPictureInPictureController {
         }
 
         isNativeRendering = enabled
+        // JellyReco: PiP shows only the video layer, so subtitles go into its frames meanwhile.
+        player?.setSubtitleCompositing(enabled)
 
         if enabled {
             updateNativeOverlay()

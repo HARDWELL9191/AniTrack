@@ -140,7 +140,8 @@ private struct SubtitleRenderHost: View {
             for _ in 0..<40 {
                 try? await Task.sleep(for: .milliseconds(100))
                 let r = Self.displayedFramePixels()
-                let n = r.range(of: #"brightpx:(\d+)"#, options: .regularExpression).map { Int(r[$0].dropFirst(9)) ?? -1 } ?? -1
+                // Video layer and subtitle layer: the caption is on whichever draws it.
+                let n = r.matches(of: #/brightpx:(\d+)/#).compactMap { Int($0.output.1) }.max() ?? -1
                 seen.append(n)
                 if n > best { best = n; sample = r }
                 if best == -1 { sample = r }
@@ -152,7 +153,8 @@ private struct SubtitleRenderHost: View {
             + "nativeSubtitles=\(native.availability.rawValue) at=\(p.position)\(frame) log=\(log.lines.joined(separator: " || "))"
     }
 
-    /// Bright pixels in the frame the native layer displays ("brightpx:N"), or why there's none.
+    /// Bright pixels in the frames the native layers display ("brightpx:N" per layer: the video,
+    /// then the subtitle layer above it), or why there's none.
     static func displayedFramePixels() -> String {
         var layers: [AVSampleBufferDisplayLayer] = []
         func walk(_ l: CALayer) {

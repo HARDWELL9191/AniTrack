@@ -17,6 +17,13 @@ final class MPVMetalLayer: CAMetalLayer {
         didSet { layoutVideoSublayer() }
     }
 
+    /// JellyReco: subtitle layer laid out (and animated) exactly like the video layer; its new
+    /// size in pixels is reported for libmpv.
+    weak var subtitleSublayer: CALayer? {
+        didSet { layoutVideoSublayer() }
+    }
+    var subtitleSublayerDidResize: (@MainActor (CGSize) -> Void)?
+
     var geometryAnimationDidStart: (@MainActor () -> Void)?
 
     override var bounds: CGRect {
@@ -178,6 +185,9 @@ final class MPVMetalLayer: CAMetalLayer {
         if let videoSublayer, videoSublayer.superlayer === self {
             videoSublayer.add(geometry, forKey: key)
         }
+        if let subtitleSublayer, subtitleSublayer.superlayer === self {
+            subtitleSublayer.add(geometry, forKey: key)
+        }
 
         if Thread.isMainThread {
             let didStart = geometryAnimationDidStart
@@ -190,6 +200,7 @@ final class MPVMetalLayer: CAMetalLayer {
            animation(forKey: key).flatMap(Self.geometryAnimation) != nil
         {
             videoSublayer?.removeAnimation(forKey: key)
+            subtitleSublayer?.removeAnimation(forKey: key)
         }
 
         super.removeAnimation(forKey: key)
@@ -395,14 +406,24 @@ final class MPVMetalLayer: CAMetalLayer {
     #endif
 
     private func layoutVideoSublayer() {
-        guard let videoSublayer, videoSublayer.superlayer === self else { return }
+        let sublayers = [videoSublayer, subtitleSublayer].compactMap { $0 }.filter { $0.superlayer === self }
+        guard !sublayers.isEmpty else { return }
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        videoSublayer.anchorPoint = .zero
-        videoSublayer.position = bounds.origin
-        videoSublayer.bounds = bounds
+        for sublayer in sublayers {
+            sublayer.anchorPoint = .zero
+            sublayer.position = bounds.origin
+            sublayer.bounds = bounds
+        }
         CATransaction.commit()
+
+        if let subtitleSublayer, subtitleSublayer.superlayer === self, Thread.isMainThread {
+            let scale = subtitleSublayer.contentsScale
+            let size = CGSize(width: bounds.width * scale, height: bounds.height * scale)
+            let report = subtitleSublayerDidResize
+            MainActor.assumeIsolated { report?(size) }
+        }
     }
 
     #if canImport(UIKit)

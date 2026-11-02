@@ -342,6 +342,7 @@ public final class MPVPlatformVideoPlayer: MPVPlatformView {
            player.isRenderSurfaceActive(token: surfaceToken)
         {
             player.sampleBufferDisplayLayer.removeFromSuperlayer()
+            player.subtitleDisplayLayer.removeFromSuperlayer()
 
             player.updateSampleBufferOutput(
                 displayCapabilities: .unknown,
@@ -635,9 +636,12 @@ extension MPVPlatformVideoPlayer {
         guard isActiveRenderingSurface, bounds.width > 0, bounds.height > 0 else { return }
 
         let displayLayer = player.sampleBufferDisplayLayer
+        let subtitleLayer = player.subtitleDisplayLayer
         let scale = platformScale
 
-        if displayLayer.superlayer !== metalLayer || displayLayer.contentsScale != scale {
+        if displayLayer.superlayer !== metalLayer || displayLayer.contentsScale != scale
+            || subtitleLayer.superlayer !== metalLayer || subtitleLayer.contentsScale != scale
+        {
             applyWithoutImplicitAnimations {
                 if displayLayer.superlayer !== metalLayer {
                     displayLayer.removeFromSuperlayer()
@@ -646,8 +650,22 @@ extension MPVPlatformVideoPlayer {
                 }
 
                 displayLayer.contentsScale = scale
+
+                // JellyReco: subtitles on their own layer right above the video.
+                subtitleLayer.contentsScale = scale
+                if subtitleLayer.superlayer !== metalLayer {
+                    subtitleLayer.removeFromSuperlayer()
+                    metalLayer.insertSublayer(subtitleLayer, above: displayLayer)
+                    if let backing = metalLayer as? MPVMetalLayer {
+                        backing.subtitleSublayerDidResize = { [weak player = self.player] size in
+                            player?.updateSubtitleLayer(pixelSize: size)
+                        }
+                        backing.subtitleSublayer = subtitleLayer
+                    }
+                }
             }
         }
+        player.updateSubtitleLayer(pixelSize: CGSize(width: bounds.width * scale, height: bounds.height * scale))
 
         let configuration = makeSurfaceConfiguration()
 
