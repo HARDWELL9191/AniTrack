@@ -261,6 +261,7 @@ final class AppModel {
         storageLoaded = false
         dirty = [:]
         myList = []; externalSeen = []; externalNotForMe = []
+        baseMyList = []; baseTitles = [:]
         settings.dismissedPicks = []
         reco.reset()
         discovery.reset()
@@ -335,6 +336,10 @@ final class AppModel {
     @ObservationIgnored private var flushTask: Task<Void, Never>?
     /// Counts completed saves (so a read that started before one can tell it's out of date).
     @ObservationIgnored private var storageSaves = 0
+    /// Each list as it was last loaded from / saved to the server: what this device's changes are
+    /// worked out against when it saves (see `merge`).
+    @ObservationIgnored private var baseMyList: [MyListEntry] = []
+    @ObservationIgnored private var baseTitles: [ExternalList: [ExternalTitle]] = [:]
 
     /// For You lists and synced settings, from this account's storage on the server.
     /// A list with an unsaved change here gets that change applied onto the server's copy (see
@@ -428,9 +433,10 @@ final class AppModel {
 
     /// Saves the pending keys, one save at a time. Jellyfin replaces the whole stored record on
     /// every save, so each save starts from a fresh copy of it (keeping what other devices wrote)
-    /// and puts in the current value of every pending key. If that copy can't be read, nothing is
-    /// written (writing over an old or empty copy would erase the other keys); the keys stay
-    /// pending and go with the next change or refresh.
+    /// and puts in every pending key: a list as this device's changes merged onto that copy's list,
+    /// a setting as its current value. If that copy can't be read, nothing is written (writing
+    /// over an old or empty copy would erase the other keys); the keys stay pending and go with
+    /// the next change or refresh.
     private func flushStorage() async {
         while storageLoaded, !dirty.isEmpty, let client {
             let pending = dirty
@@ -438,8 +444,22 @@ final class AppModel {
             guard client === self.client, storageLoaded else { return }
             var prefs = fresh
             var custom = prefs.customPrefs ?? [:]
+            // Each merged list: this device's copy it was made from, and what was saved.
+            var sentList: (local: [MyListEntry], saved: [MyListEntry])?
+            var sentTitles: [ExternalList: (local: [ExternalTitle], saved: [ExternalTitle])] = [:]
             for key in pending.keys {
-                if let v = currentValue(key) { custom[key] = .some(v) }
+                let server: String? = custom[key] ?? nil
+                if key == "mylist" {
+                    let saved = Self.merge(local: myList, base: baseMyList, server: Self.decodeList(server))
+                    custom[key] = .some(Self.encodeList(saved))
+                    sentList = (local: myList, saved: saved)
+                } else if let list = ExternalList(rawValue: key) {
+                    let saved = Self.merge(local: titles(list), base: baseTitles[list] ?? [], server: Self.decodeTitles(server))
+                    custom[key] = .some(Self.encodeTitles(saved))
+                    sentTitles[list] = (local: titles(list), saved: saved)
+                } else if let v = currentValue(key) {
+                    custom[key] = .some(v)
+                }
             }
             prefs.customPrefs = custom
             do {
@@ -447,6 +467,18 @@ final class AppModel {
                 guard client === self.client else { return }
                 storageSaves &+= 1
                 for (key, n) in pending where dirty[key] == n { dirty[key] = nil }
+                // The saved list is the new base and shows here (other devices' additions appear);
+                // a change made here while the save was on its way goes on top of it again.
+                if let sent = sentList {
+                    baseMyList = sent.saved
+                    let now = Self.merge(local: myList, base: sent.local, server: sent.saved)
+                    if now != myList { myList = now }
+                }
+                for (list, sent) in sentTitles {
+                    baseTitles[list] = sent.saved
+                    let now = Self.merge(local: titles(list), base: sent.local, server: sent.saved)
+                    if now != titles(list) { setTitles(list, now) }
+                }
             } catch {
                 report(error)
                 return
@@ -454,12 +486,38 @@ final class AppModel {
         }
     }
 
-    /// This device's current value for a stored key.
+    /// Three-way merge of one saved list. This device's changes since `base` (ids added here, ids
+    /// removed here) are applied onto the server's copy: what another device added stays, what was
+    /// removed here goes, and what was added here is added once, on top (titles appended at the
+    /// end here, like older picks folded in, stay at the end).
+    private static func merge<T: Identifiable>(local: [T], base: [T], server: [T]) -> [T] where T.ID == String {
+        let baseIds = Set(base.map(\.id))
+        let localIds = Set(local.map(\.id))
+        var top: [T] = [], bottom: [T] = []
+        var addedIds = Set<String>()
+        var pastKnown = false
+        for entry in local {
+            if baseIds.contains(entry.id) { pastKnown = true; continue }
+            guard addedIds.insert(entry.id).inserted else { continue }
+            if pastKnown { bottom.append(entry) } else { top.append(entry) }
+        }
+        let kept = server.filter { entry in
+            !addedIds.contains(entry.id) && !(baseIds.contains(entry.id) && !localIds.contains(entry.id))
+        }
+        return top + kept + bottom
+    }
+
+    private func titles(_ list: ExternalList) -> [ExternalTitle] {
+        list == .seenelsewhere ? externalSeen : externalNotForMe
+    }
+
+    private func setTitles(_ list: ExternalList, _ value: [ExternalTitle]) {
+        if list == .seenelsewhere { externalSeen = value } else { externalNotForMe = value }
+    }
+
+    /// This device's current value for a stored setting (lists are merged in `flushStorage`).
     private func currentValue(_ key: String) -> String? {
         switch key {
-        case "mylist": return Self.encodeList(myList)
-        case "notforme": return Self.encodeTitles(externalNotForMe)
-        case "seenelsewhere": return Self.encodeTitles(externalSeen)
         case "settings": return settings.exportJSON()
         case "tmdbkey": return settings.tmdbKey
         case "wishlist": return "[]"

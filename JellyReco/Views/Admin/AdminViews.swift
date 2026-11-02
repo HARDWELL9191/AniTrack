@@ -589,6 +589,8 @@ struct UserAdminDetail: View {
     @State private var confirmReset = false
     @State private var pw = ""
     @State private var pw2 = ""
+    @State private var currentPw = ""
+    @State private var pwError: String?
 
     private static let unrated: [(String, String)] = [
         ("Book", "Books"), ("ChannelContent", "Channels"), ("LiveTvChannel", "Live TV"), ("Movie", "Movies"),
@@ -777,11 +779,14 @@ struct UserAdminDetail: View {
 
     @ViewBuilder private var password: some View {
         Section("Password") {
+            // Jellyfin asks for the current password when you change your own (admins too).
+            if isOwnAccount { SecureField("Current password", text: $currentPw).textContentType(.password) }
             SecureField("New password", text: $pw).textContentType(.newPassword)
             SecureField("Confirm new password", text: $pw2).textContentType(.newPassword)
             if !pw2.isEmpty && pw != pw2 {
                 Text("The passwords don't match.").font(.footnote).foregroundStyle(.red)
             }
+            if let pwError { Text(pwError).font(.footnote).foregroundStyle(.red) }
         }
         Section {
             Button("Save password") { Task { await setPassword(reset: false) } }
@@ -997,13 +1002,40 @@ struct UserAdminDetail: View {
         guard let client = model.client else { return }
         saving = true
         defer { saving = false }
+        pwError = nil
+        let own = isOwnAccount
         do {
-            let body: [String: Any] = reset ? ["ResetPassword": true] : ["NewPw": pw]
+            let body: [String: Any] = reset ? ["ResetPassword": true]
+                : own ? ["CurrentPw": currentPw, "NewPw": pw]   // empty allowed, like Jellyfin web
+                : ["NewPw": pw]
             try await client.send("POST", "/Users/Password", query: ["userId": user.id], body: try JSONSerialization.data(withJSONObject: body))
             pw = ""
             pw2 = ""
+            currentPw = ""
             message = reset ? "Password reset." : "Password changed."
+        } catch JellyfinError.http(403, let body) {
+            // Wrong current password: the server says "Invalid user or password entered."
+            pwError = Self.serverMessage(body) ?? (own && !reset ? "The current password is wrong." : JellyfinError.http(403, body).localizedDescription)
         } catch { message = error.localizedDescription }
+    }
+
+    /// The account being edited is the one signed in on this device.
+    private var isOwnAccount: Bool {
+        func norm(_ id: String?) -> String? { id.map { $0.replacingOccurrences(of: "-", with: "").lowercased() } }
+        let me = norm(model.user?.id) ?? norm(model.client?.userId)
+        return me != nil && norm(user.id) == me
+    }
+
+    /// The text of an error response: a JSON string, a problem's detail/title, or plain text.
+    private static func serverMessage(_ body: String?) -> String? {
+        guard let text = body?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty, text.count < 300 else { return nil }
+        if let data = text.data(using: .utf8),
+           let any = try? JSONSerialization.jsonObject(with: data, options: .fragmentsAllowed) {
+            if let s = any as? String { return s.isEmpty ? nil : s }
+            if let o = any as? [String: Any] { return (o["detail"] as? String) ?? (o["title"] as? String) }
+            return nil
+        }
+        return text
     }
 }
 

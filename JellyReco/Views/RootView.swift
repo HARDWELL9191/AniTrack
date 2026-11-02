@@ -17,15 +17,23 @@ struct RootView: View {
                 MainTabView()
             }
         }
+        // The lock is drawn in its own window above sheets and the player (LockWindow.swift);
+        // only when there's no window scene yet is it drawn here instead.
         .overlay {
-            if model.isLocked { LockView() }
+            if model.isLocked, LockWindowController.shared.windowScene == nil { LockView() }
         }
         // Face ID lock: also when you come back to the app, not only at a cold start (not while a
         // video keeps playing in the background or in picture in picture).
         .onChange(of: scenePhase) { _, phase in
+            LockWindowController.shared.scenePhase = phase
             if phase == .background, model.settings.requireFaceID, model.phase == .ready, model.playback == nil {
                 model.isLocked = true
+                // Straight away, so the app-switcher snapshot already shows the lock.
+                LockWindowController.shared.update(model: model, phase: phase)
             }
+        }
+        .onChange(of: model.isLocked, initial: true) { _, _ in
+            LockWindowController.shared.update(model: model, phase: scenePhase)
         }
         .fullScreenCover(item: $model.playback) { request in
             PlayerScreen(request: request)
