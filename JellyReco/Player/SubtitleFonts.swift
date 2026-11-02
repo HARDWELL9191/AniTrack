@@ -13,6 +13,8 @@ enum SubtitleFonts {
     struct Setup {
         let directory: String
         let family: String
+        /// mpv's config folder holding `subfont.ttf`, libass's last-resort font (see below).
+        let configDirectory: String?
     }
 
     /// PostScript names, primary family first.
@@ -25,6 +27,27 @@ enum SubtitleFonts {
     private static let maxFileBytes: Int64 = 40 * 1024 * 1024
 
     @MainActor private static var cached: Setup?
+
+    /// For a character the subtitle font lacks, libass asks Core Text which font has it. For
+    /// Japanese punctuation and kanji (～ 〜 「」 漢…) Core Text answers PingFang, a protected
+    /// system font libass can't open, so they showed as boxes (seen in the simulator test). libass
+    /// then falls back to mpv's `subfont.ttf` from its config folder: that's Hiragino Sans, which
+    /// has all of them (Chinese-only characters it lacks still can't be shown).
+    private static func lastResortFolder(base: URL) -> String? {
+        let fm = FileManager.default
+        let dir = base.appendingPathComponent("SubtitleFallback", isDirectory: true)
+        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        let font = CTFontCreateWithName("HiraginoSans-W3" as CFString, 24, nil)
+        guard (CTFontCopyPostScriptName(font) as String) == "HiraginoSans-W3",
+              let source = CTFontCopyAttribute(font, kCTFontURLAttribute) as? URL,
+              fm.isReadableFile(atPath: source.path) else { return nil }
+        let dest = dir.appendingPathComponent("subfont.ttf")
+        if (try? fm.destinationOfSymbolicLink(atPath: dest.path)) != source.path {
+            try? fm.removeItem(at: dest)
+            if (try? fm.createSymbolicLink(at: dest, withDestinationURL: source)) == nil { return nil }
+        }
+        return fm.fileExists(atPath: dest.path) ? dir.path : nil
+    }
 
     @MainActor static func prepare() -> Setup? {
         if let cached, FileManager.default.fileExists(atPath: cached.directory) { return cached }
@@ -55,7 +78,7 @@ enum SubtitleFonts {
             if fm.fileExists(atPath: dest.path) { linkedFiles.insert(fileName) }
         }
         guard let family, !linkedFiles.isEmpty else { return nil }
-        let setup = Setup(directory: dir.path, family: family)
+        let setup = Setup(directory: dir.path, family: family, configDirectory: lastResortFolder(base: base))
         cached = setup
         return setup
     }

@@ -158,6 +158,11 @@ final class PlaybackController {
             options["sub-fonts-dir"] = fonts.directory
             options["sub-font"] = fonts.family
             options["osd-font"] = fonts.family
+            // Only so mpv finds subfont.ttf (libass's last-resort font); the folder holds nothing else.
+            if let config = fonts.configDirectory {
+                options["config"] = "yes"
+                options["config-dir"] = config
+            }
         }
         if settings.stereoDownmix { options["audio-channels"] = "stereo" }
         return MPVPlayerConfiguration(
