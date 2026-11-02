@@ -1,0 +1,60 @@
+name: JellyReco republish build
+
+# Puts an earlier build's exact IPA back as the "JellyReco latest" release and the AltStore
+# source (no rebuild). Run by hand with the run id of the build to put back.
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Run id of the JellyReco iOS build to republish"
+        required: true
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  republish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Download that build's IPA
+        uses: actions/download-artifact@v5
+        with:
+          name: JellyReco-ipa
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+          path: ipa
+      - name: Check the IPA
+        id: app
+        run: |
+          set -e
+          cd ipa && unzip -q JellyReco.ipa && cd ..
+          APP=ipa/Payload/JellyReco.app
+          python3 -c "import plistlib,sys;d=plistlib.load(open('$APP/Info.plist','rb'));print('Republishing', d['CFBundleShortVersionString'], d['CFBundleVersion'])"
+          SHA=$(gh api repos/${{ github.repository }}/actions/runs/${{ inputs.run_id }} -q .head_sha)
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "notes=$(gh api repos/${{ github.repository }}/commits/$SHA -q .commit.message | head -1 | head -c 300)" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Replace the "JellyReco latest" release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          gh release delete jellyreco-latest --yes --cleanup-tag -R "$GITHUB_REPOSITORY" 2>/dev/null || true
+          gh release create jellyreco-latest ipa/JellyReco.ipa -R "$GITHUB_REPOSITORY" --target "${{ steps.app.outputs.sha }}" \
+            --title "JellyReco (latest build)" --notes "Build from ${{ steps.app.outputs.sha }}: ${{ steps.app.outputs.notes }}" --prerelease
+      - name: Point the AltStore source at it
+        run: |
+          set -e
+          RAW="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/altstore"
+          IPA_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/jellyreco-latest/JellyReco.ipa"
+          python3 tools/altstore/make_source.py ipa/Payload/JellyReco.app ipa/JellyReco.ipa "$IPA_URL" "$RAW" \
+            "${{ steps.app.outputs.notes }}" /tmp/altstore
+          cp JellyReco/Assets.xcassets/Logo.imageset/Logo.png /tmp/altstore/icon.png
+          cd /tmp/altstore
+          git init -q && git checkout -q -b altstore
+          git add -A && git -c user.name=ci -c user.email=ci@local commit -qm "JellyReco: republished run ${{ inputs.run_id }}"
+          git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" altstore:altstore
+          python3 -c "import json;a=json.load(open('source.json'))['apps'][0]['versions'][0];print(a['version'],a['buildVersion'],a['size'])"
