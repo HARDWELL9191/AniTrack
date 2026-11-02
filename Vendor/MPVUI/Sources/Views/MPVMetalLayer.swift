@@ -1,0 +1,423 @@
+import CoreGraphics
+import Foundation
+import Metal
+import MPVCore
+import QuartzCore
+
+/// A shared Metal layer that preserves MPVUI's host contract while MoltenVK
+/// retires or replaces a swapchain.
+final class MPVMetalLayer: CAMetalLayer {
+
+    /// Native libmpv and MoltenVK surface extents use a signed C `int`.
+    static let maximumDrawableDimension = CGFloat(Int32.max)
+
+    /// Native video is a child of the view's backing layer. Keep it in the
+    /// same geometry transaction, including explicit UIKit/SwiftUI animations.
+    weak var videoSublayer: CALayer? {
+        didSet { layoutVideoSublayer() }
+    }
+
+    var geometryAnimationDidStart: (@MainActor () -> Void)?
+
+    override var bounds: CGRect {
+        didSet { layoutVideoSublayer() }
+    }
+
+    #if os(iOS)
+    private var hostExtendedDynamicRangeContent: Bool?
+    #endif
+
+    private let drawableStateLock = NSLock()
+    private var storedLastValidDrawableSize: CGSize?
+    private var nativeResizeTransactionCount = 0
+    private let colorStateLock = NSLock()
+    private var hostColorSpace: CGColorSpace?
+    private var hostPixelFormat: MTLPixelFormat?
+    #if DEBUG
+    private let presentationObserverLock = NSLock()
+    private var presentationObserver: (@Sendable (CFTimeInterval) -> Void)?
+    #endif
+
+    var hasGeometryAnimation: Bool {
+        (animationKeys() ?? []).contains { key in
+            animation(forKey: key).flatMap(Self.geometryAnimation) != nil
+        }
+    }
+
+    override var colorspace: CGColorSpace? {
+        get { super.colorspace }
+
+        set {
+            colorStateLock.lock()
+            defer { colorStateLock.unlock() }
+
+            if let hostColorSpace, !Self.matchesColorSpace(hostColorSpace, newValue) {
+                return
+            }
+
+            guard !Self.matchesColorSpace(super.colorspace, newValue) else { return }
+
+            super.colorspace = newValue
+        }
+    }
+
+    override var pixelFormat: MTLPixelFormat {
+        get { super.pixelFormat }
+
+        set {
+            colorStateLock.lock()
+            defer { colorStateLock.unlock() }
+
+            if let hostPixelFormat, hostPixelFormat != newValue {
+                return
+            }
+
+            guard super.pixelFormat != newValue else { return }
+
+            super.pixelFormat = newValue
+        }
+    }
+
+    override var isOpaque: Bool {
+        get { true }
+
+        set {
+            guard !super.isOpaque else { return }
+
+            super.isOpaque = true
+        }
+    }
+
+    override var contentsGravity: CALayerContentsGravity {
+        get { .resize }
+
+        set {
+            guard super.contentsGravity != .resize else { return }
+
+            super.contentsGravity = .resize
+        }
+    }
+
+    #if canImport(UIKit)
+    /// MoltenVK configures both filters while creating a swapchain on its
+    /// render thread. UIKit requires mutations of a view-owned layer to occur
+    /// on main, so preserve the request without blocking the renderer.
+    override var minificationFilter: CALayerContentsFilter {
+        get { super.minificationFilter }
+
+        set {
+            if Thread.isMainThread {
+                applyMinificationFilter(newValue)
+            } else {
+                DispatchQueue.main.async(
+                    execute: DispatchWorkItem { [weak self] in
+                        self?.applyMinificationFilter(newValue)
+                    }
+                )
+            }
+        }
+    }
+
+    override var magnificationFilter: CALayerContentsFilter {
+        get { super.magnificationFilter }
+
+        set {
+            if Thread.isMainThread {
+                applyMagnificationFilter(newValue)
+            } else {
+                DispatchQueue.main.async(
+                    execute: DispatchWorkItem { [weak self] in
+                        self?.applyMagnificationFilter(newValue)
+                    }
+                )
+            }
+        }
+    }
+    #endif
+
+    override var drawableSize: CGSize {
+        get {
+            drawableStateLock.lock()
+            defer { drawableStateLock.unlock() }
+            return super.drawableSize
+        }
+
+        set {
+            guard newValue.width.isFinite, newValue.height.isFinite else { return }
+
+            drawableStateLock.lock()
+            defer { drawableStateLock.unlock() }
+
+            if Self.isMoltenVKRetirementSentinel(newValue) {
+                guard !Thread.isMainThread,
+                      storedLastValidDrawableSize != nil,
+                      nativeResizeTransactionCount > 0
+                else { return }
+
+                super.drawableSize = newValue
+                return
+            }
+
+            guard Self.isValidDrawableSize(newValue) else { return }
+
+            // Unlike colorspace and pixelFormat, an equal drawable-size write
+            // is not redundant. MoltenVK uses it while installing a replacement
+            // swapchain to invalidate CAMetalLayer's cached drawable pool.
+            super.drawableSize = newValue
+            storedLastValidDrawableSize = newValue
+        }
+    }
+
+    override func add(_ animation: CAAnimation, forKey key: String?) {
+        super.add(animation, forKey: key)
+        guard let geometry = Self.geometryAnimation(animation) else { return }
+
+        // Copy the actual animation, preserving spring parameters, keyframes,
+        // timing, and interactive interruption. A new default-duration implicit
+        // animation would visibly lag behind the hosting view.
+        if let videoSublayer, videoSublayer.superlayer === self {
+            videoSublayer.add(geometry, forKey: key)
+        }
+
+        if Thread.isMainThread {
+            let didStart = geometryAnimationDidStart
+            MainActor.assumeIsolated { didStart?() }
+        }
+    }
+
+    override func removeAnimation(forKey key: String) {
+        if videoSublayer?.superlayer === self,
+           animation(forKey: key).flatMap(Self.geometryAnimation) != nil
+        {
+            videoSublayer?.removeAnimation(forKey: key)
+        }
+
+        super.removeAnimation(forKey: key)
+    }
+
+    override func removeAllAnimations() {
+        for key in animationKeys() ?? [] {
+            removeAnimation(forKey: key)
+        }
+
+        super.removeAllAnimations()
+    }
+
+    static func isValidDrawableSize(_ size: CGSize) -> Bool {
+        size.width.isFinite
+            && size.height.isFinite
+            && size.width > 1
+            && size.height > 1
+            && size.width <= maximumDrawableDimension
+            && size.height <= maximumDrawableDimension
+    }
+
+    private static func geometryAnimation(_ animation: CAAnimation) -> CAAnimation? {
+        if let group = animation as? CAAnimationGroup {
+            let children = group.animations?.compactMap(geometryAnimation) ?? []
+            guard !children.isEmpty, let copy = group.copy() as? CAAnimationGroup else { return nil }
+
+            copy.animations = children
+
+            return copy
+        }
+
+        guard let property = animation as? CAPropertyAnimation,
+              let path = property.keyPath,
+              path == "bounds" || path.hasPrefix("bounds.")
+        else { return nil }
+
+        return animation
+    }
+
+    private static func isMoltenVKRetirementSentinel(_ size: CGSize) -> Bool {
+        size.width == 1 && size.height == 1
+    }
+
+    private static func matchesColorSpace(
+        _ lhs: CGColorSpace?,
+        _ rhs: CGColorSpace?
+    ) -> Bool {
+        switch (lhs, rhs) {
+        case (nil, nil):
+            return true
+
+        case let (lhs?, rhs?):
+            if lhs === rhs {
+                return true
+            }
+
+            return CFEqual(lhs, rhs)
+
+        default:
+            return false
+        }
+    }
+
+    #if DEBUG
+    /// Opt-in measurement of displayed frames, rather than resize requests or
+    /// submitted command buffers. No drawable handlers are installed normally.
+    func observePresentation(_ observer: (@Sendable (CFTimeInterval) -> Void)?) {
+        presentationObserverLock.lock()
+        presentationObserver = observer
+        presentationObserverLock.unlock()
+    }
+
+    override func nextDrawable() -> (any CAMetalDrawable)? {
+        let drawable = super.nextDrawable()
+        #if !targetEnvironment(simulator)
+        presentationObserverLock.lock()
+
+        let observer = presentationObserver
+
+        presentationObserverLock.unlock()
+
+        if let observer {
+            drawable?.addPresentedHandler { presented in
+                observer(presented.presentedTime)
+            }
+        }
+        #endif
+        return drawable
+    }
+    #endif
+
+    /// MoltenVK may set a generic swapchain colorspace while rebuilding. The
+    /// host's exact profile is authoritative, particularly in calibrated ICC
+    /// mode where a second display transform would corrupt the result.
+    func configureHostColorSpace(_ colorSpace: CGColorSpace, pixelFormat: MTLPixelFormat) {
+        precondition(Thread.isMainThread)
+        colorStateLock.lock()
+        defer { colorStateLock.unlock() }
+        hostColorSpace = colorSpace
+        hostPixelFormat = pixelFormat
+
+        if !Self.matchesColorSpace(super.colorspace, colorSpace) {
+            super.colorspace = colorSpace
+        }
+
+        if super.pixelFormat != pixelFormat {
+            super.pixelFormat = pixelFormat
+        }
+    }
+
+    /// Limits MoltenVK's retirement sentinel exception to a host-authorized
+    /// synchronous swapchain replacement or destruction. Other background writers remain
+    /// subject to the normal 1x1 rejection policy.
+    func beginNativeResizeTransaction() {
+        drawableStateLock.lock()
+        nativeResizeTransactionCount &+= 1
+        drawableStateLock.unlock()
+    }
+
+    /// Called after the renderer has joined all native presentation threads.
+    /// MoltenVK only writes its retirement sentinel for outstanding presents.
+    /// Completed drawables may still belong to CAMetalLayer's reusable pool.
+    /// Invalidate that pool without exposing a permanent invalid host extent.
+    @discardableResult
+    func invalidateDrawablePoolAfterNativeTeardown() -> Bool {
+        drawableStateLock.lock()
+        defer { drawableStateLock.unlock() }
+        guard nativeResizeTransactionCount > 0, let storedLastValidDrawableSize else { return false }
+
+        super.drawableSize = CGSize(width: 1, height: 1)
+        super.drawableSize = storedLastValidDrawableSize
+
+        return true
+    }
+
+    func endNativeResizeTransaction() {
+        drawableStateLock.lock()
+        nativeResizeTransactionCount = max(nativeResizeTransactionCount - 1, 0)
+
+        // A successful replacement normally installs its final extent before
+        // returning. If MoltenVK exits abnormally after writing only its 1x1
+        // retirement sentinel, or teardown retires without replacing it, never
+        // expose that transient as durable layer
+        // geometry once the outermost native transaction has ended.
+        if nativeResizeTransactionCount == 0,
+           Self.isMoltenVKRetirementSentinel(super.drawableSize),
+           let storedLastValidDrawableSize
+        {
+            super.drawableSize = storedLastValidDrawableSize
+        }
+
+        drawableStateLock.unlock()
+    }
+
+    #if os(iOS)
+    /// Records the host's EDR policy on main before native rendering starts.
+    func configureExtendedDynamicRangeContent(_ newValue: Bool) {
+        precondition(Thread.isMainThread)
+        hostExtendedDynamicRangeContent = newValue
+
+        if #available(iOS 26.0, *) {
+            return
+        }
+
+        setExtendedDynamicRangeContent(newValue)
+    }
+
+    /// MoltenVK can write this property from its render queue. Redundant native
+    /// writes are ignored and valid writes are marshalled without blocking it.
+    override var wantsExtendedDynamicRangeContent: Bool {
+        get { super.wantsExtendedDynamicRangeContent }
+
+        set {
+            if Thread.isMainThread {
+                applyExtendedDynamicRangeRequest(newValue)
+            } else {
+                DispatchQueue.main.async(
+                    execute: DispatchWorkItem { [weak self] in
+                        self?.applyExtendedDynamicRangeRequest(newValue)
+                    }
+                )
+            }
+        }
+    }
+
+    private func applyExtendedDynamicRangeRequest(_ newValue: Bool) {
+        precondition(Thread.isMainThread)
+        guard hostExtendedDynamicRangeContent == newValue else { return }
+
+        if #available(iOS 26.0, *) {
+            return
+        }
+
+        setExtendedDynamicRangeContent(newValue)
+    }
+
+    private func setExtendedDynamicRangeContent(_ newValue: Bool) {
+        guard super.wantsExtendedDynamicRangeContent != newValue else { return }
+
+        super.wantsExtendedDynamicRangeContent = newValue
+    }
+    #endif
+
+    private func layoutVideoSublayer() {
+        guard let videoSublayer, videoSublayer.superlayer === self else { return }
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        videoSublayer.anchorPoint = .zero
+        videoSublayer.position = bounds.origin
+        videoSublayer.bounds = bounds
+        CATransaction.commit()
+    }
+
+    #if canImport(UIKit)
+    private func applyMinificationFilter(_ newValue: CALayerContentsFilter) {
+        precondition(Thread.isMainThread)
+        guard super.minificationFilter != newValue else { return }
+
+        super.minificationFilter = newValue
+    }
+
+    private func applyMagnificationFilter(_ newValue: CALayerContentsFilter) {
+        precondition(Thread.isMainThread)
+        guard super.magnificationFilter != newValue else { return }
+
+        super.magnificationFilter = newValue
+    }
+    #endif
+}

@@ -1128,9 +1128,12 @@ final class PlaybackController {
 
     /// Where subtitles sit (mpv sub-pos: 100 = their normal place, less = higher, more = lower).
     /// - Text and styled ASS: the Vertical position setting, relative to what's visible.
-    /// - Picture subtitles (PGS, VobSub, DVB) already sit above the bottom on the disc: in Fill
-    ///   they're lifted only by the part cut off below them (not the whole strip), and above
-    ///   100 % they move down, never past the picture's bottom edge (mpv stops them there).
+    /// - Picture subtitles (PGS, VobSub, DVB): placed by JellyReco's libmpv patch from where their
+    ///   visible pixels are (each disc puts them at its own height, often well above the bottom).
+    ///   With your style, the bottom lines sit exactly where text lines sit (same gap, the
+    ///   Vertical position setting on top); keeping their own styling, they stay where the disc
+    ///   put them and are only lifted, in Fill, by as much as is cut off. Top lines move down into
+    ///   view in Fill.
     /// - "Keep their own styling" ASS ignores any repositioning in mpv, so while it has to move
     ///   (Fill, or a position other than 100 %) it runs as "keep styling" with a size that only
     ///   cancels the zoom: same fonts, colours and look.
@@ -1151,11 +1154,25 @@ final class PlaybackController {
         var marginY = 22.0                       // mpv's default gap above / below text lines (720 lines)
         var marginX = 25.0                       // and to the sides
         var styleOverrides = ""
+        // Picture subtitles (% of the picture's height from its top; -1 = where the disc put them).
+        var pictureBottom = -1.0
+        var pictureBottomMode = "limit"
+        var pictureTop = -1.0
         switch kind {
         case .picture:
-            // Disc subtitles keep ~5 % below them: lifted only by what's cut off beyond that.
-            let fillNeed = max(0, fillHidden * 100 - 4)
-            pos = 100 - fillNeed - (100 - base) * visible
+            pos = 100                                // placed by sub-image-bottom/top instead
+            // The plain-text gap below the lowest line (22 of 720 lines, scaled like the text),
+            // as it looks on screen in Fit.
+            let gap = 22.0 / 720 * 100 * k / zoom
+            let visibleBottom = 100 * (1 - fillHidden)
+            if override != "no" {
+                let wanted = base > 100 ? 100 + min(base - 100, Self.textLoweringLimit) : base
+                pictureBottom = visibleBottom - gap - (100 - wanted) * visible
+                pictureBottomMode = "anchor"
+            } else if filled {
+                pictureBottom = visibleBottom - gap
+            }
+            if filled { pictureTop = 100 * fillHidden + gap }
         case .text, .none:
             // Your style at the same size on every file; top and bottom lines move in by the
             // cropped strip in Fill; the position setting on top.
@@ -1202,6 +1219,9 @@ final class PlaybackController {
                 }
             }
         }
+        setSubtitleProperty("sub-image-bottom", String(format: "%.2f", pictureBottom < 0 ? -1 : min(100, max(40, pictureBottom))))
+        setSubtitleProperty("sub-image-bottom-mode", pictureBottomMode)
+        setSubtitleProperty("sub-image-top", String(format: "%.2f", pictureTop < 0 ? -1 : min(60, pictureTop)))
         setSubtitleProperty("sub-ass-override", override)
         setSubtitleProperty("sub-ass-style-overrides", styleOverrides)   // reloads the subtitles when it changes
         setSubtitleProperty("sub-margin-y", String(Int(marginY.rounded())))

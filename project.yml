@@ -14,8 +14,8 @@ settings:
 
 packages:
   MPVUI:
-    url: https://github.com/LePips/MPVUI
-    exactVersion: 0.8.0
+    # MPVUI 0.8.0 with JellyReco's own build of its native library (see Vendor/MPVUI/Package.swift).
+    path: Vendor/MPVUI
 
 targets:
   JellyReco:

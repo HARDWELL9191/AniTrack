@@ -263,7 +263,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Download MPVUI's libmpv (same build as the app)
+      # MPVUI's published build: the same decoders and demuxers as the app's own build (which adds
+      # only subtitle-placement patches and has no macOS slice for this Mac-side tester).
+      - name: Download MPVUI's libmpv (same decoders as the app)
         run: |
           set -euo pipefail
           curl -fsSL -o libmpv.zip https://github.com/LePips/MPVUI/releases/download/0.8.0/Libmpv.xcframework.zip
