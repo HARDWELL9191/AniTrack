@@ -4,20 +4,17 @@ import UIKit
 // MARK: - Tinted Liquid Glass button (instead of the flat blue .glassProminent)
 
 /// A prominent button that is real Liquid Glass: refractive glass tinted with the accent colour
-/// (the same recipe AniReco uses for its accent glass), white label, presses like glass. The
-/// default accent is the icon's purple → blue gradient, laid over the glass.
+/// (the same recipe AniReco uses for its accent glass), white label, presses like glass.
 struct TintedGlassButtonStyle: ButtonStyle {
     var tint: Color = Theme.accent
-    var gradient = true
 
     func makeBody(configuration: Configuration) -> some View {
-        TintedGlassBody(configuration: configuration, tint: tint, gradient: gradient)
+        TintedGlassBody(configuration: configuration, tint: tint)
     }
 
     private struct TintedGlassBody: View {
         let configuration: ButtonStyleConfiguration
         let tint: Color
-        let gradient: Bool
         @Environment(\.isEnabled) private var isEnabled
         @Environment(\.controlSize) private var controlSize
 
@@ -30,13 +27,8 @@ struct TintedGlassButtonStyle: ButtonStyle {
                 .padding(.vertical, vertical)
                 .padding(.horizontal, horizontal)
                 .contentShape(Capsule())
-                .background {
-                    if gradient {
-                        Capsule().fill(Theme.accentGradient).opacity(isEnabled ? 0.6 : 0.22)
-                    }
-                }
                 // Not .interactive(): a button style shouldn't add its own touch handling.
-                .glassEffect(.regular.tint(tint.opacity(gradient ? (isEnabled ? 0.3 : 0.12) : (isEnabled ? 0.65 : 0.25))), in: .capsule)
+                .glassEffect(.regular.tint(tint.opacity(isEnabled ? 0.65 : 0.25)), in: .capsule)
                 .opacity(isEnabled ? 1 : 0.55)
                 .scaleEffect(configuration.isPressed ? 0.97 : 1)
                 .animation(.snappy(duration: 0.15), value: configuration.isPressed)
@@ -47,7 +39,7 @@ struct TintedGlassButtonStyle: ButtonStyle {
 extension ButtonStyle where Self == TintedGlassButtonStyle {
     /// Accent-tinted Liquid Glass (use instead of `.glassProminent`).
     static var tintedGlass: TintedGlassButtonStyle { TintedGlassButtonStyle() }
-    static func tintedGlass(_ tint: Color) -> TintedGlassButtonStyle { TintedGlassButtonStyle(tint: tint, gradient: false) }
+    static func tintedGlass(_ tint: Color) -> TintedGlassButtonStyle { TintedGlassButtonStyle(tint: tint) }
 }
 
 // MARK: - Dropdowns (AniReco)
@@ -203,13 +195,13 @@ private struct LabelValueRowLayout: Layout {
     }
 }
 
-/// A menu entry (Settings, Dashboard): the icon in the app's purple → blue accent.
+/// A menu entry (Settings, Dashboard): the icon in the app's purple accent.
 struct MenuLabel: View {
     let title: String
     let symbol: String
     init(_ title: String, _ symbol: String) { self.title = title; self.symbol = symbol }
     var body: some View {
-        Label { Text(title) } icon: { Image(systemName: symbol).foregroundStyle(Theme.accentGradient) }
+        Label { Text(title) } icon: { Image(systemName: symbol).foregroundStyle(Theme.accent) }
     }
 }
 

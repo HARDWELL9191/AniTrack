@@ -391,7 +391,7 @@ struct ExternalPickCard: View {
             Label {
                 Text(explanation).font(.subheadline)
             } icon: {
-                Image(systemName: "apple.intelligence").foregroundStyle(Theme.accentGradient)
+                Image(systemName: "apple.intelligence").foregroundStyle(Theme.accent)
             }
             .padding(12)
             .background(Theme.accent.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))

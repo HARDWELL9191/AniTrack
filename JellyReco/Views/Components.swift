@@ -7,15 +7,6 @@ enum Theme {
     static let accent = Color(UIColor { $0.userInterfaceStyle == .dark
         ? UIColor(red: 0xAA / 255, green: 0x5C / 255, blue: 0xC3 / 255, alpha: 1)
         : UIColor(red: 0x8E / 255, green: 0x3E / 255, blue: 0xA8 / 255, alpha: 1) })
-    /// The gradient's blue end: the icon's #0083B0 (light) / Jellyfin's #00A4DC (dark).
-    static let accentBlue = Color(UIColor { $0.userInterfaceStyle == .dark
-        ? UIColor(red: 0x00 / 255, green: 0xA4 / 255, blue: 0xDC / 255, alpha: 1)
-        : UIColor(red: 0x00 / 255, green: 0x83 / 255, blue: 0xB0 / 255, alpha: 1) })
-    /// Purple → blue, like the icon and Jellyfin's logo: for fills, prominent buttons and icons.
-    static let accentGradient = LinearGradient(colors: [accent, accentBlue], startPoint: .topLeading, endPoint: .bottomTrailing)
-    static let pink = Color(red: 0.98, green: 0.45, blue: 0.62)
-    /// Match % glass tint (AniReco's darker pink).
-    static let pinkGlass = Color(red: 0.86, green: 0.33, blue: 0.50)
     /// The app icon's gradient: purple #8E3EA8 → blue #0083B0.
     static let brandPurple = Color(red: 0x8E / 255, green: 0x3E / 255, blue: 0xA8 / 255)
     static let brandBlue = Color(red: 0x00 / 255, green: 0x83 / 255, blue: 0xB0 / 255)
@@ -322,7 +313,7 @@ struct ProgressBar: View {
         GeometryReader { geo in
             ZStack(alignment: .leading) {
                 Capsule().fill(.white.opacity(0.3))
-                Capsule().fill(LinearGradient(colors: [Theme.accent, Theme.accentBlue], startPoint: .leading, endPoint: .trailing))
+                Capsule().fill(Theme.accent)
                     .frame(width: max(4, geo.size.width * value))
             }
         }
