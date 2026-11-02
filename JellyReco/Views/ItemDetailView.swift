@@ -287,7 +287,7 @@ struct ItemDetailView: View {
                 // Double-tap or press and hold to select; a single tap still expands it.
                 SelectableText(text: hidden ? "Overview hidden until you've watched this episode. Tap to show." : text,
                                style: .subheadline, color: .secondaryLabel, lineLimit: expanded ? nil : 5,
-                               onTap: { withAnimation(.snappy) { expanded.toggle() } })
+                               onTap: { expanded.toggle() })
             }
             if let genres = current.genres, !genres.isEmpty {
                 FlowLayout {
@@ -719,7 +719,7 @@ struct PersonView: View {
                 .padding(.horizontal)
                 if let bio = person?.plainOverview, !bio.isEmpty {
                     SelectableText(text: bio, style: .subheadline, color: .secondaryLabel, lineLimit: expanded ? nil : 6,
-                                   onTap: { withAnimation { expanded.toggle() } })
+                                   onTap: { expanded.toggle() })
                         .padding(.horizontal)
                 }
                 Shelf(title: "Movies", items: movies)

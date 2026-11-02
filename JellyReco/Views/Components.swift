@@ -589,6 +589,12 @@ struct SelectableText: UIViewRepresentable {
         view.addGestureRecognizer(double)
         view.addGestureRecognizer(single)
         coordinator.single = single
+        // A tap on the text while something is selected only clears the selection, at once and
+        // without the text view's own tap handling (which flashed the menu somewhere else first).
+        let clear = UITapGestureRecognizer(target: coordinator, action: #selector(Coordinator.clearSelection))
+        clear.delegate = coordinator
+        view.addGestureRecognizer(clear)
+        coordinator.clearTap = clear
         return view
     }
 
@@ -647,6 +653,7 @@ struct SelectableText: UIViewRepresentable {
     final class Coordinator: NSObject, UIGestureRecognizerDelegate, UITextViewDelegate {
         var onTap: (() -> Void)?
         weak var single: UITapGestureRecognizer?
+        weak var clearTap: UITapGestureRecognizer?
         weak var textView: UITextView?
         /// The tap began while text was selected: it only clears the selection (as in other apps),
         /// it doesn't also expand or collapse the text.
@@ -694,11 +701,30 @@ struct SelectableText: UIViewRepresentable {
             self.outsideTap = nil
         }
 
+        @objc func clearSelection() {
+            guard let textView else { return }
+            UIView.performWithoutAnimation { textView.selectedTextRange = nil }
+        }
+
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            if gestureRecognizer === clearTap { return (textView?.selectedRange.length ?? 0) > 0 }
+            return true
+        }
+
+        // The text view's own taps wait for `clearTap` to fail (it only succeeds while text is
+        // selected), so a tap that clears the selection never reaches them.
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                               shouldBeRequiredToFailBy other: UIGestureRecognizer) -> Bool {
+            guard gestureRecognizer === clearTap, let textView, other.view === textView,
+                  other is UITapGestureRecognizer, other !== single, other !== clearTap else { return false }
+            return true
+        }
+
         @objc private func tappedOutside() {
             // After the tap's own action (a button, another text) has run.
             DispatchQueue.main.async { [weak self] in
                 guard let textView = self?.textView, textView.selectedRange.length > 0 else { return }
-                textView.selectedTextRange = nil
+                UIView.performWithoutAnimation { textView.selectedTextRange = nil }
             }
         }
 
@@ -723,6 +749,9 @@ struct SelectableText: UIViewRepresentable {
 
         // Alongside the text view's own selection gestures (and anything else), never instead of them.
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
-                               shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
+                               shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+            if gestureRecognizer === clearTap, other.view === textView { return false }
+            return true
+        }
     }
 }
