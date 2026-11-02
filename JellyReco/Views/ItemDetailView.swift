@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct ItemDetailView: View {
     @Environment(AppModel.self) private var model
@@ -103,15 +104,24 @@ struct ItemDetailView: View {
                 }
                 VStack(alignment: .leading, spacing: 6) {
                     if let logo = model.client?.logoURL(current), current.kind != .episode {
+                        // The title as a logo: press and hold to copy its name.
                         RemoteImage(url: logo, contentMode: .fit)
                             .frame(maxWidth: 220, maxHeight: 70, alignment: .leading)
+                            .contextMenu {
+                                Button { UIPasteboard.general.string = current.displayName } label: {
+                                    Label("Copy Title", systemImage: "doc.on.doc")
+                                }
+                            }
                     } else {
                         if current.kind == .episode, let s = current.seriesName {
                             Text(s).font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
+                                .textSelection(.enabled)
                         }
                         Text(current.displayName).font(.title2.bold()).lineLimit(3)
+                            .textSelection(.enabled)
                     }
                     Text(current.subtitleLine).font(.caption).foregroundStyle(.secondary)
+                        .textSelection(.enabled)
                     HStack(spacing: 10) {
                         RatingLabel(item: current)
                         if let m = model.reco.match(for: current) {
@@ -256,7 +266,7 @@ struct ItemDetailView: View {
     private var overview: some View {
         VStack(alignment: .leading, spacing: 10) {
             if let tagline = current.taglines?.first, !tagline.isEmpty {
-                Text(tagline).font(.headline).italic()
+                Text(tagline).font(.headline).italic().textSelection(.enabled)
             }
             let text = current.plainOverview
             if !text.isEmpty {
@@ -265,6 +275,8 @@ struct ItemDetailView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(expanded ? nil : 5)
+                    // Press and hold to copy; a tap still expands it.
+                    .textSelection(.enabled)
                     .onTapGesture { withAnimation(.snappy) { expanded.toggle() } }
             }
             if let genres = current.genres, !genres.isEmpty {
@@ -665,7 +677,7 @@ struct PersonView: View {
                         .frame(width: 110, height: 150)
                         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(name).font(.title2.bold())
+                        Text(name).font(.title2.bold()).textSelection(.enabled)
                         if let b = person?.premiereDate { Text("Born \(b.formatted(date: .long, time: .omitted))").font(.caption).foregroundStyle(.secondary) }
                         if let place = person?.productionLocations?.first { Text(place).font(.caption).foregroundStyle(.secondary) }
                     }
@@ -673,6 +685,7 @@ struct PersonView: View {
                 .padding(.horizontal)
                 if let bio = person?.plainOverview, !bio.isEmpty {
                     Text(bio).font(.subheadline).foregroundStyle(.secondary).lineLimit(expanded ? nil : 6)
+                        .textSelection(.enabled)
                         .onTapGesture { withAnimation { expanded.toggle() } }
                         .padding(.horizontal)
                 }
