@@ -28,13 +28,19 @@ struct ExternalPick: Identifiable, Hashable, Codable {
 @MainActor
 final class DiscoveryEngine {
     private(set) var picks: [String: [ExternalPick]] = [:]
+    /// Running builds, their errors, status and generation are per build (`buildKey`): a library's
+    /// full build and a category build of it run side by side, so picking a category no longer
+    /// cancels the full build.
     private(set) var isBuilding: Set<String> = []
     private(set) var errors: [String: String] = [:]
     private(set) var builtAt: [String: Date] = [:]
     private(set) var usedAI = false
-    /// What the build is doing right now, per library (shown under the spinner).
+    /// What the build is doing right now, per build (shown under the spinner).
     private(set) var status: [String: String] = [:]
     @ObservationIgnored private var generation: [String: Int] = [:]
+    /// Picks category builds added while the library's full build was running: kept when it lands
+    /// (its list would otherwise drop them).
+    @ObservationIgnored private var addedDuringFullBuild: [String: [ExternalPick]] = [:]
     private(set) var version = 0
 
     @ObservationIgnored private weak var model: AppModel?
@@ -63,6 +69,7 @@ final class DiscoveryEngine {
         errors = [:]
         status = [:]
         isBuilding = []
+        addedDuringFullBuild = [:]
         builtAt = [:]
         version &+= 1
     }
@@ -135,6 +142,25 @@ final class DiscoveryEngine {
         return index
     }
 
+    /// A library's full build is keyed by the library; a category build by library and category.
+    private func buildKey(_ sourceId: String, _ genre: String?) -> String {
+        genre.map { "\(sourceId)|genre:\($0)" } ?? sourceId
+    }
+
+    /// For the view of a library + category: a category also fills from the library's full build,
+    /// so its spinner shows while either runs; "Any category" follows the full build only.
+    func isBuildingPicks(_ sourceId: String, genre: String?) -> Bool {
+        isBuilding.contains(buildKey(sourceId, genre)) || isBuilding.contains(sourceId)
+    }
+
+    func buildStatus(_ sourceId: String, genre: String?) -> String? {
+        status[buildKey(sourceId, genre)] ?? status[sourceId]
+    }
+
+    func buildError(_ sourceId: String, genre: String?) -> String? {
+        errors[buildKey(sourceId, genre)]
+    }
+
     func genres(for sourceId: String) -> [String] {
         var counts: [String: Int] = [:]
         for p in picks[sourceId] ?? [] { for g in p.title.genres { counts[g, default: 0] += 1 } }
@@ -168,12 +194,18 @@ final class DiscoveryEngine {
     }
 
     func build(_ sourceId: String, genre: String?) async {
-        if let running = tasks[sourceId] { running.cancel() }
+        let key = buildKey(sourceId, genre)
+        if let running = tasks[key] { running.cancel() }
+        // One category build per library at a time (as before); the full build keeps running.
+        if genre != nil {
+            let prefix = buildKey(sourceId, "")
+            for (k, t) in tasks where k != key && k.hasPrefix(prefix) { t.cancel() }
+        }
         let task = Task { [weak self] in
             guard let self else { return }
             await self.run(sourceId, genre: genre)
         }
-        tasks[sourceId] = task
+        tasks[key] = task
         await task.value
     }
 
@@ -181,26 +213,30 @@ final class DiscoveryEngine {
 
     private func run(_ sourceId: String, genre: String?) async {
         guard let model else { return }
+        let key = buildKey(sourceId, genre)
         guard let tmdb = client() else {
-            errors[sourceId] = TMDBError.noKey.localizedDescription
+            errors[key] = TMDBError.noKey.localizedDescription
             return
         }
-        // Only the newest build of a library owns its spinner and status (an older, cancelled
-        // build finishing late must not hide the spinner of the one still running).
-        let gen = (generation[sourceId] ?? 0) + 1
-        generation[sourceId] = gen
-        isBuilding.insert(sourceId)
-        errors[sourceId] = nil
+        // Only the newest build of a library (or of a library's category) owns its spinner and
+        // status (an older, cancelled build finishing late must not hide the spinner of the one
+        // still running).
+        let gen = (generation[key] ?? 0) + 1
+        generation[key] = gen
+        isBuilding.insert(key)
+        errors[key] = nil
+        if genre == nil { addedDuringFullBuild[sourceId] = nil }
         defer {
-            if generation[sourceId] == gen {
-                isBuilding.remove(sourceId)
-                status[sourceId] = nil
+            if generation[key] == gen {
+                isBuilding.remove(key)
+                status[key] = nil
             }
         }
-        func step(_ text: String) { if generation[sourceId] == gen { status[sourceId] = text } }
+        func step(_ text: String) { if generation[key] == gen { status[key] = text } }
         func fail(_ text: String) {
-            guard generation[sourceId] == gen else { return }
-            errors[sourceId] = text
+            // (A category build cancelled by another category is not an error.)
+            guard generation[key] == gen, !Task.isCancelled else { return }
+            errors[key] = text
             if genre == nil, picks[sourceId] == nil { picks[sourceId] = [] }
         }
         await tmdb.resetStats()
@@ -430,7 +466,7 @@ final class DiscoveryEngine {
                                 because: because,
                                 highlights: profile.highlights(for: Self.pseudoItem(s.title)))
         }
-        if Task.isCancelled { return }
+        if Task.isCancelled || generation[key] != gen { return }
         if result.isEmpty {
             fail(candidates.isEmpty ? "TMDB found nothing." :
                  "Everything TMDB suggested (\(candidates.count) titles) is already on your server, on My List, or marked Seen / Not for me. Pull down to try again, or pick another category.")
@@ -440,10 +476,16 @@ final class DiscoveryEngine {
             // A category build adds to the library's list instead of replacing it.
             var merged = picks[sourceId] ?? []
             let known = Set(merged.map(\.id))
-            merged += result.filter { !known.contains($0.id) && $0.title.genres.contains(genre) }
+            let added = result.filter { !known.contains($0.id) && $0.title.genres.contains(genre) }
+            merged += added
             picks[sourceId] = merged
+            if isBuilding.contains(sourceId) { addedDuringFullBuild[sourceId, default: []] += added }
         } else {
-            picks[sourceId] = Array(result)
+            // What category builds added while this one ran stays (after this build's picks).
+            let ids = Set(result.map(\.id))
+            let kept = (addedDuringFullBuild[sourceId] ?? []).filter { !ids.contains($0.id) }
+            addedDuringFullBuild[sourceId] = nil
+            picks[sourceId] = Array(result) + kept
         }
         builtAt[sourceId] = Date()
         version &+= 1

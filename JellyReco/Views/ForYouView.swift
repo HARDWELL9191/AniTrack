@@ -136,17 +136,17 @@ struct ForYouView: View {
         if !discovery.hasKey {
             TMDBKeyCard()
                 .padding(.horizontal)
-        } else if picks.isEmpty && discovery.isBuilding.contains(sourceId) {
+        } else if picks.isEmpty && discovery.isBuildingPicks(sourceId, genre: genre) {
             VStack(spacing: 14) {
                 ProgressView()
                 Text("Learning from \(model.reco.sourceName(sourceId))…").font(.headline)
-                Text(discovery.status[sourceId] ?? "Comparing what you finished on your server with what's out there\(model.settings.useOnDeviceAI ? ", with on-device AI" : "").")
+                Text(discovery.buildStatus(sourceId, genre: genre) ?? "Comparing what you finished on your server with what's out there\(model.settings.useOnDeviceAI ? ", with on-device AI" : "").")
                     .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
                     .contentTransition(.opacity)
-                    .animation(.easeInOut, value: discovery.status[sourceId])
+                    .animation(.easeInOut, value: discovery.buildStatus(sourceId, genre: genre))
             }
             .padding(40)
-        } else if picks.isEmpty, let error = discovery.errors[sourceId] {
+        } else if picks.isEmpty, let error = discovery.buildError(sourceId, genre: genre) {
             ContentUnavailableView {
                 Label("Couldn't build picks", systemImage: "exclamationmark.triangle")
             } description: {
