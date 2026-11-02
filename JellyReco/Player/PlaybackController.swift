@@ -250,14 +250,14 @@ final class PlaybackController {
             source = src
             streams = src.mediaStreams ?? full.mediaStreams ?? []
 
-            // Picture subtitles (PGS, VobSub, DVB) are drawn into the frame by the native layer, which
-            // uses far less battery than the Metal renderer. The one exception is native Dolby Vision,
-            // whose frames can't be drawn on: when such a file starts with a picture subtitle on, it
-            // opens on the Metal renderer straight away instead of switching a moment into playback.
+            // Subtitles are drawn into the frame by the native layer, which uses far less battery than
+            // the Metal renderer. The one exception is native Dolby Vision, whose frames can't be
+            // drawn on (the player shows no subtitle at all there): when such a file starts with a
+            // subtitle on, it opens on the Metal renderer straight away instead of switching later.
             let startSubtitle = request.subtitleIndex ?? src.defaultSubtitleStreamIndex ?? -1
-            let startsWithPictureSub = streams.contains { $0.isSubtitle && $0.index == startSubtitle && Self.isPictureSubtitle($0.codec) }
+            let startsWithSubtitle = streams.contains { $0.isSubtitle && $0.index == startSubtitle }
             let dolbyVision = streams.contains { $0.isVideo && ($0.videoRangeType ?? "").uppercased().contains("DOVI") }
-            if !fallback, dolbyVision, startsWithPictureSub {
+            if !fallback, dolbyVision, startsWithSubtitle {
                 if usesNativeOutput { rebuildPlayer(output: .metal) }
                 metalForSubtitles = true
             } else if metalForSubtitles, !usesNativeOutput, !triedMetal {
@@ -270,6 +270,8 @@ final class PlaybackController {
             if fallback, let t = src.transcodingUrl {
                 url = client.absolute(t)
                 method = .transcode
+                transcodedAudioIndex = request.audioIndex ?? src.defaultAudioStreamIndex
+                    ?? streams.first(where: \.isAudio)?.index
             } else {
                 url = client.directStreamURL(itemId: full.id, source: src, playSessionId: playSessionId)
                 method = .directPlay
@@ -327,53 +329,65 @@ final class PlaybackController {
         let format: String
         switch codec {
         case "pgssub", "hdmv_pgs_subtitle", "pgs", "sup": format = "pgssub"
+        // DVD VobSub: Jellyfin hands its copy over as a plain (uncompressed) Matroska file, which
+        // the player opens as it is (checked against a real server and the app's libmpv in CI).
+        case "dvdsub", "dvd_subtitle", "vobsub": format = "mks"
         case "ass", "ssa": format = "ass"
         case "subrip", "srt", "text": format = "srt"
         case "webvtt", "vtt": format = "vtt"
-        default: return   // VobSub/DVB come back from Jellyfin in containers mpv can't add as a subtitle file
+        default: return   // DVB: Jellyfin can't hand it over in a form the player can add
         }
         var plain = stream
         plain.deliveryUrl = nil
         guard let url = client.subtitleURL(itemId: item.id, sourceId: src.id, stream: plain, format: format) else { return }
         skippedEmbedded.insert(stream.index)
         diagnostics.append("[JellyReco] Loading subtitle \(stream.index) (\(codec)) from the server instead")
-        if format == "pgssub" {
-            // The player can't open a bare .sup file: wrap the server's PGS stream in Matroska.
-            let itemId = item.id
-            let generation = loadGeneration
-            let language = stream.language ?? "und"
-            let index = stream.index
-            Task { [weak self] in
-                do {
-                    let (data, response) = try await URLSession.shared.data(from: url)
-                    let code = (response as? HTTPURLResponse)?.statusCode ?? 0
-                    // Converting and writing the file happen off the main thread (it held up the
-                    // start of playback for large subtitle tracks).
-                    let file = try await Task.detached(priority: .userInitiated) { () -> URL? in
-                        guard (200..<300).contains(code), let mks = PGSContainer.matroska(fromSUP: data, language: language) else { return nil }
-                        let file = Self.subtitleDirectory.appendingPathComponent("\(itemId)-\(index).mks")
-                        try mks.write(to: file, options: .atomic)
-                        return file
-                    }.value
-                    guard let file else {
-                        self?.diagnostics.append("[JellyReco] Subtitle \(index): server answered HTTP \(code), \(data.count) bytes, not PGS")
-                        return
-                    }
-                    guard let self, self.loadGeneration == generation else { return }
-                    self.externalSubs.append(stream)
-                    self.player.loadExternalSubtitle(file, selecting: nil)
-                    self.diagnostics.append("[JellyReco] Subtitle \(stream.index) ready (\(data.count) bytes of PGS)")
-                } catch {
-                    self?.diagnostics.append("[JellyReco] Subtitle \(stream.index): \(error.localizedDescription)")
-                }
-            }
-        } else {
+        addServerSubtitle(stream, url: url, rawPGS: format == "pgssub")
+        // It's the subtitle that should be on: select it as soon as it arrives.
+        if wantedSubtitleIndex == stream.index { pendingSubtitleSelection = stream.index }
+    }
+
+    /// Adds a subtitle file the server provides as a separate track. Raw PGS (.sup) can't be
+    /// opened by the player as it is, so it's downloaded and wrapped in Matroska first (off the
+    /// main thread); everything else is added straight from its address. `externalSubs` follows
+    /// the order tracks are added to mpv, which is how they're told apart.
+    private func addServerSubtitle(_ stream: MediaStream, url: URL, rawPGS: Bool) {
+        guard rawPGS else {
             externalSubs.append(stream)
             player.loadExternalSubtitle(url, selecting: nil)
+            return
         }
-        // It's the subtitle that should be on: select it as soon as it arrives.
-        let wanted = request.subtitleIndex ?? source?.defaultSubtitleStreamIndex ?? -1
-        if wanted == stream.index { pendingSubtitleSelection = stream.index }
+        let itemId = item.id
+        let generation = loadGeneration
+        let language = stream.language ?? "und"
+        let index = stream.index
+        Task { [weak self] in
+            do {
+                let (data, response) = try await URLSession.shared.data(from: url)
+                let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+                let file = try await Task.detached(priority: .userInitiated) { () -> URL? in
+                    guard (200..<300).contains(code), let mks = PGSContainer.matroska(fromSUP: data, language: language) else { return nil }
+                    let file = Self.subtitleDirectory.appendingPathComponent("\(itemId)-\(index).mks")
+                    try mks.write(to: file, options: .atomic)
+                    return file
+                }.value
+                guard let file else {
+                    self?.diagnostics.append("[JellyReco] Subtitle \(index): server answered HTTP \(code), \(data.count) bytes, not PGS")
+                    return
+                }
+                guard let self, self.loadGeneration == generation else { return }
+                self.externalSubs.append(stream)
+                self.player.loadExternalSubtitle(file, selecting: nil)
+                self.diagnostics.append("[JellyReco] Subtitle \(index) ready (\(data.count) bytes of PGS)")
+            } catch {
+                self?.diagnostics.append("[JellyReco] Subtitle \(index): \(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// The subtitle that should be on when the file starts (-1: off).
+    private var wantedSubtitleIndex: Int {
+        request.subtitleIndex ?? source?.defaultSubtitleStreamIndex ?? -1
     }
 
     /// Converted picture subtitles for this session (emptied when the player closes).
@@ -383,16 +397,41 @@ final class PlaybackController {
         return dir
     }
 
+    /// Subtitle files beside the video (and, when the server converts, every subtitle it
+    /// delivers separately): each one as its own track, in a form the player can open.
     private func loadExternalSubtitles(itemId: String, source: MediaSourceInfo) {
-        let external = streams.filter { $0.isSubtitle && ($0.isExternal ?? false) }
-        for sub in external {
-            let format = (sub.codec ?? "srt").lowercased()
-                .replacingOccurrences(of: "subrip", with: "srt")
-                .replacingOccurrences(of: "sup", with: "pgssub")   // Jellyfin returns PGS as-is only for "pgssub"
-                .replacingOccurrences(of: "webvtt", with: "vtt")
-            guard let url = client.subtitleURL(itemId: itemId, sourceId: source.id, stream: sub, format: format) else { continue }
-            externalSubs.append(sub)
-            player.loadExternalSubtitle(url, selecting: nil)
+        let separate: [MediaStream]
+        if method == .transcode {
+            // A converted stream carries no subtitles: Jellyfin extracts the text ones (and sends
+            // PGS as-is) at their delivery addresses; picture ones it can't send are burned in.
+            separate = streams.filter { $0.isSubtitle && $0.deliveryMethod?.lowercased() == "external" && !($0.deliveryUrl ?? "").isEmpty }
+        } else {
+            separate = streams.filter { $0.isSubtitle && ($0.isExternal ?? false) }
+        }
+        for sub in separate {
+            let codec = (sub.codec ?? "").lowercased()
+            var plain = sub
+            let format: String
+            switch codec {
+            case "pgssub", "hdmv_pgs_subtitle", "pgs", "sup":
+                format = "pgssub"                     // the original .sup, wrapped before adding
+                plain.deliveryUrl = nil
+            case "dvdsub", "dvd_subtitle", "vobsub", "dvbsub", "dvb_subtitle":
+                // External VobSub is an .idx + .sub pair and the server only hands out the .idx:
+                // not added (a track that fails to load would shift every later one's name).
+                if method != .transcode { continue }
+                format = "mks"
+                plain.deliveryUrl = nil
+            case "ass", "ssa": format = codec
+            case "subrip", "srt": format = "srt"
+            case "webvtt", "vtt": format = "vtt"
+            default:
+                // Other text formats (SAMI, MicroDVD, TTML…): the server converts them to SRT.
+                format = "srt"
+                plain.deliveryUrl = nil
+            }
+            guard let url = client.subtitleURL(itemId: itemId, sourceId: source.id, stream: plain, format: format) else { continue }
+            addServerSubtitle(sub, url: url, rawPGS: format == "pgssub")
         }
     }
 
@@ -703,19 +742,19 @@ final class PlaybackController {
         await open(item, start: at, fallback: method == .transcode)
     }
 
-    /// The native layer draws picture subtitles itself, except on native Dolby Vision frames (the
-    /// player library reports that as `nativeSubtitles` unavailable). Only then, with a picture
-    /// subtitle on, move to the Metal renderer at the same spot with the same tracks.
+    /// The native layer draws subtitles into the picture, except on native Dolby Vision frames (the
+    /// player library reports that as `nativeSubtitles` unavailable and shows none). Only then, with
+    /// a subtitle on, move to the Metal renderer at the same spot with the same tracks.
     @ObservationIgnored private var metalForSubtitles = false
     @ObservationIgnored private var subtitleSwitchStarted = false
     private func checkSubtitleRendering() {
+        // Any subtitle: the native layer draws none of them onto Dolby Vision frames.
         guard usesNativeOutput, !subtitleSwitchStarted, phase == .playing,
               player.videoFeatureCapabilities.nativeSubtitles.availability == .unavailable,
-              let sub = player.selectedSubtitle(),
-              Self.isPictureSubtitle(stream(for: sub)?.codec ?? sub.codec) else { return }
+              player.selectedSubtitle() != nil || player.selectedSubtitle(for: .secondary) != nil else { return }
         subtitleSwitchStarted = true
         metalForSubtitles = true
-        statusNote = "Switching renderer for picture subtitles…"
+        statusNote = "Switching renderer for subtitles…"
         Task {
             await switchRenderer(toMetal: true)
             subtitleSwitchStarted = false
@@ -733,11 +772,25 @@ final class PlaybackController {
 
     // MARK: Tracks
 
-    private var embeddedAudio: [MediaStream] { streams.filter { $0.isAudio && !($0.isExternal ?? false) }.sorted { $0.index < $1.index } }
-    // mpv still lists a track it skipped (no data), so it keeps its place in the numbering.
-    private var embeddedSubs: [MediaStream] {
-        streams.filter { $0.isSubtitle && !($0.isExternal ?? false) }.sorted { $0.index < $1.index }
+    /// The file's own audio tracks, in mpv's order. A converted stream carries only the one the
+    /// server was asked for.
+    private var embeddedAudio: [MediaStream] {
+        let all = streams.filter { $0.isAudio && !($0.isExternal ?? false) }.sorted { $0.index < $1.index }
+        guard method == .transcode else { return all }
+        return all.filter { $0.index == transcodedAudioIndex }.prefix(1).map { $0 }.ifEmpty(Array(all.prefix(1)))
     }
+    // mpv still lists a track it skipped (no data), so it keeps its place in the numbering.
+    // A converted stream has no subtitles inside it: every one is added separately.
+    private var embeddedSubs: [MediaStream] {
+        guard method != .transcode else { return [] }
+        return streams.filter { $0.isSubtitle && !($0.isExternal ?? false) }.sorted { $0.index < $1.index }
+    }
+
+    /// The audio track the server put into a converted stream.
+    @ObservationIgnored private var transcodedAudioIndex: Int?
+    /// Audio choices while the server converts are its tracks, not mpv's: picking one asks the
+    /// server for a new conversion with it (ids above this number are server track numbers).
+    private static let serverAudioBase = 100_000
 
     /// An embedded subtitle mpv skipped (zlib): its working copy is the external track.
     private func isDeadTrack(_ t: MPVMediaTrack) -> Bool {
@@ -768,7 +821,18 @@ final class PlaybackController {
         return tracks.first { stream(for: $0)?.index == index }
     }
 
-    var audioOptions: [TrackOption] { player.audioTracks.map(option) }
+    var audioOptions: [TrackOption] {
+        guard method == .transcode else { return player.audioTracks.map(option) }
+        return streams.filter { $0.isAudio && !($0.isExternal ?? false) }.sorted { $0.index < $1.index }.map { s in
+            var details: [String] = []
+            if let c = s.codec { details.append(c.uppercased()) }
+            if let ch = s.channelLayout { details.append(ch) }
+            return TrackOption(id: MPVMediaTrackIdentifier(type: .audio, mpvID: Self.serverAudioBase + s.index),
+                               title: s.displayTitle ?? s.languageName ?? "Track \(s.index)",
+                               detail: details.joined(separator: " · "),
+                               isSelected: s.index == transcodedAudioIndex, isExternal: false)
+        }
+    }
     var subtitleOptions: [TrackOption] { player.subtitleTracks.filter { !isDeadTrack($0) }.map(option) }
 
     private func option(_ t: MPVMediaTrack) -> TrackOption {
@@ -789,16 +853,35 @@ final class PlaybackController {
     var secondarySubtitle: MPVMediaTrack? { player.selectedSubtitle(for: .secondary) }
 
     func selectAudio(_ id: MPVMediaTrackIdentifier) {
+        if id.mpvID >= Self.serverAudioBase {
+            let index = id.mpvID - Self.serverAudioBase
+            guard method == .transcode, index != transcodedAudioIndex else { return }
+            Task { await restartConversion(audioIndex: index) }
+            return
+        }
         player.selectTrack(id)
         reportProgressInBackground()
+    }
+
+    /// While the server converts, a different audio track means a new conversion with that track,
+    /// from the same spot and with the same subtitle.
+    private func restartConversion(audioIndex: Int) async {
+        let at = currentSeconds
+        request.audioIndex = audioIndex
+        request.subtitleIndex = player.selectedSubtitle().flatMap { stream(for: $0)?.index } ?? -1
+        statusNote = "Switching audio…"
+        endSession()
+        await open(item, start: at, fallback: true)
     }
 
     func selectSubtitle(_ id: MPVMediaTrackIdentifier?, secondary: Bool = false) {
         if secondary {
             player.selectSubtitle(id, for: .secondary)
         } else if let id {
+            pendingSubtitleSelection = nil          // your choice wins over one still arriving
             player.selectSubtitle(id, for: .primary)
         } else {
+            pendingSubtitleSelection = nil
             player.disableTrack(.subtitle)
         }
         reportProgressInBackground()
@@ -830,12 +913,47 @@ final class PlaybackController {
         if let idx = audioIndex, let t = track(forJellyfinIndex: idx, type: .audio), !t.isSelected {
             player.selectTrack(t.id)
         }
-        let subIndex = request.subtitleIndex ?? source?.defaultSubtitleStreamIndex ?? -1
+        var subIndex = wantedSubtitleIndex
+        if request.subtitleIndex == nil, let text = textAlternative(to: subIndex) {
+            diagnostics.append("[JellyReco] Using text subtitle \(text) instead of picture subtitle \(subIndex) (Force my style)")
+            subIndex = text
+        }
         if subIndex < 0 {
+            pendingSubtitleSelection = nil
             player.disableTrack(.subtitle)
         } else if let t = track(forJellyfinIndex: subIndex, type: .subtitle) {
+            pendingSubtitleSelection = nil
             player.selectSubtitle(t.id)
+        } else {
+            // Not loaded yet (a subtitle file still downloading, or a server copy of a track the
+            // player can't read): turned on when it arrives.
+            pendingSubtitleSelection = subIndex
         }
+    }
+
+    /// Text subtitle formats the player reads.
+    private static let textSubtitleCodecs: Set<String> = [
+        "subrip", "srt", "ass", "ssa", "webvtt", "vtt", "mov_text", "tx3g", "text", "microdvd",
+        "sami", "smi", "mpl2", "subviewer", "realtext", "jacosub", "vplayer",
+    ]
+
+    /// With Force my style, a picture subtitle (Blu-ray/DVD, whose look comes from the disc) is
+    /// swapped for a text one in the same language, so every file looks the same. Only for the
+    /// automatic choice: a subtitle picked on the item page is kept.
+    private func textAlternative(to index: Int) -> Int? {
+        guard settings.subtitleASSMode == "force", index >= 0,
+              let picture = streams.first(where: { $0.isSubtitle && $0.index == index }),
+              Self.isPictureSubtitle(picture.codec) else { return nil }
+        let language = picture.language?.lowercased()
+        let candidates = streams.filter {
+            $0.isSubtitle && $0.index != index && $0.language?.lowercased() == language
+                && Self.textSubtitleCodecs.contains(($0.codec ?? "").lowercased())
+        }
+        // Same kind of track (full vs forced-only, SDH or not) first.
+        let sameKind = candidates.first(where: { ($0.isForced ?? false) == (picture.isForced ?? false)
+                                                  && ($0.isHearingImpaired ?? false) == (picture.isHearingImpaired ?? false) })
+        let sameForced = candidates.first(where: { ($0.isForced ?? false) == (picture.isForced ?? false) })
+        return (sameKind ?? sameForced)?.index
     }
 
     // MARK: Controls
@@ -956,11 +1074,19 @@ final class PlaybackController {
     /// While the video is zoomed to fill, part of the picture is off screen (the native layer
     /// draws subtitles into the picture, so they're cropped with it): lift subtitles into the
     /// visible area and scale them back to their normal size.
-    func applyFill(hiddenFraction: Double, scale: Double) {
+    func applyFill(hiddenFraction: Double, scale: Double, textScale: Double) {
+        guard hiddenFraction != fillHidden || max(scale, 1) != fillScale || textScale != self.textScale else { return }
         fillHidden = hiddenFraction
         fillScale = max(scale, 1)
+        self.textScale = textScale
         applySubtitleLayout()
     }
+
+    /// mpv sizes text against the picture's height, so a wide movie (a shorter picture on the
+    /// screen) got smaller subtitles than a 16:9 episode with the same setting. This factor (the
+    /// height a 16:9 picture would have on this screen ÷ this picture's height in Fit) evens it
+    /// out: your style comes out the same size on every file.
+    @ObservationIgnored private var textScale: Double = 1
 
     func applySubtitleScale() { applySubtitleLayout() }
 
@@ -1012,7 +1138,8 @@ final class PlaybackController {
         // cancelled) and the same line breaks (the lines get proportionally narrower, by wider
         // side margins), only moved into the part that stays on screen.
         let zoom = filled ? fillScale : 1
-        let scale = settings.subtitleSize / zoom
+        let k = textScale
+        var scale = settings.subtitleSize / zoom
         var override = settings.subtitleASSMode
         let pos: Double
         var marginY = 22.0                       // mpv's default gap above / below text lines (720 lines)
@@ -1024,8 +1151,10 @@ final class PlaybackController {
             let fillNeed = max(0, fillHidden * 100 - 4)
             pos = 100 - fillNeed - (100 - base) * visible
         case .text, .none:
-            // Top and bottom lines both move in by the cropped strip; the position setting on top.
-            marginY = 22 / zoom + fillHidden * 720
+            // Your style at the same size on every file; top and bottom lines move in by the
+            // cropped strip in Fill; the position setting on top.
+            scale = settings.subtitleSize * k / zoom
+            marginY = 22 * k / zoom + fillHidden * 720
             if filled {
                 let width = 720 * videoAspect             // the picture's width in mpv's 720-line units
                 marginX = (width - (width - 2 * 25) / zoom) / 2
@@ -1037,7 +1166,13 @@ final class PlaybackController {
             pos = 100 - (100 - wanted) * visible
             // "Keep their own styling" ignores any repositioning in mpv: while something has to
             // move, it runs as "keep styling" at the normal size (same fonts, colours, look).
-            if override == "no", filled || base != 100 { override = "scale" }
+            if override == "no" {
+                // Their own size too (only cancelling the zoom).
+                scale = 1 / zoom
+                if filled || base != 100 { override = "scale" }
+            } else {
+                scale = settings.subtitleSize * k / zoom   // your size, the same on every file
+            }
             // Top and bottom lines (\an8 / \an2 without an exact position) move in by the cropped
             // strip: every style's own top/bottom margin plus that strip, in the file's units.
             if filled {
@@ -1547,4 +1682,8 @@ final class TrickplayProvider {
             self.loading.remove(sheet)
         }
     }
+}
+
+private extension Array {
+    func ifEmpty(_ other: @autoclosure () -> [Element]) -> [Element] { isEmpty ? other() : self }
 }

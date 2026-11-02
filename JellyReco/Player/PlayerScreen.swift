@@ -620,6 +620,13 @@ private struct PlayerContent: View {
 /// is built to animate: during the animation it keeps the current picture and stretches it
 /// smoothly, then renders sharp at the final size. Subtitles are moved up and scaled back while
 /// filled so they stay on screen at their normal size.
+/// What subtitle sizing depends on: the aspect mode, the screen and the picture's size.
+private struct SubtitleFit: Equatable {
+    let mode: PlaybackController.AspectMode
+    let container: CGSize
+    let video: CGSize
+}
+
 private struct VideoSurface: View {
     let controller: PlaybackController
     let pinch: CGFloat?
@@ -646,11 +653,15 @@ private struct VideoSurface: View {
                 .frame(width: container.width, height: container.height)
                 .clipped()
                 .allowsHitTesting(false)
-                .onChange(of: mode, initial: true) { _, mode in
+                // Recomputed whenever the mode, the screen (rotation) or the picture's size changes.
+                .onChange(of: SubtitleFit(mode: mode, container: container, video: video), initial: true) { _, fit in
                     // Part of the picture hidden above and below while filled (fraction of its height).
-                    let filled = mode == .fill
+                    let filled = fit.mode == .fill
                     let hidden = filled ? max(0, 1 - container.height / max(fitted.height * fillScale, 1)) / 2 : 0
-                    controller.applyFill(hiddenFraction: hidden, scale: filled ? fillScale : 1)
+                    // How much taller a 16:9 picture would be on this screen than this one (Fit).
+                    let reference = min(container.height, container.width * 9 / 16)
+                    let textScale = fitted.height > 1 ? max(1, min(2, reference / fitted.height)) : 1
+                    controller.applyFill(hiddenFraction: hidden, scale: filled ? fillScale : 1, textScale: textScale)
                 }
         }
     }
