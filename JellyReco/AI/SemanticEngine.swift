@@ -254,14 +254,6 @@ actor SemanticEngine {
         acc = vDSP.add(multiplication: (a: v, b: scale), acc)
     }
 
-    /// Already-known vectors only (never loads the model).
-    func cachedVectors(for keys: [String]) -> [String: [Float]] {
-        loadCacheIfPresent()
-        var result: [String: [Float]] = [:]
-        for key in keys { if let v = cache[Self.stableKey(key)] { result[key] = v } }
-        return result
-    }
-
     /// Unit vectors for the inputs; the model loads only if something is new.
     func vectors(for inputs: [Input]) async -> [String: [Float]] {
         loadCacheIfPresent()
@@ -301,13 +293,5 @@ actor SemanticEngine {
         }
         saveCache()
         return result
-    }
-
-    func clear() {
-        cache = [:]
-        unsaved = []
-        recordsOnDisk = 0
-        for b in [Backend.contextual, .sentence] { try? FileManager.default.removeItem(at: cacheURL(b)) }
-        cacheLoadedFor = nil
     }
 }

@@ -686,7 +686,7 @@ struct ConfigPageView: View {
                 editor.preload(preview)
                 return
             }
-            // The task runs again whenever the page reappears (another tab, a pushed page);
+            // The task runs again whenever the page reappears (e.g. back from another tab);
             // reloading then would silently throw away unsaved edits.
             guard editor.dirty.isEmpty else { return }
             await editor.load(page.stores, client: model.client)

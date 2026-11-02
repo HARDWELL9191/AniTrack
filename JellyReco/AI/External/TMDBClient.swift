@@ -17,7 +17,9 @@ enum TMDBError: LocalizedError {
 actor TMDBClient {
     private let key: String
     private let session: URLSession
+    /// Every TMDB genre (movie and TV ids never clash), and each kind's own list.
     private var genreNames: [Int: String] = [:]
+    private var genresByKind: [Bool: [Int: String]] = [:]   // key: tv
     private var detailCache: [String: ExternalTitle] = [:]
 
     static let imageBase = "https://image.tmdb.org/t/p/"
@@ -35,16 +37,13 @@ actor TMDBClient {
     private var isBearer: Bool { key.count > 40 }
 
     // Request statistics, so For You can say exactly what went wrong instead of showing nothing.
-    private(set) var succeeded = 0
     private(set) var failed = 0
     private(set) var lastFailure: String?
-    func resetStats() { succeeded = 0; failed = 0; lastFailure = nil }
+    func resetStats() { failed = 0; lastFailure = nil }
 
     private func get(_ path: String, _ query: [String: String] = [:]) async throws -> Data {
         do {
-            let data = try await rawGet(path, query)
-            succeeded += 1
-            return data
+            return try await rawGet(path, query)
         } catch {
             if !(error is CancellationError) && (error as? URLError)?.code != .cancelled {
                 failed += 1
@@ -104,24 +103,28 @@ actor TMDBClient {
         guard genreNames.isEmpty else { return }
         struct List: Decodable { let genres: [G] }
         struct G: Decodable { let id: Int; let name: String }
-        for kind in ["movie", "tv"] {
-            let list = try JSONDecoder().decode(List.self, from: try await get("/genre/\(kind)/list"))
-            for g in list.genres { genreNames[g.id] = g.name }
+        // Both lists or neither (a half-loaded list used to stay half-loaded for the session).
+        var byKind: [Bool: [Int: String]] = [:]
+        for tv in [false, true] {
+            let list = try JSONDecoder().decode(List.self, from: try await get("/genre/\(tv ? "tv" : "movie")/list"))
+            byKind[tv] = Dictionary(list.genres.map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a })
         }
+        genresByKind = byKind
+        genreNames = (byKind[false] ?? [:]).merging(byKind[true] ?? [:]) { a, _ in a }
     }
 
     func genreId(named name: String, tv: Bool) -> Int? {
-        // TV uses combined names ("Action & Adventure", "Sci-Fi & Fantasy").
+        // Looked up among that kind's genres: TV uses combined names ("Action & Adventure",
+        // "Sci-Fi & Fantasy"), and a movie genre id (Action = 28) finds no TV shows.
+        let list = (genresByKind[tv] ?? genreNames).sorted { $0.key < $1.key }
         let lower = name.lowercased()
-        if let exact = genreNames.first(where: { $0.value.lowercased() == lower }) { return exact.key }
-        return genreNames.first(where: { $0.value.lowercased().contains(lower) || lower.contains($0.value.lowercased()) })?.key
+        if let exact = list.first(where: { $0.value.lowercased() == lower }) { return exact.key }
+        return list.first(where: { $0.value.lowercased().contains(lower) || lower.contains($0.value.lowercased()) })?.key
     }
 
     // MARK: Results
 
-    private struct Page: Decodable { let results: [Raw]; let totalPages: Int?
-        enum CodingKeys: String, CodingKey { case results; case totalPages = "total_pages" }
-    }
+    private struct Page: Decodable { let results: [Raw] }
 
     private struct Raw: Decodable {
         let id: Int

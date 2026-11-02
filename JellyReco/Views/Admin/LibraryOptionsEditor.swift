@@ -92,6 +92,12 @@ final class LibraryOptionsModel {
         defer { saving = false }
         error = nil
         do {
+            // Folders are added and removed on their own (here or elsewhere) after the options were
+            // loaded, and Jellyfin re-creates every folder in the posted PathInfos that it no longer
+            // has: post the server's current folder list, not the one loaded with the page.
+            if let paths = await Self.currentPathInfos(client, libraryId: libraryId) {
+                options[Self.realKey(options, "PathInfos")] = paths
+            }
             let body = try JSONSerialization.data(withJSONObject: ["Id": libraryId, "LibraryOptions": options])
             try await client.send("POST", "/Library/VirtualFolders/LibraryOptions", body: body)
             baseline = options
@@ -222,6 +228,12 @@ final class LibraryOptionsModel {
     private static func list(_ client: JellyfinClient, _ path: String) async -> [[String: Any]] {
         guard let d = try? await client.send("GET", path) else { return [] }
         return (try? JSONSerialization.jsonObject(with: d) as? [[String: Any]]) ?? []
+    }
+    private static func currentPathInfos(_ client: JellyfinClient, libraryId: String) async -> Any? {
+        let folders = await list(client, "/Library/VirtualFolders")
+        guard let mine = folders.first(where: { (get($0, "ItemId") as? String) == libraryId }),
+              let libraryOptions = get(mine, "LibraryOptions") as? [String: Any] else { return nil }
+        return get(libraryOptions, "PathInfos")
     }
 }
 

@@ -31,17 +31,18 @@ enum TMDBCertification {
         return nil
     }
 
+    /// Systems whose letters carry the age (US film and TV, UK, Australia, Canada, Japan…).
+    private static let named: [String: String] = [
+        "G": "PG", "PG": "PG", "U": "PG", "L": "PG", "E": "PG", "TP": "PG", "AL": "PG", "ALL": "PG", "A": "PG",
+        "TV-Y": "PG", "TV-Y7": "PG", "TV-Y7-FV": "PG", "TV-G": "PG", "TV-PG": "PG", "12A": "PG", "PG12": "PG",
+        "PG-13": "13+", "TV-14": "13+", "M": "13+", "14A": "13+", "MA15+": "13+", "R15+": "13+",
+        "R": "17+", "TV-MA": "17+",
+        "NC-17": "18+", "R18": "18+", "R18+": "18+", "X": "18+", "X18+": "18+", "18A": "18+", "R-18": "18+",
+    ]
+
     /// AniReco's four age bubbles: PG (everything under 13), 13+ (13–16), 17+, 18+.
     static func bucket(_ certification: String) -> String? {
         let c = clean(certification).uppercased()
-        // Systems whose letters carry the age (US film and TV, UK, Australia, Canada, Japan…).
-        let named: [String: String] = [
-            "G": "PG", "PG": "PG", "U": "PG", "L": "PG", "E": "PG", "TP": "PG", "AL": "PG", "ALL": "PG", "A": "PG",
-            "TV-Y": "PG", "TV-Y7": "PG", "TV-Y7-FV": "PG", "TV-G": "PG", "TV-PG": "PG", "12A": "PG", "PG12": "PG",
-            "PG-13": "13+", "TV-14": "13+", "M": "13+", "14A": "13+", "MA15+": "13+", "R15+": "13+",
-            "R": "17+", "TV-MA": "17+",
-            "NC-17": "18+", "R18": "18+", "R18+": "18+", "X": "18+", "X18+": "18+", "18A": "18+", "R-18": "18+",
-        ]
         if let label = named[c] { return label }
         // Jellyfin stores many ratings with a country in front ("DE-16", "GB-15", "AU-M").
         if let dash = c.firstIndex(of: "-"), c.distance(from: c.startIndex, to: dash) == 2,

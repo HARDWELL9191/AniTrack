@@ -72,10 +72,16 @@ enum TitleKey {
         pattern: "\\b(\\d+(st|nd|rd|th)\\s+season|season\\s*\\d*|part\\s*\\d+|cour\\s*\\d+|final season|the movie)\\b.*$",
         options: [.caseInsensitive])
 
+    private static let alphanumerics = CharacterSet.alphanumerics
+
     static func make(_ s: String) -> String {
         var t = s.lowercased().folding(options: [.diacriticInsensitive, .widthInsensitive], locale: nil)
         t = tail.stringByReplacingMatches(in: t, range: NSRange(t.startIndex..., in: t), withTemplate: "")
-        return t.unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) }.map(String.init).joined()
+        // Built in place (a String per character used to be made and joined: this runs for every
+        // title on the server when checking what you already have).
+        var key = String.UnicodeScalarView()
+        for scalar in t.unicodeScalars where alphanumerics.contains(scalar) { key.append(scalar) }
+        return String(key)
     }
 }
 
