@@ -234,7 +234,6 @@ struct ServerAddressesSheet: View {
 
 struct ApproveQuickConnectSheet: View {
     @Environment(AppModel.self) private var model
-    @Environment(\.dismiss) private var dismiss
     @State private var code = ""
     @State private var result: String?
 

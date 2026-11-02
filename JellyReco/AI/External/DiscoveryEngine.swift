@@ -58,7 +58,7 @@ final class DiscoveryEngine {
         epoch &+= 1
         // Builds still running for the old account no longer own their library's spinner,
         // status or error message.
-        for key in generation.keys { generation[key, default: 0] += 1 }
+        generation = generation.mapValues { $0 + 1 }
         picks = [:]
         errors = [:]
         status = [:]
