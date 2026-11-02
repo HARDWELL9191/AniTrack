@@ -1,13 +1,13 @@
 name: JellyReco republish build
 
 # Puts an earlier build's exact IPA back as the "JellyReco latest" release and the AltStore
-# source (no rebuild). Run by hand with the run id of the build to put back.
+# source (no rebuild). Runs when this branch is pushed; RUN_ID is the build to put back.
 on:
-  workflow_dispatch:
-    inputs:
-      run_id:
-        description: "Run id of the JellyReco iOS build to republish"
-        required: true
+  push:
+    branches: [release-rollback]
+
+env:
+  RUN_ID: "41522149345"   # JellyReco build 66
 
 permissions:
   contents: write
@@ -22,7 +22,7 @@ jobs:
         uses: actions/download-artifact@v5
         with:
           name: JellyReco-ipa
-          run-id: ${{ inputs.run_id }}
+          run-id: ${{ env.RUN_ID }}
           github-token: ${{ github.token }}
           path: ipa
       - name: Check the IPA
@@ -32,7 +32,7 @@ jobs:
           cd ipa && unzip -q JellyReco.ipa && cd ..
           APP=ipa/Payload/JellyReco.app
           python3 -c "import plistlib,sys;d=plistlib.load(open('$APP/Info.plist','rb'));print('Republishing', d['CFBundleShortVersionString'], d['CFBundleVersion'])"
-          SHA=$(gh api repos/${{ github.repository }}/actions/runs/${{ inputs.run_id }} -q .head_sha)
+          SHA=$(gh api repos/${{ github.repository }}/actions/runs/${{ env.RUN_ID }} -q .head_sha)
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
           echo "notes=$(gh api repos/${{ github.repository }}/commits/$SHA -q .commit.message | head -1 | head -c 300)" >> "$GITHUB_OUTPUT"
         env:
@@ -55,6 +55,6 @@ jobs:
           cp JellyReco/Assets.xcassets/Logo.imageset/Logo.png /tmp/altstore/icon.png
           cd /tmp/altstore
           git init -q && git checkout -q -b altstore
-          git add -A && git -c user.name=ci -c user.email=ci@local commit -qm "JellyReco: republished run ${{ inputs.run_id }}"
+          git add -A && git -c user.name=ci -c user.email=ci@local commit -qm "JellyReco: republished run ${{ env.RUN_ID }}"
           git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" altstore:altstore
           python3 -c "import json;a=json.load(open('source.json'))['apps'][0]['versions'][0];print(a['version'],a['buildVersion'],a['size'])"
