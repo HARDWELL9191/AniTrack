@@ -337,7 +337,8 @@ final class AppModel {
     @ObservationIgnored private var storageSaves = 0
 
     /// For You lists and synced settings, from this account's storage on the server.
-    /// A key with an unsaved change here keeps this device's value (it's the newer one).
+    /// A list with an unsaved change here gets that change applied onto the server's copy (see
+    /// `merge`); a setting with an unsaved change keeps this device's value (it's the newer one).
     func loadAccountStorage() async {
         guard let client else { return }
         let savesBefore = storageSaves
@@ -345,17 +346,16 @@ final class AppModel {
         // (applying it put the old list back, and the next change then saved that over the server's).
         if let prefs = try? await client.loadAppStorage(), client === self.client, storageSaves == savesBefore {
             let custom = prefs.customPrefs ?? [:]
-            let firstLoad = !storageLoaded
             func value(_ key: String) -> String? { custom[key] ?? nil }
 
             let serverList = Self.decodeList(value("mylist"))
             if dirty["mylist"] == nil {
                 myList = serverList
-            } else if firstLoad {
-                // Added here before the server answered: keep those, on top of the server's list.
-                let ids = Set(myList.map(\.id))
-                myList = myList + serverList.filter { !ids.contains($0.id) }
+            } else {
+                // Changed here and not saved yet (also: added before the server first answered).
+                myList = Self.merge(local: myList, base: baseMyList, server: serverList)
             }
+            baseMyList = serverList
             // Older builds kept For You picks in a separate "wishlist": fold them into My List.
             let legacy = Self.decodeTitles(value("wishlist"))
             if !legacy.isEmpty {
@@ -366,12 +366,12 @@ final class AppModel {
             }
             for list in [ExternalList.seenelsewhere, .notforme] {
                 let server = Self.decodeTitles(value(list.rawValue))
-                let local = list == .seenelsewhere ? externalSeen : externalNotForMe
-                let merged: [ExternalTitle]
-                if dirty[list.rawValue] == nil { merged = server }
-                else if firstLoad { let ids = Set(local.map(\.id)); merged = local + server.filter { !ids.contains($0.id) } }
-                else { merged = local }
-                if list == .seenelsewhere { externalSeen = merged } else { externalNotForMe = merged }
+                if dirty[list.rawValue] == nil {
+                    setTitles(list, server)
+                } else {
+                    setTitles(list, Self.merge(local: titles(list), base: baseTitles[list] ?? [], server: server))
+                }
+                baseTitles[list] = server
             }
             // TMDB key: the phone's copy and the server's copy keep each other filled in.
             let serverKey = (value("tmdbkey") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
