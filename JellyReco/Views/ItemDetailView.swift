@@ -114,14 +114,11 @@ struct ItemDetailView: View {
                             }
                     } else {
                         if current.kind == .episode, let s = current.seriesName {
-                            Text(s).font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
-                                .textSelection(.enabled)
+                            SelectableText(text: s, style: .subheadline, weight: .semibold, color: .secondaryLabel)
                         }
-                        Text(current.displayName).font(.title2.bold()).lineLimit(3)
-                            .textSelection(.enabled)
+                        SelectableText(text: current.displayName, style: .title2, weight: .bold, lineLimit: 3)
                     }
-                    Text(current.subtitleLine).font(.caption).foregroundStyle(.secondary)
-                        .textSelection(.enabled)
+                    SelectableText(text: current.subtitleLine, style: .caption1, color: .secondaryLabel)
                     HStack(spacing: 10) {
                         RatingLabel(item: current)
                         if let m = model.reco.match(for: current) {
@@ -266,18 +263,15 @@ struct ItemDetailView: View {
     private var overview: some View {
         VStack(alignment: .leading, spacing: 10) {
             if let tagline = current.taglines?.first, !tagline.isEmpty {
-                Text(tagline).font(.headline).italic().textSelection(.enabled)
+                SelectableText(text: tagline, style: .headline, italic: true)
             }
             let text = current.plainOverview
             if !text.isEmpty {
                 let hidden = model.settings.hideSpoilers && current.kind == .episode && !model.isPlayed(current) && !expanded
-                Text(hidden ? "Overview hidden until you've watched this episode. Tap to show." : text)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(expanded ? nil : 5)
-                    // Press and hold to copy; a tap still expands it.
-                    .textSelection(.enabled)
-                    .onTapGesture { withAnimation(.snappy) { expanded.toggle() } }
+                // Double-tap or press and hold to select; a single tap still expands it.
+                SelectableText(text: hidden ? "Overview hidden until you've watched this episode. Tap to show." : text,
+                               style: .subheadline, color: .secondaryLabel, lineLimit: expanded ? nil : 5,
+                               onTap: { withAnimation(.snappy) { expanded.toggle() } })
             }
             if let genres = current.genres, !genres.isEmpty {
                 FlowLayout {
@@ -677,16 +671,15 @@ struct PersonView: View {
                         .frame(width: 110, height: 150)
                         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(name).font(.title2.bold()).textSelection(.enabled)
+                        SelectableText(text: name, style: .title2, weight: .bold)
                         if let b = person?.premiereDate { Text("Born \(b.formatted(date: .long, time: .omitted))").font(.caption).foregroundStyle(.secondary) }
                         if let place = person?.productionLocations?.first { Text(place).font(.caption).foregroundStyle(.secondary) }
                     }
                 }
                 .padding(.horizontal)
                 if let bio = person?.plainOverview, !bio.isEmpty {
-                    Text(bio).font(.subheadline).foregroundStyle(.secondary).lineLimit(expanded ? nil : 6)
-                        .textSelection(.enabled)
-                        .onTapGesture { withAnimation { expanded.toggle() } }
+                    SelectableText(text: bio, style: .subheadline, color: .secondaryLabel, lineLimit: expanded ? nil : 6,
+                                   onTap: { withAnimation { expanded.toggle() } })
                         .padding(.horizontal)
                 }
                 Shelf(title: "Movies", items: movies)

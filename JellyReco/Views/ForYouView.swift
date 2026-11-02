@@ -295,7 +295,7 @@ struct ExternalPickCard: View {
                 .buttonStyle(PressStyle())
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Pick \(position) of \(total)").font(.caption).foregroundStyle(.secondary)
-                    Text(t.title).font(.title3.bold()).lineLimit(3).textSelection(.enabled)
+                    SelectableText(text: t.title, style: .title3, weight: .bold, lineLimit: 3)
                     Text("\(pick.match)% match").font(.headline).foregroundStyle(Theme.pink)
                     Text(t.metaLine).font(.caption).foregroundStyle(.secondary)
                     if let score = t.score, score > 0 {
@@ -314,7 +314,7 @@ struct ExternalPickCard: View {
             if !pick.highlights.isEmpty {
                 FlowLayout { ForEach(pick.highlights, id: \.self) { Chip(text: $0) } }
             }
-            Text(t.overview).font(.subheadline).lineLimit(6).foregroundStyle(.secondary).textSelection(.enabled)
+            SelectableText(text: t.overview, style: .subheadline, color: .secondaryLabel, lineLimit: 6)
 
             aiExplanation
 
@@ -457,8 +457,8 @@ struct ExternalDetailSheet: View {
                                 .overlay(alignment: .topLeading) { ExternalAgeBubble(title: title).padding(5) }
                                 .shadow(radius: 8)
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(title.title).font(.title3.bold()).lineLimit(3).textSelection(.enabled)
-                                if let o = title.originalTitle, o != title.title { Text(o).font(.caption).foregroundStyle(.secondary).textSelection(.enabled) }
+                                SelectableText(text: title.title, style: .title3, weight: .bold, lineLimit: 3)
+                                if let o = title.originalTitle, o != title.title { SelectableText(text: o, style: .caption1, color: .secondaryLabel) }
                                 Text(title.metaLine).font(.caption).foregroundStyle(.secondary)
                                 if let s = title.score, s > 0 {
                                     Label(String(format: "%.1f · %d votes", s, title.voteCount ?? 0), systemImage: "star.fill")
@@ -497,7 +497,7 @@ struct ExternalDetailSheet: View {
                     }
                     .padding(.horizontal)
 
-                    Text(title.overview).font(.subheadline).foregroundStyle(.secondary).textSelection(.enabled).padding(.horizontal)
+                    SelectableText(text: title.overview, style: .subheadline, color: .secondaryLabel).padding(.horizontal)
                     if !title.genres.isEmpty {
                         FlowLayout { ForEach(title.genres, id: \.self) { Chip(text: $0) } }.padding(.horizontal)
                     }

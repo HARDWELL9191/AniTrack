@@ -550,3 +550,88 @@ struct SectionHeader: View {
         Text(title).font(.title3.weight(.bold)).frame(maxWidth: .infinity, alignment: .leading)
     }
 }
+
+// MARK: - Selectable text
+
+/// Text that can be selected like in Notes or Safari: double-tap selects a word, press and hold
+/// selects too, the handles drag the selection, and the menu offers Copy, Look Up, Translate and
+/// Share (SwiftUI's own Text only copies the whole text). Sizes itself like a Text with a line limit.
+/// An optional single tap action (expand / collapse) runs only when the tap isn't part of a
+/// double tap.
+struct SelectableText: UIViewRepresentable {
+    let text: String
+    var style: UIFont.TextStyle = .body
+    var weight: UIFont.Weight = .regular
+    var italic = false
+    var color: UIColor = .label
+    var lineLimit: Int? = nil
+    var onTap: (() -> Void)? = nil
+
+    func makeUIView(context: Context) -> UITextView {
+        let view = UITextView()
+        view.isEditable = false
+        view.isSelectable = true
+        view.isScrollEnabled = false
+        view.backgroundColor = .clear
+        view.textContainerInset = .zero
+        view.textContainer.lineFragmentPadding = 0
+        view.adjustsFontForContentSizeCategory = true
+        view.dataDetectorTypes = []
+        view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        view.setContentHuggingPriority(.defaultHigh, for: .vertical)
+
+        let coordinator = context.coordinator
+        // A double tap selects a word (the text view's own); a single tap waits for it to fail.
+        let double = UITapGestureRecognizer(target: nil, action: nil)
+        double.numberOfTapsRequired = 2
+        double.cancelsTouchesInView = false
+        double.delegate = coordinator
+        let single = UITapGestureRecognizer(target: coordinator, action: #selector(Coordinator.tapped))
+        single.require(toFail: double)
+        single.cancelsTouchesInView = false
+        single.delegate = coordinator
+        view.addGestureRecognizer(double)
+        view.addGestureRecognizer(single)
+        coordinator.single = single
+        return view
+    }
+
+    func updateUIView(_ view: UITextView, context: Context) {
+        context.coordinator.onTap = onTap
+        context.coordinator.single?.isEnabled = onTap != nil
+        var font = UIFont.preferredFont(forTextStyle: style)
+        if weight != .regular || italic {
+            var traits = font.fontDescriptor.symbolicTraits
+            if italic { traits.insert(.traitItalic) }
+            var descriptor = font.fontDescriptor.addingAttributes([.traits: [UIFontDescriptor.TraitKey.weight: weight]])
+            if italic, let slanted = descriptor.withSymbolicTraits(traits) { descriptor = slanted }
+            font = UIFontMetrics(forTextStyle: style).scaledFont(for: UIFont(descriptor: descriptor, size: 0))
+        }
+        if view.text != text { view.text = text }
+        if view.font != font { view.font = font }
+        if view.textColor != color { view.textColor = color }
+        view.textContainer.maximumNumberOfLines = lineLimit ?? 0
+        view.textContainer.lineBreakMode = lineLimit == nil ? .byWordWrapping : .byTruncatingTail
+        view.invalidateIntrinsicContentSize()
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
+        let width = proposal.width ?? uiView.window?.windowScene?.screen.bounds.width ?? 390
+        guard width.isFinite, width > 0 else { return nil }
+        let fitted = uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
+        return CGSize(width: width, height: ceil(fitted.height))
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        var onTap: (() -> Void)?
+        weak var single: UITapGestureRecognizer?
+
+        @objc func tapped() { onTap?() }
+
+        // Alongside the text view's own selection gestures, never instead of them.
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                               shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
+    }
+}
