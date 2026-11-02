@@ -22,8 +22,8 @@ final class RecoEngine {
     private(set) var lastError: String?
     /// Bumped when match percentages change.
     private(set) var version = 0
-    /// Bumped whenever the library snapshot changes (For You and My List re-check "already on
-    /// your server" against it).
+    /// Bumped whenever the libraries are read (For You and My List re-check "already on your
+    /// server" against them).
     private(set) var libraryRevision = 0
 
     @ObservationIgnored private weak var model: AppModel?
@@ -141,14 +141,12 @@ final class RecoEngine {
             fresh += (try? await reader.items(q).items) ?? []
         }
         guard !Task.isCancelled, epoch == started else { return }
-        var changed = false
+        // Same titles, new watched state: `libraryRevision` (what's on the server) stays.
         for item in fresh {
             guard let lib = itemLibrary[item.id], let i = snapshot[lib]?.firstIndex(where: { $0.id == item.id }) else { continue }
             snapshot[lib]?[i] = item
             byId[item.id] = item
-            changed = true
         }
-        if changed { libraryRevision &+= 1 }
     }
 
     static let libraryFields = ["Overview", "Genres", "Tags", "Studios", "ProductionYear", "CommunityRating", "OfficialRating",
@@ -487,10 +485,11 @@ final class RecoEngine {
     private func semanticShortlist() async -> [BaseItem] {
         myListIds = Set(model?.myList.compactMap(\.serverId) ?? [])
         let candidates = snapshot.mapValues { $0.filter(isCandidate) }
-        var history: [(library: String?, weight: Double, item: BaseItem)] = []
+        var collected: [(library: String?, weight: Double, item: BaseItem)] = []
         for (id, w) in weights {
-            if let item = byId[id] { history.append((itemLibrary[id], w, item)) }
+            if let item = byId[id] { collected.append((itemLibrary[id], w, item)) }
         }
+        let history = collected
         let base = profile
         let fan = self.fan
         return await Task.detached(priority: .utility) {
