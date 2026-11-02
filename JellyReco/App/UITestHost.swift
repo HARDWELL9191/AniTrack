@@ -36,6 +36,8 @@ struct UITestHost: View {
             Color.clear
             if mode == "subrender" {
                 SubtitleRenderHost(settings: model.settings)
+            } else if mode == "fonttest" {
+                FontFallbackHost(settings: model.settings)
             } else if ready, mode == "transcoding" {
                 NavigationStack {
                     ConfigPageView(page: ServerSettingsCatalog.transcoding, preview: [
@@ -202,5 +204,59 @@ private struct SubtitleRenderHost: View {
             }
         }
         return "brightpx:\(count)(\(fourCC) \(w)x\(h))"
+    }
+}
+
+
+/// UI test only: plays a video with a subtitle holding characters anime and film subtitles use
+/// (tildes, music notes, Japanese/Korean/Chinese, other scripts, emoji) with the app's own
+/// player configuration, and reports libass's font choices for each missing glyph.
+private struct FontFallbackHost: View {
+    let settings: AppSettings
+    @State private var player: MPVPlayer?
+    @State private var status = "starting"
+
+    static let sample = """
+    Whaoo～huahehu〜 ~ … — “quotes” × ° ½
+    ♪ ♫ ♬ ♥ ♡ ★ ☆ ● ■ ▲ ◆ → ⇒ ※ ・ ‼ ⁉ ① Ⅰ ∞ ≒ ∼ ❤ ✓
+    「こんにちは」『カタカナ』漢字ー 们这说 한국어
+    Ωπ Жизнь čšžćđ ạễ שלום مرحبا สวัสดี नमस्ते 😊
+    """
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            if let player { MPVVideoPlayer(player: player).ignoresSafeArea() }
+            VStack {
+                Text(status).font(.system(size: 6)).foregroundStyle(Color(white: 0.35))
+                    .accessibilityIdentifier("fonttest-state")
+                Spacer()
+            }
+        }
+        .task { await run() }
+    }
+
+    private func run() async {
+        let env = ProcessInfo.processInfo.environment
+        guard let s = env["JELLYRECO_SAMPLE"], let url = URL(string: s) else { status = "FAIL no sample"; return }
+        let srt = FileManager.default.temporaryDirectory.appendingPathComponent("fonttest.srt")
+        try? "1\n00:00:00,000 --> 00:00:30,000\n\(Self.sample)\n".write(to: srt, atomically: true, encoding: .utf8)
+        let p = MPVPlayer(configuration: PlaybackController.configuration(settings: settings, output: .sampleBuffer, logLevel: .verbose))
+        player = p
+        let log = LogBox()
+        p.logHandler = { msg in
+            let m = msg.message.trimmingCharacters(in: .whitespacesAndNewlines)
+            if m.contains("fontselect") || m.contains("Glyph 0x") || m.contains("fallback") || m.contains("font provider")
+                || m.contains("Using font provider") || m.contains("fonts dir") {
+                if !log.lines.contains(m) { log.lines.append(m) }
+            }
+        }
+        p.load(url, playAutomatically: true, startTime: nil)
+        for _ in 0..<150 where p.duration <= .zero { try? await Task.sleep(for: .milliseconds(100)) }
+        p.loadExternalSubtitle(srt, selecting: .primary)
+        try? await Task.sleep(for: .seconds(6))
+        p.pause()
+        status = "READY fonts=\(SubtitleFonts.prepare().map { "\($0.family) @ \((try? FileManager.default.contentsOfDirectory(atPath: $0.directory))?.joined(separator: ",") ?? "")" } ?? "none") || "
+            + log.lines.joined(separator: " || ")
     }
 }

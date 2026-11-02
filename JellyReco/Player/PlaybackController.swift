@@ -122,7 +122,8 @@ final class PlaybackController {
 
     // MARK: Configuration
 
-    static func configuration(settings: AppSettings, output: MPVPlayerConfiguration.VideoOutput) -> MPVPlayerConfiguration {
+    static func configuration(settings: AppSettings, output: MPVPlayerConfiguration.VideoOutput,
+                              logLevel: MPVPlayerConfiguration.LogLevel = .info) -> MPVPlayerConfiguration {
         var options: [String: String] = [
             // Subtitles: mpv/libass renders ASS with its own styles; these shape plain text ones.
             "sub-auto": "no",
@@ -168,7 +169,7 @@ final class PlaybackController {
             dolbyVisionPolicy: .strict,
             hardwareDecoding: settings.hardwareDecoding ? .automatic : .disabled,
             initialBufferDuration: .seconds(1),
-            logLevel: .info,   // info: for the ASS header the app reads (only warnings are shown)
+            logLevel: logLevel,   // info: for the ASS header the app reads (only warnings are shown)
             networkCacheDuration: .seconds(30),
             playbackRate: settings.defaultSpeed,
             videoOutput: output
