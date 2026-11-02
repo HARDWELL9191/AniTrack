@@ -197,6 +197,7 @@ final class PlaybackController {
 
     /// Asks the server for the file (direct play only, or conversion when falling back) and loads it.
     private func open(_ target: BaseItem, start: Double?, fallback: Bool) async {
+        guard !stopped else { return }   // closed meanwhile (a Next or retry still on its way)
         phase = .loading
         didApplyTracks = false
         playingSince = nil
@@ -207,8 +208,6 @@ final class PlaybackController {
         let generation = loadGeneration
         opening = true
         defer { if loadGeneration == generation { opening = false } }
-        // The previous session was ended by the caller; nothing runs on the server for this one yet.
-        playSessionId = nil
         // mpv starts every file without audio / subtitle delay: the same file opened again
         // (renderer switch, fallback, retry) keeps yours, another one starts at 0.
         let sameFile = target.id == item.id
@@ -1426,11 +1425,17 @@ final class PlaybackController {
         }
     }
 
-    func skip(_ segment: MediaSegment) {
+    func skip(_ segment: MediaSegment, auto: Bool = false) {
         skippedSegments.insert(segment.id)
         activeSegment = nil
         if segment.type == "Outro", upNext != nil {
-            Task { await playNext(auto: false) }
+            // Credits skipped automatically count as autoplay, so "Are you still watching?" still comes.
+            if auto, settings.stillWatchingAfter > 0, autoplayStreak >= settings.stillWatchingAfter {
+                askStillWatching = true
+                pause()
+                return
+            }
+            Task { await playNext(auto: auto) }
             return
         }
         seek(to: Fmt.seconds(segment.endTicks))
@@ -1467,7 +1472,8 @@ final class PlaybackController {
                 if Task.isCancelled { return }
                 self.upNextCountdown = left - 1
             }
-            guard !Task.isCancelled else { return }
+            // Cleared without a cancel (a new file opened): not a finished countdown.
+            guard !Task.isCancelled, self?.upNextCountdown != nil else { return }
             await self?.playNext(auto: true)
         }
     }
@@ -1494,6 +1500,7 @@ final class PlaybackController {
         request.audioIndex = nil
         request.subtitleIndex = nil
         request.mediaSourceId = nil
+        restoreTracks = nil   // mpv track numbers of the file before (a renderer switch that never finished)
         triedMetal = false
         triedTranscode = false
         await open(next, start: 0, fallback: false)
@@ -1531,6 +1538,7 @@ final class PlaybackController {
         request.audioIndex = nil
         request.subtitleIndex = nil
         request.mediaSourceId = nil
+        restoreTracks = nil
         triedMetal = false
         triedTranscode = false
         await open(previous, start: 0, fallback: false)
@@ -1538,13 +1546,17 @@ final class PlaybackController {
 
     /// Another episode chosen from the Episodes panel (the player stays open).
     func switchTo(_ episode: BaseItem) async {
+        // The queue first: until the new file opens, this one keeps playing and reporting.
+        let after = await model.episodesAfter(episode)
+        guard !stopped else { return }
         countdownTask?.cancel()
         upNextCountdown = nil
         endSession()
-        queue = await model.episodesAfter(episode)
+        queue = after
         request.audioIndex = nil
         request.subtitleIndex = nil
         request.mediaSourceId = nil
+        restoreTracks = nil
         triedMetal = false
         triedTranscode = false
         autoplayStreak = 0
@@ -1572,6 +1584,7 @@ final class PlaybackController {
     func stop() async {
         guard !stopped else { return }
         stopped = true
+        loadGeneration &+= 1   // late answers (subtitles, segments, an open in progress) are dropped
         ticker?.cancel()
         countdownTask?.cancel()
         let finished = sessionEnd()
@@ -1598,10 +1611,13 @@ final class PlaybackController {
     }
 
     private func sessionEnd(failed: Bool = false) -> @Sendable () async -> Void {
+        // The server never got this far (the file failed before it was asked), or it was ended already.
+        guard playSessionId != nil else { return {} }
         let final = report(failed: failed)
         let client = client
         let transcoding = method == .transcode ? playSessionId : nil
         let live = source?.liveStreamId
+        playSessionId = nil
         return {
             await client.reportStopped(final)
             if let transcoding { await client.stopEncoding(playSessionId: transcoding) }
@@ -1678,15 +1694,28 @@ final class PlaybackController {
         if let label = item.episodeLabel { info[MPMediaItemPropertyAlbumTitle] = label }
         if let art = nowPlayingArtwork { info[MPMediaItemPropertyArtwork] = art }
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
-        if nowPlayingArtwork == nil, let url = client.landscapeURL(item, width: 600) {
+        // Asked for once per file (not on every update while it downloads, nor again after a failure).
+        if nowPlayingArtwork == nil, artworkItemId != item.id, let url = client.landscapeURL(item, width: 600) {
+            let itemId = item.id
+            artworkItemId = itemId
             Task { [weak self] in
                 guard let (data, _) = try? await URLSession.shared.data(from: url), let image = UIImage(data: data) else { return }
-                self?.nowPlayingArtwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+                // A picture for an episode that's no longer playing is dropped.
+                guard let self, !self.stopped, self.item.id == itemId else { return }
+                let art = Self.artwork(image)
+                self.nowPlayingArtwork = art
+                MPNowPlayingInfoCenter.default().nowPlayingInfo?[MPMediaItemPropertyArtwork] = art
             }
         }
     }
 
+    /// The system asks for the picture on its own queue, so the handler mustn't be tied to the main actor.
+    nonisolated private static func artwork(_ image: UIImage) -> MPMediaItemArtwork {
+        MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+    }
+
     @ObservationIgnored private var nowPlayingArtwork: MPMediaItemArtwork?
+    @ObservationIgnored private var artworkItemId: String?
 
     private func clearNowPlaying() {
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil

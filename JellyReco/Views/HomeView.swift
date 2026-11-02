@@ -58,6 +58,7 @@ struct HomeView: View {
                         UserAvatar(serverURL: model.client?.baseURL, userId: model.user?.id ?? "",
                                    tag: model.user?.primaryImageTag, size: 30)
                     }
+                    .accessibilityLabel("Accounts")
                 }
             }
             .refreshable { await load() }
@@ -91,14 +92,15 @@ struct HomeView: View {
     private func load() async {
         guard let client = model.client else { return }
         if model.libraries.isEmpty { await model.refreshSession() }
-        let web = await client.loadWebUserSettings()
-        let order = HomeSection.sections(from: web)
         let settings = model.settings
 
+        // Continue Watching and Next Up load while the home settings are fetched.
         async let r = client.resume(limit: 12)
         let cutoff = settings.nextUpMaxDays   // Jellyfin web's default is 365 days
         async let n = client.nextUp(limit: 24, enableRewatching: settings.nextUpRewatching,
                                     maxDaysOld: cutoff > 0 ? cutoff : nil)
+        let web = await client.loadWebUserSettings()
+        let order = HomeSection.sections(from: web)
 
         // Recently added: same rules as Jellyfin web (skip these library types and your exclusions).
         let excludedTypes: Set<String> = ["playlists", "livetv", "boxsets", "channels", "folders"]
@@ -118,13 +120,20 @@ struct HomeView: View {
             }
         }
         var anyError: Error?
-        do { resume = try await r } catch { anyError = error }
-        do { nextUp = try await n } catch { anyError = anyError ?? error }
+        var fetchedResume: [BaseItem]?
+        var fetchedNextUp: [BaseItem]?
+        do { fetchedResume = try await r } catch { anyError = error }
+        do { fetchedNextUp = try await n } catch { anyError = anyError ?? error }
+        var fetchedOnNow: [BaseItem] = []
         if order.contains(.liveTV) && model.hasLiveTV {
-            onNow = (try? await client.recommendedPrograms()) ?? []
-        } else {
-            onNow = []
+            fetchedOnNow = (try? await client.recommendedPrograms()) ?? []
         }
+        // A load replaced by a newer one (pull to refresh, a content change) leaves the shelves
+        // alone instead of emptying them with its cancelled requests.
+        guard !Task.isCancelled else { return }
+        if let fetchedResume { resume = fetchedResume }
+        if let fetchedNextUp { nextUp = fetchedNextUp }
+        onNow = fetchedOnNow
         latest = lat
         sections = order
         loadError = anyError.flatMap { AppModel.isCancellation($0) ? nil : $0.localizedDescription }

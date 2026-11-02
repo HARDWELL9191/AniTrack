@@ -38,8 +38,14 @@ struct PlayerScreen: View {
             UIApplication.shared.isIdleTimerDisabled = true
             await c.start()
         }
-        // Closed some other way than the close button (signed out, account switched): stop playing.
-        .onDisappear { if let c = controller { Task { await c.stop() } } }
+        // Closed some other way than the close button (signed out, account switched): stop playing,
+        // and let the screen sleep and the app go back to portrait as close() does.
+        .onDisappear {
+            guard let c = controller else { return }
+            Task { await c.stop() }
+            UIApplication.shared.isIdleTimerDisabled = false
+            OrientationLock.exitPlayer()
+        }
         .onChange(of: scenePhase) { _, phase in
             guard let c = controller else { return }
             if phase == .background && !model.settings.backgroundAudio && !c.player.pictureInPicture.isActive
@@ -114,7 +120,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
 }
 
 enum PlayerPanel: String, Identifiable {
-    case chapters, episodes, info
+    case chapters, episodes
     var id: String { rawValue }
 }
 
@@ -504,7 +510,6 @@ private struct PlayerContent: View {
         switch p {
         case .chapters: ChaptersStrip(controller: controller) { panel = nil }
         case .episodes: EpisodesStrip(controller: controller) { panel = nil }
-        case .info: InfoCard(controller: controller) { panel = nil }
         }
     }
 
@@ -616,10 +621,6 @@ private struct PlayerContent: View {
 
 // MARK: - Video surface (fit / fill / pinch)
 
-/// Fit and fill change the video view's real size (centred, clipped), the way MPVUI's surface
-/// is built to animate: during the animation it keeps the current picture and stretches it
-/// smoothly, then renders sharp at the final size. Subtitles are moved up and scaled back while
-/// filled so they stay on screen at their normal size.
 /// What subtitle sizing depends on: the aspect mode, the screen and the picture's size.
 private struct SubtitleFit: Equatable {
     let mode: PlaybackController.AspectMode
@@ -627,6 +628,10 @@ private struct SubtitleFit: Equatable {
     let video: CGSize
 }
 
+/// Fit and fill change the video view's real size (centred, clipped), the way MPVUI's surface
+/// is built to animate: during the animation it keeps the current picture and stretches it
+/// smoothly, then renders sharp at the final size. Subtitles are moved up and scaled back while
+/// filled so they stay on screen at their normal size.
 private struct VideoSurface: View {
     let controller: PlaybackController
     let pinch: CGFloat?
@@ -1017,18 +1022,6 @@ private struct HUDView: View {
         }
         .foregroundStyle(.white)
         .glassEffect(.regular, in: hud.isJump ? AnyShape(Circle()) : AnyShape(Capsule()))
-    }
-
-    private func bar(_ symbol: String, _ v: Double) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: symbol).font(.title3)
-            ZStack(alignment: .leading) {
-                Capsule().fill(.white.opacity(0.25))
-                Capsule().fill(.white).frame(width: 150 * v)
-            }
-            .frame(width: 150, height: 6)
-        }
-        .padding(.horizontal, 20).padding(.vertical, 14)
     }
 }
 

@@ -1,27 +1,18 @@
 import Foundation
 import Observation
 
-/// A personal pick from the user's own Jellyfin library.
-struct Pick: Identifiable, Hashable, Codable {
-    var id: String { item.id }
-    let item: BaseItem
-    let score: Double
-    let because: [String]
-    let highlights: [String]
-}
-
-/// For You, built only from what's on the server: your libraries, what you've finished,
-/// favourited, are watching or gave up on. Same recipe as AniReco's AI picks:
+/// Your server's library, as For You and the match % see it: built only from what's on the
+/// server (your libraries, what you've finished, favourited, are watching or gave up on).
+/// Same recipe as AniReco's AI picks:
 ///
 /// 1. Taste profile: genres, tags and studios of what you liked (finished, favourites, likes,
 ///    in progress) push up; what you abandoned or marked "Not for me" pushes down. History in
 ///    the library you're browsing counts 1.5×, the rest still helps.
-/// 2. "Fans also liked": Jellyfin's own Similar items for your ~12 strongest likes (the
-///    library equivalent of AniList fan recommendations).
-/// 3. On-device AI re-rank: Apple's Natural Language model embeds each overview on the iPhone
-///    and compares it with a taste vector built from your favourites. Cached on disk; skipped in
+/// 2. "Fans also liked": Jellyfin's own Similar items for your strongest likes (the library
+///    equivalent of AniList fan recommendations).
+/// 3. On-device AI: Apple's Natural Language model embeds each overview on the iPhone and
+///    compares it with a taste vector built from your favourites. Cached on disk; skipped in
 ///    Low Power Mode or when the phone is hot.
-/// 4. Community rating as a small quality nudge.
 /// "Why would I like this?" is written by Apple Intelligence on device, only when asked.
 @Observable
 @MainActor
@@ -29,14 +20,11 @@ final class RecoEngine {
     // Public state
     private(set) var isBuilding = false
     private(set) var lastError: String?
-    private(set) var builtAt: Date?
-    private(set) var usedAI = false
-    /// Ranked picks per source (library id or `RecoSource.all`).
-    private(set) var picks: [String: [Pick]] = [:]
-    /// Genres available in each source, most common first (the second dropdown).
-    private(set) var genres: [String: [String]] = [:]
     /// Bumped when match percentages change.
     private(set) var version = 0
+    /// Bumped whenever the library snapshot changes (For You and My List re-check "already on
+    /// your server" against it).
+    private(set) var libraryRevision = 0
 
     @ObservationIgnored private weak var model: AppModel?
     /// Every movie/series in every eligible library, keyed by library id.
@@ -52,6 +40,14 @@ final class RecoEngine {
     @ObservationIgnored private var buildTask: Task<Void, Never>?
     @ObservationIgnored private var debounce: Task<Void, Never>?
     @ObservationIgnored private var dirty = true
+    /// A build ran to its end for this account (a cancelled or failed one leaves this false).
+    @ObservationIgnored private var built = false
+    /// Changes since start-up: a build only clears `dirty` if nothing changed while it ran.
+    @ObservationIgnored private var changes = 0
+    /// Only the newest build owns `isBuilding` (a cancelled one finishing late mustn't clear it).
+    @ObservationIgnored private var buildGeneration = 0
+    /// Bumped on account change: work started for the previous account must not land here.
+    @ObservationIgnored private var epoch = 0
     @ObservationIgnored private var similarCache: [String: (items: [String], at: Date)] = [:]
     /// When the libraries were last read from the server, and titles to re-read before the next
     /// ranking (what was just played: its watched state changed on the server).
@@ -69,11 +65,14 @@ final class RecoEngine {
         buildTask = nil
         debounce?.cancel()
         debounce = nil
+        epoch &+= 1
+        buildGeneration &+= 1
+        isBuilding = false
+        lastError = nil
         refreshIds = []
         snapshotAt = nil
         profileReady = false
-        picks = [:]
-        genres = [:]
+        built = false
         snapshot = [:]
         itemLibrary = [:]
         byId = [:]
@@ -83,18 +82,18 @@ final class RecoEngine {
         semantic = [:]
         matchMemo = [:]
         similarCache = [:]
-        builtAt = nil
         dirty = true
         version &+= 1
+        libraryRevision &+= 1
     }
 
     /// Something was watched / favourited / listed: re-rank a little later (several changes →
-    /// one pass). The libraries aren't downloaded again for that (it used to page through every
-    /// library on each tap and after each video): your changes are already known here, and only
-    /// the titles in `refreshing` (just played) are re-read. A full re-read happens on launch,
-    /// pull-to-refresh, or when the last one is over 15 minutes old.
+    /// one pass). The libraries aren't downloaded again for that: your changes are already known
+    /// here, and only the titles in `refreshing` (just played) are re-read. A full re-read happens
+    /// when the last one is over 15 minutes old.
     func listChanged(refreshing ids: [String] = []) {
         dirty = true
+        changes &+= 1
         refreshIds.formUnion(ids)
         debounce?.cancel()
         debounce = Task { [weak self] in
@@ -105,22 +104,28 @@ final class RecoEngine {
     }
 
     private func refreshAfterChange() async {
-        if buildTask != nil { await build(force: false); return }   // a full read is already on its way
+        if buildTask != nil {
+            // A full read is already on its way; changes made while it ran are applied below.
+            await build(force: false)
+            if !dirty || Task.isCancelled { return }
+        }
         guard let at = snapshotAt, Date().timeIntervalSince(at) < 15 * 60, !snapshot.isEmpty, let reader = model?.reader else {
             await build(force: true)
             return
         }
+        let started = epoch
         let ids = refreshIds
         refreshIds = []
         if !ids.isEmpty { await reread(ids, reader: reader) }
-        if Task.isCancelled { return }
+        if Task.isCancelled || epoch != started { return }
+        if model?.settings.useOnDeviceAI == false { semantic = [:] }   // AI turned off: no AI in the match %
         rebuildProfile()
-        rankAll(aiAllowed: usedAI)
         dirty = false
     }
 
     /// Fresh copies of a few titles (and the shows of played episodes), put into the snapshot.
     private func reread(_ ids: Set<String>, reader: LibraryReader) async {
+        let started = epoch
         var q = JellyfinClient.ItemQuery()
         q.ids = Array(ids.prefix(100))
         q.recursive = true
@@ -128,18 +133,22 @@ final class RecoEngine {
         q.isMissing = nil
         q.fields = Self.libraryFields
         guard let played = try? await reader.items(q).items else { return }
+        guard epoch == started else { return }
         let shows = Set(played.compactMap { $0.kind == .episode || $0.kind == .season ? $0.seriesId : nil }).filter { byId[$0] != nil }
         var fresh = played.filter { byId[$0.id] != nil }
         if !shows.isEmpty {
             q.ids = Array(shows.prefix(100))
             fresh += (try? await reader.items(q).items) ?? []
         }
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, epoch == started else { return }
+        var changed = false
         for item in fresh {
             guard let lib = itemLibrary[item.id], let i = snapshot[lib]?.firstIndex(where: { $0.id == item.id }) else { continue }
             snapshot[lib]?[i] = item
             byId[item.id] = item
+            changed = true
         }
+        if changed { libraryRevision &+= 1 }
     }
 
     static let libraryFields = ["Overview", "Genres", "Tags", "Studios", "ProductionYear", "CommunityRating", "OfficialRating",
@@ -188,62 +197,23 @@ final class RecoEngine {
         sources.first { $0.id == id }?.name ?? "All"
     }
 
-    /// "anime", "show", "movie" or "title": used in prompts and empty states.
-    func noun(for sourceId: String) -> String {
-        let source = sources.first { $0.id == sourceId }
-        let name = source?.name.lowercased() ?? ""
-        if name.contains("anime") { return name.contains("movie") || name.contains("film") ? "anime movie" : "anime" }
-        switch source?.collectionType {
-        case "movies": return "movie"
-        case "tvshows": return "show"
-        default: return "title"
-        }
-    }
-
-    func picks(for sourceId: String, genre: String?) -> [Pick] {
-        _ = version
-        let all = picks[sourceId] ?? []
-        let visible = all.filter { pick in
-            !(model?.isNotForMe(pick.item) ?? false) && !(model?.isPlayed(pick.item) ?? false)
-                && (genre == nil || (pick.item.genres ?? []).contains(genre!))
-        }
-        guard let genre, visible.count > 1 else { return visible }
-        // Within a genre, what you finished *in that genre* (in this library) matters most:
-        // re-rank with that history counting extra.
-        let key = "\(sourceId)|\(genre)|\(version)"
-        if let order = genreOrder[key] {
-            let pos = Dictionary(uniqueKeysWithValues: order.enumerated().map { ($1, $0) })
-            return visible.sorted { (pos[$0.id] ?? .max) < (pos[$1.id] ?? .max) }
-        }
-        var p = TasteProfile()
-        for (id, w) in weights {
-            guard let item = byId[id] else { continue }
-            var scaled = w
-            if sourceId == RecoSource.all || itemLibrary[id] == sourceId { scaled *= 1.5 }
-            if (item.genres ?? []).contains(genre) { scaled *= 1.6 }
-            p.add(item, weight: scaled)
-        }
-        p.finalize()
-        let rescored = visible.map { pick -> (Pick, Double) in
-            let sim = max(0, p.similarity(to: pick.item, sameLibraryBoost: nil))
-            return (pick, 0.6 * pick.score + 0.4 * sim)
-        }.sorted { $0.1 > $1.1 }.map(\.0)
-        if genreOrder.count > 60 { genreOrder.removeAll() }
-        genreOrder[key] = rescored.map(\.id)
-        return rescored
-    }
-
-    @ObservationIgnored private var genreOrder: [String: [String]] = [:]
-
     // MARK: Building
 
     /// True once the library list and your watch signals are known (For You needs only this,
-    /// not the slower "More like this" ranking and on-device AI pass that follow).
+    /// not the slower "fans also liked" and on-device AI pass that follow).
     @ObservationIgnored private(set) var profileReady = false
 
-    /// Waits only for the library list and your history (never for the AI ranking).
+    /// Waits only for the library list and your history (never for the AI pass).
     func ensureProfile() async {
         if profileReady && !byId.isEmpty { return }
+        // The library list arrives with the account (e.g. right after switching): wait for it
+        // instead of reading no libraries at all.
+        var waited = 0
+        while waited < 240, model?.reader != nil, model?.libraries.isEmpty == true {   // up to 60 s
+            if Task.isCancelled { return }
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            waited += 1
+        }
         Task { await self.ensureBuilt() }
         for n in 0..<240 {   // up to 60 s
             try? await Task.sleep(nanoseconds: 250_000_000)
@@ -254,12 +224,20 @@ final class RecoEngine {
     }
 
     func ensureBuilt() async {
-        if picks.isEmpty || snapshot.isEmpty {
+        if !built || snapshot.isEmpty {
             await build(force: false)
         } else if dirty {
             debounce?.cancel()
             await refreshAfterChange()
         }
+    }
+
+    /// Re-reads the libraries in the background when the last read is over 15 minutes old (or
+    /// never finished), so titles added to the server since are known as yours.
+    func refreshIfStale() {
+        guard buildTask == nil, !byId.isEmpty else { return }
+        if let at = snapshotAt, Date().timeIntervalSince(at) < 15 * 60 { return }
+        Task { await build(force: false) }
     }
 
     func build(force: Bool) async {
@@ -279,9 +257,11 @@ final class RecoEngine {
 
     private func runBuild() async {
         guard let model, let reader = model.reader else { return }
+        buildGeneration &+= 1
+        let generation = buildGeneration
         isBuilding = true
         lastError = nil
-        defer { isBuilding = false }
+        defer { if buildGeneration == generation { isBuilding = false } }
 
         // 0) Fast start: last snapshot from disk while the fresh one loads.
         let cacheName = "reco-\(model.store.currentServerId ?? "s")-\(reader.userId ?? "u")"
@@ -290,46 +270,51 @@ final class RecoEngine {
             ingest(saved)
             rebuildProfile()
             profileReady = true
-            rankAll(aiAllowed: false)
         }
 
-        // 1) Fresh snapshot of every eligible library.
-        do {
-            var fresh: [String: [BaseItem]] = [:]
-            for source in sources where source.id != RecoSource.all {
-                if Task.isCancelled { return }
-                fresh[source.id] = try await fetchLibrary(source, reader: reader)
-            }
-            if Task.isCancelled { return }   // e.g. the account changed while reading
-            ingest(fresh)
-            snapshotAt = Date()
-            refreshIds = []
-            DiskCache.saveInBackground(fresh, name: cacheName)
-        } catch {
-            if AppModel.isCancellation(error) { return }
-            if snapshot.isEmpty {
-                lastError = error.localizedDescription
-                return
+        // 1) Fresh snapshot of every eligible library. With no library list yet (still loading),
+        // nothing is read: an empty read would replace the saved snapshot with nothing.
+        let libraries = sources.filter { $0.id != RecoSource.all }
+        if !libraries.isEmpty {
+            let pendingBefore = refreshIds
+            do {
+                var fresh: [String: [BaseItem]] = [:]
+                for source in libraries {
+                    if Task.isCancelled { return }
+                    fresh[source.id] = try await fetchLibrary(source, reader: reader)
+                }
+                if Task.isCancelled { return }   // e.g. the account changed while reading
+                ingest(fresh)
+                snapshotAt = Date()
+                // Titles played while this read ran may have been read before they changed.
+                refreshIds.subtract(pendingBefore)
+                DiskCache.saveInBackground(fresh, name: cacheName)
+            } catch {
+                if AppModel.isCancellation(error) || Task.isCancelled { return }
+                if snapshot.isEmpty {
+                    lastError = error.localizedDescription
+                    return
+                }
             }
         }
 
         // 2) Taste profile + Similar ("fans also liked") from your strongest likes.
+        let seenChanges = changes
+        if !model.settings.useOnDeviceAI { semantic = [:] }   // AI turned off: no AI in the match %
         rebuildProfile()
         profileReady = true
         await collectSimilar(reader: reader)
         if Task.isCancelled { return }
 
-        // 3) Rank every source; then the on-device AI pass.
-        rankAll(aiAllowed: false)
-        let aiAllowed = model.settings.useOnDeviceAI && SemanticEngine.shouldRunNow
-        if aiAllowed {
-            await runSemantic()
+        // 3) The on-device AI pass over the best unwatched titles of each library.
+        if model.settings.useOnDeviceAI && SemanticEngine.shouldRunNow {
+            let shortlist = await semanticShortlist()
             if Task.isCancelled { return }
-            rankAll(aiAllowed: true)
+            await runSemantic(shortlist: shortlist)
+            if Task.isCancelled { return }
         }
-        usedAI = aiAllowed && !semantic.isEmpty
-        builtAt = Date()
-        dirty = false
+        built = true
+        if changes == seenChanges { dirty = false }
     }
 
     private func fetchLibrary(_ source: Source, reader: LibraryReader) async throws -> [BaseItem] {
@@ -366,18 +351,7 @@ final class RecoEngine {
                 byId[item.id] = item
             }
         }
-        var genreCounts: [String: [String: Int]] = [:]
-        for (lib, items) in libs {
-            for item in items { for g in item.genres ?? [] { genreCounts[lib, default: [:]][g, default: 0] += 1 } }
-        }
-        var merged: [String: Int] = [:]
-        for counts in genreCounts.values { merged.merge(counts, uniquingKeysWith: +) }
-        var result: [String: [String]] = [:]
-        for (lib, counts) in genreCounts {
-            result[lib] = counts.filter { $0.value >= 2 }.sorted { $0.value > $1.value }.map(\.key)
-        }
-        result[RecoSource.all] = merged.filter { $0.value >= 2 }.sorted { $0.value > $1.value }.map(\.key)
-        genres = result
+        libraryRevision &+= 1
     }
 
     // MARK: Signals
@@ -431,16 +405,19 @@ final class RecoEngine {
         myListIds = Set(model?.myList.compactMap(\.serverId) ?? [])
         var p = TasteProfile()
         var w: [String: Double] = [:]
+        var likedVectors: [(vector: [String: Double], weight: Double)] = []
         for item in byId.values {
             guard let s = signal(for: item) else { continue }
             w[item.id] = s
-            p.add(item, weight: s)
+            let v = TasteProfile.vector(for: item)   // once per title (also used for the calibration below)
+            p.add(vector: v, weight: s)
+            if s > 0.5 { likedVectors.append((v, s)) }
         }
         p.finalize()
         profile = p
         weights = w
         // Calibrate "very high match" on your well-liked titles (each vs. the rest of your history).
-        let liked = w.filter { $0.value > 0.5 }.compactMap { id, wt in byId[id].map { p.similarity(to: $0, excludingWeight: wt) } }.sorted()
+        let liked = likedVectors.map { p.similarity(toVector: $0.vector, excludingWeight: $0.weight) }.sorted()
         let all = byId.values.prefix(2000).map { p.similarity(to: $0, excludingWeight: w[$0.id] ?? 0) }.sorted()
         let hi = liked.isEmpty ? 0.55 : liked[min(liked.count - 1, Int(Double(liked.count) * 0.75))]
         let lo = all.isEmpty ? 0.0 : min(all[Int(Double(all.count - 1) * 0.1)], hi * 0.4)
@@ -459,7 +436,6 @@ final class RecoEngine {
             }
             .prefix(16)
         var votes: [String: Double] = [:]
-        var reasons: [String: [String]] = [:]
         var results: [(String, [String])] = []
         var toFetch: [String] = []
         for (seedId, _) in seeds {
@@ -480,29 +456,23 @@ final class RecoEngine {
             for await r in group { out.append(r) }
             return out
         }
+        // The account may have changed while asking: nothing from the old one lands here.
+        if Task.isCancelled { return }
         for (seedId, ids) in fetched where !ids.isEmpty { similarCache[seedId] = (ids, Date()) }
         results += fetched
         for (seedId, ids) in results {
             let seedWeight = weights[seedId] ?? 0.5
-            let title = byId[seedId]?.displayName ?? ""
             for (rank, id) in ids.enumerated() {
                 votes[id, default: 0] += seedWeight * (1 - Double(rank) / 32)
-                if !title.isEmpty, !(reasons[id] ?? []).contains(title) { reasons[id, default: []].append(title) }
             }
         }
         let maxVote = max(votes.values.max() ?? 1, 0.0001)
         fan = votes.mapValues { min(1, $0 / maxVote) }
-        becauseSimilar = reasons
         matchMemo = [:]
         version &+= 1
     }
 
-    @ObservationIgnored private var becauseSimilar: [String: [String]] = [:]
-
     // MARK: AI pass
-
-    @ObservationIgnored private var tasteVector: [Float] = []
-    @ObservationIgnored private var anchorVectors: [String: [Float]] = [:]
 
     static func embeddingInput(_ item: BaseItem) -> SemanticEngine.Input {
         let genres = (item.genres ?? []).joined(separator: ", ")
@@ -511,44 +481,90 @@ final class RecoEngine {
         return SemanticEngine.Input(key: "\(item.id)|\(SemanticEngine.stableKey(text))", text: text)
     }
 
-    private func runSemantic() async {
-        // Anchors: your strongest likes and dislikes. Candidates: the best ~120 of each source.
+    /// The best ~120 unwatched titles of each library and of All, by taste, "fans also liked" and
+    /// rating (history in a library counts 1.5× for that library): what the AI pass compares.
+    /// Scored off the main thread.
+    private func semanticShortlist() async -> [BaseItem] {
+        myListIds = Set(model?.myList.compactMap(\.serverId) ?? [])
+        let candidates = snapshot.mapValues { $0.filter(isCandidate) }
+        var history: [(library: String?, weight: Double, item: BaseItem)] = []
+        for (id, w) in weights {
+            if let item = byId[id] { history.append((itemLibrary[id], w, item)) }
+        }
+        let base = profile
+        let fan = self.fan
+        return await Task.detached(priority: .utility) {
+            Self.shortlist(candidates: candidates, history: history, base: base, fan: fan, perSource: 120)
+        }.value
+    }
+
+    private nonisolated static func shortlist(candidates: [String: [BaseItem]],
+                                              history: [(library: String?, weight: Double, item: BaseItem)],
+                                              base: TasteProfile, fan: [String: Double], perSource: Int) -> [BaseItem] {
+        let historyVectors = history.map { (library: $0.library, weight: $0.weight, vector: TasteProfile.vector(for: $0.item)) }
+        func score(_ item: BaseItem, _ similarity: Double) -> Double {
+            let c = fan[item.id] ?? 0
+            let q = (item.communityRating ?? 6.5) / 10
+            return 0.45 * c + 0.40 * max(0, similarity) + 0.15 * q
+        }
+        var result: [BaseItem] = []
+        var taken: Set<String> = []
+        func take(_ scored: [(BaseItem, Double)]) {
+            for (item, _) in scored.sorted(by: { $0.1 > $1.1 }).prefix(perSource) where taken.insert(item.id).inserted {
+                result.append(item)
+            }
+        }
+        var all: [(BaseItem, Double)] = []
+        var inAll: Set<String> = []
+        for (lib, items) in candidates {
+            // History in this library counts 1.5×: a tailored profile per library.
+            var p = TasteProfile()
+            for h in historyVectors { p.add(vector: h.vector, weight: h.library == lib ? h.weight * 1.5 : h.weight) }
+            p.finalize()
+            var scored: [(BaseItem, Double)] = []
+            scored.reserveCapacity(items.count)
+            for item in items {
+                let v = TasteProfile.vector(for: item)   // once, for this library and for All
+                scored.append((item, score(item, p.similarity(toVector: v))))
+                if inAll.insert(item.id).inserted { all.append((item, score(item, base.similarity(toVector: v)))) }
+            }
+            take(scored)
+        }
+        take(all)
+        return result
+    }
+
+    private func runSemantic(shortlist: [BaseItem]) async {
+        // Anchors: your strongest likes and dislikes. Candidates: the shortlist.
         let anchors = weights.filter { abs($0.value) >= 0.4 }
             .sorted { abs($0.value) > abs($1.value) }
             .prefix(50)
             .compactMap { byId[$0.key] }
             .filter { !$0.plainOverview.isEmpty }
         guard !anchors.isEmpty else { return }
-        var shortlist: [BaseItem] = []
-        var seen: Set<String> = []
-        for list in picks.values {
-            for pick in list.prefix(120) where seen.insert(pick.id).inserted { shortlist.append(pick.item) }
-        }
-        let inputs = (anchors + shortlist).map(Self.embeddingInput)
-        let keyOf = Dictionary(uniqueKeysWithValues: (anchors + shortlist).map { ($0.id, Self.embeddingInput($0).key) })
+        // A title can be both (thumbs up/down but not watched yet): keyed by id, never a duplicate key.
+        let embedded = anchors + shortlist
+        let inputs = embedded.map(Self.embeddingInput)
+        var keyOf: [String: String] = [:]
+        for (item, input) in zip(embedded, inputs) { keyOf[item.id] = input.key }
         let vectors = await Task.detached(priority: .utility) {
             await SemanticEngine.shared.vectors(for: inputs)
         }.value
         guard !Task.isCancelled else { return }
 
         var taste: [Float] = []
-        var anchorV: [String: [Float]] = [:]
         for a in anchors {
             guard let key = keyOf[a.id], let v = vectors[key] else { continue }
             if taste.isEmpty { taste = [Float](repeating: 0, count: v.count) }
             SemanticEngine.accumulate(v, scale: Float(weights[a.id] ?? 0), into: &taste)
-            if (weights[a.id] ?? 0) > 0 { anchorV[a.id] = v }
         }
         guard !taste.isEmpty else { return }
         taste = SemanticEngine.normalized(taste)
-        tasteVector = taste
-        anchorVectors = anchorV
 
         var sims: [String: Float] = [:]
         for item in shortlist {
             guard let key = keyOf[item.id], let v = vectors[key] else { continue }
             sims[item.id] = SemanticEngine.cosine(taste, v)
-            candidateVectors[item.id] = v
         }
         let sorted = sims.values.sorted()
         guard sorted.count >= 3 else { return }
@@ -557,57 +573,6 @@ final class RecoEngine {
         semantic = sims.mapValues { max(-1, min(1, ($0 - lo) / span)) }
         matchMemo = [:]
         version &+= 1
-    }
-
-    @ObservationIgnored private var candidateVectors: [String: [Float]] = [:]
-
-    // MARK: Ranking
-
-    /// Ranks every library (the best of each feed the on-device AI pass). Explanations aren't
-    /// worked out here: nothing reads them from these picks, and computing them for 200 titles
-    /// per library was most of the time this took (on the main thread).
-    private func rankAll(aiAllowed: Bool) {
-        myListIds = Set(model?.myList.compactMap(\.serverId) ?? [])
-        var result: [String: [Pick]] = [:]
-        let maxQuality = 10.0
-        func rank(_ items: [BaseItem], sourceId: String) -> [Pick] {
-            var scored: [(BaseItem, Double)] = []
-            for item in items where isCandidate(item) {
-                let sim = max(0, profile.similarity(to: item, sameLibraryBoost: nil))
-                let c = fan[item.id] ?? 0
-                let q = (item.communityRating ?? 6.5) / maxQuality
-                var score = 0.45 * c + 0.40 * sim + 0.15 * q
-                if aiAllowed, let sem = semantic[item.id] {
-                    let s = Double((sem + 1) / 2)
-                    score = 0.30 * c + 0.25 * sim + 0.33 * s + 0.12 * q
-                }
-                scored.append((item, score))
-            }
-            scored.sort { $0.1 > $1.1 }
-            return scored.prefix(200).map { item, score in
-                Pick(item: item, score: score, because: [], highlights: [])
-            }
-        }
-        for (lib, items) in snapshot {
-            // History in this library counts 1.5×: a tailored profile per source.
-            result[lib] = withProfile(boostedFor: lib) { rank(items, sourceId: lib) }
-        }
-        result[RecoSource.all] = rank(Array(byId.values), sourceId: RecoSource.all)
-        picks = result
-    }
-
-    /// Temporarily weights history from one library higher while ranking it.
-    private func withProfile<T>(boostedFor lib: String, _ body: () -> T) -> T {
-        let saved = profile
-        var p = TasteProfile()
-        for (id, w) in weights {
-            guard let item = byId[id] else { continue }
-            p.add(item, weight: itemLibrary[id] == lib ? w * 1.5 : w)
-        }
-        p.finalize()
-        profile = p
-        defer { profile = saved }
-        return body()
     }
 
     // MARK: Match %
@@ -652,24 +617,34 @@ final class RecoEngine {
         var single = TasteProfile()
         single.add(base, weight: 1)
         single.finalize()
-        let sameKind = byId.values.filter { $0.kind == base.kind && $0.id != base.id }
-        let byTags = sameKind.map { ($0, single.similarity(to: $0, sameLibraryBoost: nil)) }
-            .sorted { $0.1 > $1.1 }
-            .prefix(80)
-        for (c, _) in byTags { pool[c.id] = c }
+        let one = single
+        let baseKind = base.kind, baseItemId = base.id
+        let sameKind = byId.values.filter { $0.kind == baseKind && $0.id != baseItemId }
+        // Closest by genres, tags and studio: scored off the main thread (the whole library).
+        let byTags = await Task.detached(priority: .userInitiated) {
+            Array(sameKind.map { ($0, one.similarity(to: $0, sameLibraryBoost: nil)) }
+                .sorted { $0.1 > $1.1 }
+                .prefix(80))
+        }.value
+        var tagScore: [String: Double] = [:]
+        for (c, s) in byTags {
+            pool[c.id] = c
+            tagScore[c.id] = s
+        }
         pool[base.id] = nil
         let candidates = pool.values.filter { !model.isPlayed($0) && !model.isNotForMe($0) }
         guard !candidates.isEmpty else { return [] }
 
         var semantic: [String: Float] = [:]
         if model.settings.useOnDeviceAI && SemanticEngine.shouldRunNow {
-            let inputs = ([base] + candidates).map(Self.embeddingInput)
+            let baseInput = Self.embeddingInput(base)
+            let inputs = candidates.map(Self.embeddingInput)
             let vectors = await Task.detached(priority: .userInitiated) {
-                await SemanticEngine.shared.vectors(for: inputs)
+                await SemanticEngine.shared.vectors(for: [baseInput] + inputs)
             }.value
-            if let bv = vectors[Self.embeddingInput(base).key] {
-                for c in candidates {
-                    if let v = vectors[Self.embeddingInput(c).key] { semantic[c.id] = SemanticEngine.cosine(bv, v) }
+            if let bv = vectors[baseInput.key] {
+                for (c, input) in zip(candidates, inputs) {
+                    if let v = vectors[input.key] { semantic[c.id] = SemanticEngine.cosine(bv, v) }
                 }
             }
         }
@@ -677,14 +652,14 @@ final class RecoEngine {
         let lo = sims.first ?? 0, hi = sims.last ?? 1
         let span = max(hi - lo, 0.0001)
         func score(_ c: BaseItem) -> Double {
-            let tag = single.similarity(to: c, sameLibraryBoost: nil)
+            let tag = tagScore[c.id] ?? one.similarity(to: c, sameLibraryBoost: nil)
             let mine = Double(match(for: c) ?? 60) / 100
             if let s = semantic[c.id] {
                 return 0.45 * Double((s - lo) / span) + 0.35 * tag + 0.20 * mine
             }
             return 0.65 * tag + 0.35 * mine
         }
-        // Each title scored once (scoring inside the sort's comparison redid it many times per title).
+        // Each title scored once, then sorted.
         return candidates.map { ($0, score($0)) }.sorted { $0.1 > $1.1 }.prefix(30).map(\.0)
     }
 
@@ -707,24 +682,12 @@ final class RecoEngine {
 
     func source(_ id: String) -> Source? { sources.first { $0.id == id } }
 
-    func titleFor(_ id: String) -> String? { byId[id]?.displayName }
-
     /// Titles you loved most (for explanations).
     func topLiked(in sourceId: String, limit: Int = 8) -> [String] {
         weights.filter { $0.value > 0.6 && (sourceId == RecoSource.all || itemLibrary[$0.key] == sourceId) }
             .sorted { $0.value > $1.value }
             .prefix(limit)
             .compactMap { byId[$0.key]?.displayName }
-    }
-
-    func dismiss(_ item: BaseItem) {
-        guard let model else { return }
-        Task { await model.setNotForMe(item, true) }
-    }
-
-    func resetDismissed() {
-        guard let model else { return }
-        Task { await model.resetNotForMe() }
     }
 }
 
@@ -744,8 +707,13 @@ struct TasteProfile {
     }
 
     mutating func add(_ item: BaseItem, weight: Double) {
+        add(vector: Self.vector(for: item), weight: weight)
+    }
+
+    /// `add` with the title's features already worked out (`vector(for:)`).
+    mutating func add(vector v: [String: Double], weight: Double) {
         guard weight != 0 else { return }
-        for (key, value) in Self.vector(for: item) { features[key, default: 0] += value * weight }
+        for (key, value) in v { features[key, default: 0] += value * weight }
     }
 
     mutating func finalize() {
@@ -753,8 +721,11 @@ struct TasteProfile {
     }
 
     func similarity(to item: BaseItem, sameLibraryBoost: Double?) -> Double {
+        similarity(toVector: Self.vector(for: item))
+    }
+
+    func similarity(toVector v: [String: Double]) -> Double {
         guard norm > 0 else { return 0 }
-        let v = Self.vector(for: item)
         let vNorm = sqrt(v.values.reduce(0) { $0 + $1 * $1 })
         guard vNorm > 0 else { return 0 }
         var dot = 0.0
@@ -764,8 +735,11 @@ struct TasteProfile {
 
     /// Leave-one-out: a title in your history is compared with the rest of your taste.
     func similarity(to item: BaseItem, excludingWeight w: Double) -> Double {
-        guard w != 0 else { return similarity(to: item, sameLibraryBoost: nil) }
-        let v = Self.vector(for: item)
+        similarity(toVector: Self.vector(for: item), excludingWeight: w)
+    }
+
+    func similarity(toVector v: [String: Double], excludingWeight w: Double) -> Double {
+        guard w != 0 else { return similarity(toVector: v) }
         let vNorm = sqrt(v.values.reduce(0) { $0 + $1 * $1 })
         guard vNorm > 0 else { return 0 }
         var normSq = norm * norm

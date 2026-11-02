@@ -180,8 +180,8 @@ struct BackupsView: View {
                 } else if backups.isEmpty {
                     Text("No backups yet.").foregroundStyle(.secondary)
                 }
-                ForEach(sorted.indices, id: \.self) { i in
-                    let b = sorted[i]
+                // Sorted once per redraw, not once per row.
+                ForEach(Array(sorted.enumerated()), id: \.offset) { _, b in
                     let path = jsonString(b, "Path") ?? ""
                     VStack(alignment: .leading, spacing: 2) {
                         Text(date(b))
@@ -206,11 +206,17 @@ struct BackupsView: View {
         backups.sorted { (jsonString($0, "DateCreated") ?? "") > (jsonString($1, "DateCreated") ?? "") }
     }
 
-    private func date(_ b: [String: Any]) -> String {
-        guard let raw = jsonString(b, "DateCreated") else { return "Backup" }
+    /// Made once, not twice per row on every redraw.
+    private static let fractionalISO: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let d = f.date(from: raw) ?? ISO8601DateFormatter().date(from: raw)
+        return f
+    }()
+    private static let plainISO = ISO8601DateFormatter()
+
+    private func date(_ b: [String: Any]) -> String {
+        guard let raw = jsonString(b, "DateCreated") else { return "Backup" }
+        let d = Self.fractionalISO.date(from: raw) ?? Self.plainISO.date(from: raw)
         return d.map { $0.formatted(date: .abbreviated, time: .shortened) } ?? raw
     }
 
@@ -300,7 +306,9 @@ struct PluginSettingsView: View {
                 Button("Save") { Keyboard.dismiss(); Task { await save() } }.disabled(!dirty || saving)
             }
         }
-        .task { await load() }
+        // Runs again when the page reappears (back from a nested object's page, another tab):
+        // reloading then would silently throw away unsaved edits.
+        .task { if !dirty { await load() } }
     }
 
     private var dirty: Bool { loaded && Self.json(draft) != original }
@@ -359,7 +367,20 @@ struct JSONValueRow: View {
             .swipeActions { if let onRemove { Button(role: .destructive, action: onRemove) { Label("Remove", systemImage: "trash") } } }
     }
 
-    private var label: String { AllServerSettingsView.humanize(name.prefix(1).uppercased() + name.dropFirst()) }
+    private var label: String { Self.humanize(name.prefix(1).uppercased() + name.dropFirst()) }
+
+    /// "EnableHwDecoding" → "Enable Hw Decoding"; runs of capitals ("URL") stay together.
+    private static func humanize(_ key: String) -> String {
+        var out = ""
+        let chars = Array(key)
+        for (i, c) in chars.enumerated() {
+            if i > 0, c.isUppercase, !(chars[i - 1].isUppercase && (i + 1 >= chars.count || chars[i + 1].isUppercase)) {
+                out.append(" ")
+            }
+            out.append(c)
+        }
+        return out
+    }
 
     @ViewBuilder private var content: some View {
         if let n = value as? NSNumber, CFGetTypeID(n) == CFBooleanGetTypeID() {

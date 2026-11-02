@@ -42,6 +42,7 @@ final class ConfigEditor {
         guard let client else { return }
         loading = true
         defer { loading = false }
+        error = nil   // a pull to refresh that works clears the last failure
         for store in stores {
             do {
                 let data = try await client.send("GET", store.path)
@@ -717,19 +718,14 @@ struct ConfigFieldRow: View {
         case .publishedURIs:
             PublishedURIsEditor(editor: editor, store: field.store, key: field.key)
         case .select(let source, let emptyAs):
+            // MenuPickerRow keeps the title readable next to a long value (e.g. "Yet Another
+            // DeInterlacing Filter (YADIF)"): the value is shortened, the title is never squeezed.
             let options = source(editor)
             let selection = editor.option(field.store, field.key, emptyAs: emptyAs)
+            let current = selection.wrappedValue
             MenuPickerRow(title: field.label, help: field.footer, selection: selection) {
-                if !options.contains(where: { $0.value == selection.wrappedValue }) {
-                    Text(selection.wrappedValue == .null ? "Not set" : "\(selection.wrappedValue.raw)").tag(selection.wrappedValue)
-                }
-                ForEach(options.indices, id: \.self) { i in Text(options[i].label).tag(options[i].value) }
-            }
-        case .choice(let options):
-            let selection = editor.choice(field.store, field.key)
-            MenuPickerRow(title: field.label, help: field.footer, selection: selection) {
-                if !selection.wrappedValue.isEmpty && !options.contains(where: { $0.value == selection.wrappedValue }) {
-                    Text(selection.wrappedValue).tag(selection.wrappedValue)
+                if !options.contains(where: { $0.value == current }) {
+                    Text(current == .null ? "Not set" : "\(current.raw)").tag(current)
                 }
                 ForEach(options.indices, id: \.self) { i in Text(options[i].label).tag(options[i].value) }
             }
@@ -754,14 +750,8 @@ struct ConfigFieldRow: View {
     @ViewBuilder
     private var control: some View {
         switch field.kind {
-        case .toggle:
-            Toggle(field.label, isOn: editor.bool(field.store, field.key))
-        case .int:
-            numberRow(editor.int(field.store, field.key), placeholder: "")
-        case .double:
-            numberRow(editor.double(field.store, field.key), placeholder: "")
-        case .mbps:
-            numberRow(editor.mbps(field.store, field.key), placeholder: "No limit")
+        case .toggle, .select, .switches, .publishedURIs:
+            EmptyView()   // drawn by `body`
         case .number(let spec):
             numberRow(editor.number(field.store, field.key, spec), placeholder: spec.placeholder ?? (spec.nullable ? "Auto" : ""))
         case .text:
@@ -786,17 +776,6 @@ struct ConfigFieldRow: View {
                     .lineLimit(3...10).font(.callout.monospaced())
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
             }
-        case .list:
-            VStack(alignment: .leading, spacing: 4) {
-                Text(field.label).font(.subheadline)
-                TextField("One per line", text: editor.list(field.store, field.key), axis: .vertical)
-                    .lineLimit(2...10).font(.callout.monospaced())
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
-            }
-        case .choice, .select:
-            EmptyView()
-        case .switches:
-            EmptyView()
         case .tags(let numeric, let placeholder):
             TagsEditor(label: field.label, placeholder: placeholder, numeric: numeric,
                        values: editor.tags(field.store, field.key, numeric: numeric))
@@ -816,8 +795,6 @@ struct ConfigFieldRow: View {
             Label(field.label, systemImage: warn ? "exclamationmark.triangle.fill" : "info.circle")
                 .font(.footnote)
                 .foregroundStyle(warn ? Color.orange : Color.secondary)
-        case .publishedURIs:
-            PublishedURIsEditor(editor: editor, store: field.store, key: field.key)
         case .splash:
             SplashImageEditor()
         }
@@ -1122,85 +1099,5 @@ struct ServerPathPicker: View {
         } catch {
             self.error = error.localizedDescription
         }
-    }
-}
-
-/// Every key of every configuration object, typed by its value (so nothing on the server is
-/// out of reach, whatever its version).
-struct AllServerSettingsView: View {
-    @Environment(AppModel.self) private var model
-    @State private var editor = ConfigEditor()
-    @State private var search = ""
-
-    var body: some View {
-        Form {
-            if let error = editor.error { Section { Text(error).foregroundStyle(.red).font(.footnote) } }
-            ForEach(ConfigStore.allCases) { store in
-                let fields = Self.fields(for: store, in: editor.values[store] ?? [:])
-                    .filter { search.isEmpty || $0.label.localizedCaseInsensitiveContains(search) || $0.key.localizedCaseInsensitiveContains(search) }
-                if !fields.isEmpty {
-                    Section(store.title) {
-                        ForEach(fields) { ConfigFieldRow(field: $0, editor: editor) }
-                    }
-                }
-            }
-            if let note = editor.savedNote {
-                Section { Label(note, systemImage: "checkmark.circle.fill").foregroundStyle(.green) }
-            }
-        }
-        .searchable(text: $search, prompt: "Search settings")
-        .navigationTitle("All settings")
-        .keyboardDoneBar()
-        .toolbar {
-            ToolbarItem(placement: .confirmationAction) {
-                Button("Save") {
-                    Keyboard.dismiss()
-                    Task { await editor.save(client: model.client) }
-                }
-                .disabled(editor.dirty.isEmpty || editor.saving)
-            }
-        }
-        .overlay { if editor.loading && editor.values.isEmpty { ProgressView() } }
-        .task { await editor.load(ConfigStore.allCases, client: model.client) }
-    }
-
-    /// Simple values become editable fields; nested objects one level deep too.
-    static func fields(for store: ConfigStore, in object: [String: Any]) -> [ConfigField] {
-        var out: [ConfigField] = []
-        for key in object.keys.sorted() {
-            let value = object[key]!
-            if let nested = value as? [String: Any] {
-                for sub in nested.keys.sorted() {
-                    if let kind = kind(for: nested[sub]!) {
-                        out.append(ConfigField(store, "\(key).\(sub)", "\(humanize(key)) › \(humanize(sub))", kind))
-                    }
-                }
-            } else if let kind = kind(for: value) {
-                out.append(ConfigField(store, key, humanize(key), kind))
-            }
-        }
-        return out
-    }
-
-    private static func kind(for value: Any) -> ConfigField.Kind? {
-        if let n = value as? NSNumber {
-            if CFGetTypeID(n) == CFBooleanGetTypeID() { return .toggle }
-            return CFNumberIsFloatType(n as CFNumber) ? .double : .int
-        }
-        if value is String { return .text }
-        if let array = value as? [Any], array.allSatisfy({ $0 is String || $0 is NSNumber }) { return .list }
-        return nil   // lists of objects (repositories, tuners…) have their own screens
-    }
-
-    static func humanize(_ key: String) -> String {
-        var out = ""
-        let chars = Array(key)
-        for (i, c) in chars.enumerated() {
-            if i > 0, c.isUppercase, !(chars[i - 1].isUppercase && (i + 1 >= chars.count || chars[i + 1].isUppercase)) {
-                out.append(" ")
-            }
-            out.append(c)
-        }
-        return out
     }
 }

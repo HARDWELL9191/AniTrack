@@ -149,7 +149,6 @@ struct LibraryFilters: Equatable {
 struct LibraryView: View {
     @Environment(AppModel.self) private var model
     let library: BaseItem
-    var initialSort: LibrarySort = .name
     /// Restricts to certain types (e.g. boxsets of a library).
     var itemTypes: [ItemKind]? = nil
 
@@ -157,14 +156,32 @@ struct LibraryView: View {
     @State private var reloadTask: Task<Void, Never>?
     @State private var total = 0
     @State private var isLoading = false
-    @State private var sort: LibrarySort = .name
-    @State private var descending = false
+    @State private var sort: LibrarySort
+    @State private var descending: Bool
     @State private var filters = LibraryFilters()
     @State private var available = QueryFiltersLegacy()
     @State private var showFilters = false
     @State private var jumpTask: Task<Void, Never>?
     @State private var didInit = false
     @State private var generation = 0
+
+    /// The sort and its direction start from `initialSort` (no change to react to, so the first
+    /// load happens once).
+    init(library: BaseItem, initialSort: LibrarySort = .name, itemTypes: [ItemKind]? = nil) {
+        self.library = library
+        self.itemTypes = itemTypes
+        _sort = State(initialValue: initialSort)
+        _descending = State(initialValue: initialSort.defaultDescending)
+    }
+
+    /// Everything the loaded list depends on: one change (a new sort also sets its direction)
+    /// loads the library once.
+    private struct ReloadKey: Equatable {
+        let sort: LibrarySort
+        let descending: Bool
+        let filters: LibraryFilters
+    }
+    private var reloadKey: ReloadKey { ReloadKey(sort: sort, descending: descending, filters: filters) }
 
     private var layout: LibraryLayout { model.settings.layout(for: library.id) }
 
@@ -214,16 +231,12 @@ struct LibraryView: View {
         .task {
             guard !didInit else { return }
             didInit = true
-            sort = initialSort
-            descending = initialSort.defaultDescending
             scheduleReload()
             if let client = model.client {
                 available = (try? await client.filters(parentId: library.id, types: types)) ?? QueryFiltersLegacy()
             }
         }
-        .onChange(of: sort) { _, new in descending = new.defaultDescending; scheduleReload() }
-        .onChange(of: descending) { _, _ in scheduleReload() }
-        .onChange(of: filters) { _, _ in scheduleReload() }
+        .onChange(of: reloadKey) { _, _ in scheduleReload() }
         .sheet(isPresented: $showFilters) {
             FilterSheet(filters: $filters, available: available).presentationDetents([.medium, .large])
         }
@@ -281,7 +294,8 @@ struct LibraryView: View {
                 showFilters = true
             }
             Menu {
-                Picker("Sort by", selection: $sort) {
+                // Picking a sort also sets its usual direction, in the same change.
+                Picker("Sort by", selection: Binding(get: { sort }, set: { sort = $0; descending = $0.defaultDescending })) {
                     ForEach(LibrarySort.allCases) { Text($0.label).tag($0) }
                 }
                 Picker("Order", selection: $descending) {
@@ -300,6 +314,7 @@ struct LibraryView: View {
             } label: {
                 Image(systemName: "arrow.up.arrow.down.circle")
             }
+            .accessibilityLabel("Sort and layout")
         }
     }
 
@@ -326,8 +341,7 @@ struct LibraryView: View {
         return q
     }
 
-    /// Changes that come together (a new sort also sets its direction; the first load sets both)
-    /// load the library once, not two or three times.
+    /// Starts a fresh first page, replacing a reload that hasn't started yet.
     private func scheduleReload() {
         reloadTask?.cancel()
         reloadTask = Task {
@@ -395,12 +409,14 @@ struct LibraryView: View {
     }
 
     private func loadMoreIfNeeded(_ item: BaseItem) {
-        guard !isLoading, items.count < total, let idx = items.firstIndex(where: { $0.id == item.id }),
-              idx >= items.count - 20, let client = model.client else { return }
+        // Only the last 20 cards trigger the next page (checks 20 ids, not the whole list).
+        guard !isLoading, items.count < total, items.suffix(20).contains(where: { $0.id == item.id }),
+              let client = model.client else { return }
         isLoading = true
         let gen = generation
         Task {
-            defer { isLoading = false }
+            // A reload started meanwhile owns isLoading now (and replaces the list).
+            defer { if gen == generation { isLoading = false } }
             if let page = try? await client.items(query(start: items.count)), gen == generation {
                 let known = Set(items.map(\.id))
                 items += (page.items ?? []).filter { !known.contains($0.id) }
@@ -580,6 +596,7 @@ struct GenreItemsView: View {
     let genre: String
     let parentId: String?
     @State private var items: [BaseItem] = []
+    @State private var loaded = false
 
     var body: some View {
         ScrollView {
@@ -593,7 +610,7 @@ struct GenreItemsView: View {
         }
         .navigationTitle(genre)
         .task {
-            guard let client = model.client else { return }
+            guard !loaded, let client = model.client else { return }
             var q = JellyfinClient.ItemQuery()
             q.parentId = parentId
             q.genres = [genre]
@@ -601,7 +618,10 @@ struct GenreItemsView: View {
             q.sortBy = ["CommunityRating", "SortName"]
             q.sortOrder = "Descending"
             q.limit = 300
-            items = (try? await client.items(q).items) ?? []
+            let result = try? await client.items(q)
+            guard !Task.isCancelled else { return }
+            items = result?.items ?? []
+            loaded = true
         }
     }
 }
@@ -609,6 +629,7 @@ struct GenreItemsView: View {
 struct FavoritesView: View {
     @Environment(AppModel.self) private var model
     @State private var groups: [LatestShelf] = []
+    @State private var loaded = false
 
     var body: some View {
         ScrollView {
@@ -617,7 +638,7 @@ struct FavoritesView: View {
                     Shelf(title: group.library.displayName, items: group.items,
                           landscape: group.library.id == "fav-Episodes")
                 }
-                if groups.isEmpty {
+                if loaded && groups.isEmpty {
                     ContentUnavailableView("No favourites", systemImage: "heart",
                                            description: Text("Long-press anything and choose Add to favourites."))
                 }
@@ -627,19 +648,29 @@ struct FavoritesView: View {
         .navigationTitle("Favourites")
         .task(id: model.contentVersion) {
             guard let client = model.client else { return }
-            var out: [LatestShelf] = []
-            for (title, kind) in [("Movies", ItemKind.movie), ("Shows", .series), ("Episodes", .episode),
-                                  ("Collections", .boxSet), ("People", .person)] {
-                var q = JellyfinClient.ItemQuery()
-                q.filters = ["IsFavorite"]
-                q.includeItemTypes = [kind]
-                q.limit = 100
-                let items = (try? await client.items(q).items) ?? []
-                if !items.isEmpty {
-                    out.append(LatestShelf(library: BaseItem(id: "fav-\(title)", name: title), items: items))
+            let kinds: [(String, ItemKind)] = [("Movies", .movie), ("Shows", .series), ("Episodes", .episode),
+                                                ("Collections", .boxSet), ("People", .person)]
+            // The five lists load together, then show in this order.
+            var found: [Int: [BaseItem]] = [:]
+            await withTaskGroup(of: (Int, [BaseItem]).self) { group in
+                for (i, entry) in kinds.enumerated() {
+                    group.addTask {
+                        var q = JellyfinClient.ItemQuery()
+                        q.filters = ["IsFavorite"]
+                        q.includeItemTypes = [entry.1]
+                        q.limit = 100
+                        return (i, (try? await client.items(q).items) ?? [])
+                    }
                 }
+                for await (i, items) in group { found[i] = items }
             }
-            groups = out
+            guard !Task.isCancelled else { return }
+            groups = kinds.enumerated().compactMap { pair -> LatestShelf? in
+                guard let items = found[pair.offset], !items.isEmpty else { return nil }
+                let title = pair.element.0
+                return LatestShelf(library: BaseItem(id: "fav-\(title)", name: title), items: items)
+            }
+            loaded = true
         }
     }
 }
@@ -647,6 +678,7 @@ struct FavoritesView: View {
 struct CollectionsBrowser: View {
     @Environment(AppModel.self) private var model
     @State private var items: [BaseItem] = []
+    @State private var loaded = false
 
     var body: some View {
         ScrollView {
@@ -658,14 +690,20 @@ struct CollectionsBrowser: View {
             }
             .padding()
         }
-        .overlay { if items.isEmpty { ContentUnavailableView("No collections", systemImage: "square.stack") } }
+        .overlay {
+            if !loaded { ProgressView() }
+            else if items.isEmpty { ContentUnavailableView("No collections", systemImage: "square.stack") }
+        }
         .navigationTitle("Collections")
         .task {
-            guard let client = model.client else { return }
+            guard !loaded, let client = model.client else { return }
             var q = JellyfinClient.ItemQuery()
             q.includeItemTypes = [.boxSet]
             q.limit = 500
-            items = (try? await client.items(q).items) ?? []
+            let result = try? await client.items(q)
+            guard !Task.isCancelled else { return }
+            items = result?.items ?? []
+            loaded = true
         }
     }
 }
@@ -760,29 +798,35 @@ private struct FileRow: View {
     var showsPlay = true
 
     var body: some View {
-        let data = model.userData(for: item)
-        Button {
-            if showsPlay { model.play(item) }
-        } label: {
-            HStack(spacing: 12) {
-                RemoteImage(url: model.client?.landscapeURL(item, width: 300), placeholderSymbol: "film")
-                    .frame(width: 96, height: 54)
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    .overlay(alignment: .bottom) {
-                        if let p = data?.playedPercentage, p > 0, p < 100 { ProgressBar(value: p / 100).padding(4) }
-                    }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(item.displayName).font(.subheadline.weight(.semibold)).lineLimit(2)
-                    Text([item.runtimeSeconds.map(Fmt.runtime), item.container?.uppercased()].compactMap { $0 }.joined(separator: " · "))
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 0)
-                if data?.played ?? false { Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.accentGradient) }
-                if showsPlay { Image(systemName: "play.circle.fill").font(.title2).foregroundStyle(Theme.accentGradient) }
-            }
-            .contentShape(Rectangle())
+        // Only a playable row is a button: a plain button inside the NavigationLink of a
+        // non-playable file took the tap, and the file's page never opened.
+        if showsPlay {
+            Button { model.play(item) } label: { row }
+                .buttonStyle(.plain)
+                .itemActions(item)
+        } else {
+            row.itemActions(item)
         }
-        .buttonStyle(.plain)
-        .itemActions(item)
+    }
+
+    private var row: some View {
+        let data = model.userData(for: item)
+        return HStack(spacing: 12) {
+            RemoteImage(url: model.client?.landscapeURL(item, width: 300), placeholderSymbol: "film")
+                .frame(width: 96, height: 54)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(alignment: .bottom) {
+                    if let p = data?.playedPercentage, p > 0, p < 100 { ProgressBar(value: p / 100).padding(4) }
+                }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.displayName).font(.subheadline.weight(.semibold)).lineLimit(2)
+                Text([item.runtimeSeconds.map(Fmt.runtime), item.container?.uppercased()].compactMap { $0 }.joined(separator: " · "))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+            if data?.played ?? false { Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.accentGradient) }
+            if showsPlay { Image(systemName: "play.circle.fill").font(.title2).foregroundStyle(Theme.accentGradient) }
+        }
+        .contentShape(Rectangle())
     }
 }

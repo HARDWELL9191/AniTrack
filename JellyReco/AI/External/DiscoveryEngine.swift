@@ -43,6 +43,8 @@ final class DiscoveryEngine {
     @ObservationIgnored private var idMap: [String: Int] = [:]      // library item id → TMDB id
     @ObservationIgnored private var idMapLoaded = false
     @ObservationIgnored private var tasks: [String: Task<Void, Never>] = [:]
+    /// Bumped on account change: work started for the previous account must not land here.
+    @ObservationIgnored private var epoch = 0
 
     func attach(model: AppModel) { self.model = model }
     #if DEBUG
@@ -53,6 +55,10 @@ final class DiscoveryEngine {
     func reset() {
         for t in tasks.values { t.cancel() }
         tasks = [:]
+        epoch &+= 1
+        // Builds still running for the old account no longer own their library's spinner,
+        // status or error message.
+        for key in generation.keys { generation[key, default: 0] += 1 }
         picks = [:]
         errors = [:]
         status = [:]
@@ -105,9 +111,28 @@ final class DiscoveryEngine {
         _ = version
         guard let model else { return [] }
         let hidden = model.externalHidden
+        // Picks saved earlier (on this phone, or before the library was last read) are checked
+        // again against what's on the server now.
+        let owned = ownedIndex(exact: false)
         return (picks[sourceId] ?? []).filter { p in
-            !hidden.contains(p.id) && (genre == nil || p.title.genres.contains(genre!))
+            !hidden.contains(p.id) && (genre == nil || p.title.genres.contains(genre!)) && !(owned?.contains(p.title) ?? false)
         }
+    }
+
+    @ObservationIgnored private var owned: (revision: Int, mapped: Int, index: OwnedIndex)?
+
+    /// Everything on the server, indexed for "already yours" checks. Built again only when the
+    /// library snapshot changes (or, with `exact`, when more TMDB ids of your titles are known):
+    /// indexing every title used to be redone on every build and every "More like this".
+    private func ownedIndex(exact: Bool) -> OwnedIndex? {
+        guard let reco = model?.reco else { return nil }
+        let revision = reco.libraryRevision   // read here, so For You updates when the library does
+        if let owned, owned.revision == revision, !exact || owned.mapped == idMap.count { return owned.index }
+        let items = reco.libraryItems
+        guard !items.isEmpty else { return nil }
+        let index = OwnedIndex(items: items, idMap: idMap)
+        owned = (revision, idMap.count, index)
+        return index
     }
 
     func genres(for sourceId: String) -> [String] {
@@ -120,15 +145,20 @@ final class DiscoveryEngine {
     /// rebuild from TMDB on every launch, 100+ requests); pull down on For You for fresh ones.
     func ensureBuilt(_ sourceId: String) async {
         if picks[sourceId] == nil || (picks[sourceId]?.isEmpty ?? true) {
-            if let saved = await DiskCache.loadInBackground([ExternalPick].self, name: cacheName(sourceId)), !saved.isEmpty {
+            let started = epoch
+            let name = cacheName(sourceId)
+            if let saved = await DiskCache.loadInBackground([ExternalPick].self, name: name), !saved.isEmpty {
+                guard epoch == started else { return }   // the account changed meanwhile
                 picks[sourceId] = saved
                 version &+= 1
-                if let at = await DiskCache.loadInBackground(Date.self, name: cacheName(sourceId) + "-at"),
-                   Date().timeIntervalSince(at) < 12 * 3600 {
+                let at = await DiskCache.loadInBackground(Date.self, name: name + "-at")
+                guard epoch == started else { return }
+                if let at, Date().timeIntervalSince(at) < 12 * 3600 {
                     builtAt[sourceId] = at
                     return
                 }
             }
+            guard epoch == started else { return }
             await build(sourceId, genre: nil)
         }
     }
@@ -181,6 +211,9 @@ final class DiscoveryEngine {
             fail(model.reco.lastError.map { "Couldn't read your library: \($0)" } ?? "Couldn't read your library from the server. Pull down to try again.")
             return
         }
+        // A fresh look at the server when the last one is old, so new titles there are known as
+        // yours (picks are checked against it again when it arrives).
+        if genre == nil { model.reco.refreshIfStale() }
         await loadIdMap()
         step("Connecting to TMDB…")
         do { try await tmdb.loadGenres() } catch {
@@ -290,7 +323,10 @@ final class DiscoveryEngine {
 
         // 3) Never anything you already have, have seen, wished for or rejected.
         step("Removing what you already have…")
-        let owned = OwnedIndex(items: model.reco.libraryItems, idMap: idMap)
+        guard let owned = ownedIndex(exact: true) else {
+            fail("Couldn't read your library from the server. Pull down to try again.")
+            return
+        }
         let hidden = model.externalHidden
         let thisYear = Calendar.current.component(.year, from: Date())
         func allowed(_ t: ExternalTitle) -> Bool {
@@ -420,9 +456,10 @@ final class DiscoveryEngine {
     func moreLike(_ title: ExternalTitle) async -> [ExternalTitle] {
         guard let model, let tmdb = client() else { return [] }
         await loadIdMap()
-        let owned = OwnedIndex(items: model.reco.libraryItems, idMap: idMap)
         let recs = (try? await tmdb.recommendations(tmdbId: title.sourceId, tv: !title.isMovie)) ?? []
-        return recs.filter { !owned.contains($0) && !model.externalHidden.contains($0.id) && !$0.isAdult }
+        let owned = ownedIndex(exact: true)
+        let hidden = model.externalHidden
+        return recs.filter { !(owned?.contains($0) ?? false) && !hidden.contains($0.id) && !$0.isAdult }
     }
 
     func details(_ title: ExternalTitle) async -> ExternalTitle {
@@ -433,11 +470,19 @@ final class DiscoveryEngine {
     /// Age ratings found for covers, kept on the phone: each cover used to look its title up on
     /// TMDB again every session (one request per cover, in grids of hundreds).
     @ObservationIgnored private var ages: [String: String]?
+    @ObservationIgnored private var agesLoad: Task<[String: String], Never>?
     @ObservationIgnored private var agesSave: Task<Void, Never>?
 
     func ageRating(_ title: ExternalTitle) async -> String? {
         if let r = title.ageRating { return r }
-        if ages == nil { ages = await DiskCache.loadInBackground([String: String].self, name: "tmdb-ages") ?? [:] }
+        if ages == nil {
+            // One read of the saved ratings for the whole grid (every cover used to read and decode
+            // the file itself, and a late read could drop ratings found meanwhile).
+            let load = agesLoad ?? Task { await DiskCache.loadInBackground([String: String].self, name: "tmdb-ages") ?? [:] }
+            agesLoad = load
+            let loaded = await load.value
+            if ages == nil { ages = loaded }
+        }
         if let hit = ages?[title.id] { return hit }
         guard let found = await details(title).ageRating else { return nil }
         ages?[title.id] = found

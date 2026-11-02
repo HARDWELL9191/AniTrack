@@ -23,7 +23,11 @@ final class LibraryOptionsModel {
     var error: String?
     private(set) var saving = false
     var savedNote: String?
-    @ObservationIgnored private var baseline: [String: Any]?
+    @ObservationIgnored private var baseline: [String: Any]? {
+        didSet { baselineJSON = baseline.flatMap(Self.json) }
+    }
+    /// `baseline` serialized once, not on every check of `dirty`.
+    @ObservationIgnored private var baselineJSON: Data?
     /// Bumped on every edit so `dirty` is re-evaluated.
     private var revision = 0
 
@@ -45,8 +49,8 @@ final class LibraryOptionsModel {
     var ready: Bool { avail != nil }
     var dirty: Bool {
         _ = revision
-        guard let baseline else { return false }
-        return Self.json(options) != Self.json(baseline)
+        guard baseline != nil else { return false }
+        return Self.json(options) != baselineJSON
     }
 
     func load(client: JellyfinClient?, contentType: String?, isNew: Bool, initial: [String: Any]) async {
@@ -63,6 +67,8 @@ final class LibraryOptionsModel {
             let available = (try JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
             if cultures.isEmpty { cultures = await Self.list(client, "/Localization/Cultures") }
             if countries.isEmpty { countries = await Self.list(client, "/Localization/Countries") }
+            // A load for another content type replaced this one (the type was changed meanwhile).
+            if Task.isCancelled { return }
             avail = available
             fillExplicitLists()
             baseline = options
@@ -271,20 +277,18 @@ struct LibraryOptionsSections: View {
         }
 
         Section("Metadata") {
-            Picker("Preferred download language", selection: model.string("PreferredMetadataLanguage")) {
+            // Long language and country names: MenuPickerRow shortens the value, never the title.
+            MenuPickerRow(title: "Preferred download language", selection: model.string("PreferredMetadataLanguage")) {
                 Text("Server default").tag("")
                 ForEach(Array(cultureOptions(threeLetter: false).enumerated()), id: \.offset) { _, c in Text(c.name).tag(c.code) }
             }
-            .pickerStyle(.menu).tint(Color.secondary)
-            Picker("Country/region", selection: model.string("MetadataCountryCode")) {
+            MenuPickerRow(title: "Country/region", selection: model.string("MetadataCountryCode")) {
                 Text("Server default").tag("")
                 ForEach(Array(countryOptions.enumerated()), id: \.offset) { _, c in Text(c.name).tag(c.code) }
             }
-            .pickerStyle(.menu).tint(Color.secondary)
-            Picker("Automatically refresh metadata from the internet", selection: refreshDays) {
+            MenuPickerRow(title: "Automatically refresh metadata from the internet", selection: refreshDays) {
                 ForEach(refreshChoices, id: \.self) { d in Text(d == 0 ? "Never" : "Every \(d) days").tag(d) }
             }
-            .pickerStyle(.menu).tint(Color.secondary)
             if embedded {
                 row("Prefer embedded titles over filenames", "Uses the title stored inside the file, if there is one.", model.bool("EnableEmbeddedTitles"))
                 if (model.value("EnableEmbeddedTitles") as? Bool) == true {
@@ -320,13 +324,12 @@ struct LibraryOptionsSections: View {
 
         if subtitles {
             Section("Subtitles") {
-                Picker("Allow embedded subtitles", selection: model.string("AllowEmbeddedSubtitles", default: "AllowAll")) {
+                MenuPickerRow(title: "Allow embedded subtitles", selection: model.string("AllowEmbeddedSubtitles", default: "AllowAll")) {
                     Text("Allow all").tag("AllowAll")
                     Text("Allow text").tag("AllowText")
                     Text("Allow image").tag("AllowImage")
                     Text("Allow none").tag("AllowNone")
                 }
-                .pickerStyle(.menu).tint(Color.secondary)
                 NavigationLink {
                     LanguageChecklist(model: model, cultures: cultureOptions(threeLetter: true))
                 } label: {

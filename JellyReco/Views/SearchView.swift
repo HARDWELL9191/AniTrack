@@ -53,7 +53,9 @@ struct SearchView: View {
             .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Movies, shows, episodes, people")
             .task(id: "\(query)|\(searchGenre ?? "")") {
                 let term = query.trimmingCharacters(in: .whitespaces)
-                guard !term.isEmpty else { return }
+                guard !term.isEmpty else { isSearching = false; return }
+                // Searching from the first keystroke: "No results" doesn't flash during the pause.
+                isSearching = true
                 try? await Task.sleep(nanoseconds: 300_000_000)   // debounce typing
                 guard !Task.isCancelled else { return }
                 await search(term)
@@ -133,20 +135,24 @@ struct SearchView: View {
     }
 
     private func search(_ term: String) async {
-        guard let client = model.client else { return }
-        isSearching = true
-        defer { isSearching = false }
+        guard let client = model.client else { isSearching = false; return }
         let g = searchGenre
         async let m = client.search(term, types: [.movie], genre: g)
         async let s = client.search(term, types: [.series], genre: g)
         async let e = client.search(term, types: [.episode], limit: 30, genre: g)
         async let c = client.search(term, types: [.boxSet], limit: 20, genre: g)
         async let p = client.searchPeople(term)
-        movies = (try? await m) ?? []
-        shows = (try? await s) ?? []
-        episodes = (try? await e) ?? []
-        collections = (try? await c) ?? []
-        people = (try? await p) ?? []
+        let found = (movies: (try? await m) ?? [], shows: (try? await s) ?? [], episodes: (try? await e) ?? [],
+                     collections: (try? await c) ?? [], people: (try? await p) ?? [])
+        // A search replaced by newer typing (its requests cancelled) must not blank the results
+        // or end the "searching" state of the newer one.
+        guard !Task.isCancelled else { return }
+        movies = found.movies
+        shows = found.shows
+        episodes = found.episodes
+        collections = found.collections
+        people = found.people
+        isSearching = false
     }
 
     private func loadGenres() async {

@@ -543,8 +543,9 @@ struct NewUserSheet: View {
                     Button("Create") {
                         struct Body: Encodable { var name: String; var password: String? }
                         Task {
+                            guard let client = model.client else { return }   // signed out meanwhile
                             do {
-                                let _: UserDto = try await model.client!.post("/Users/New", json: Body(name: name, password: password.isEmpty ? nil : password))
+                                let _: UserDto = try await client.post("/Users/New", json: Body(name: name, password: password.isEmpty ? nil : password))
                                 await reload()
                                 dismiss()
                             } catch { model.report(error) }
@@ -631,7 +632,9 @@ struct UserAdminDetail: View {
                 Button("Save") { Keyboard.dismiss(); Task { await save() } }.disabled(!dirty || saving)
             }
         }
-        .task { await load() }
+        // Runs again when the page reappears (another tab, the app back from the background):
+        // reloading then would silently throw away unsaved edits.
+        .task { if !dirty { await load() } }
         .confirmationDialog("Delete \(user.name ?? "this user")?", isPresented: $confirmDelete, titleVisibility: .visible) {
             Button("Delete", role: .destructive) {
                 Task {
@@ -680,14 +683,11 @@ struct UserAdminDetail: View {
             toggle("Force transcoding of remote media sources such as Live TV", "ForceRemoteSourceTranscoding")
             number("Internet streaming bitrate limit (Mbps)", "RemoteClientBitrateLimit", min: 0, scale: 1_000_000,
                    help: "Overrides the server's limit (Server settings → Streaming). 0 = no limit.")
-            VStack(alignment: .leading, spacing: 4) {
-                Picker("SyncPlay access", selection: text("SyncPlayAccess", default: "CreateAndJoinGroups")) {
-                    Text("Allow creating and joining groups").tag("CreateAndJoinGroups")
-                    Text("Allow joining groups").tag("JoinGroups")
-                    Text("No access").tag("None")
-                }
-                .pickerStyle(.menu).tint(Color.secondary)
-                Text("Watching together in sync with other devices.").font(.caption).foregroundStyle(.secondary)
+            MenuPickerRow(title: "SyncPlay access", help: "Watching together in sync with other devices.",
+                          selection: text("SyncPlayAccess", default: "CreateAndJoinGroups")) {
+                Text("Allow creating and joining groups").tag("CreateAndJoinGroups")
+                Text("Allow joining groups").tag("JoinGroups")
+                Text("No access").tag("None")
             }
         }
         Section("Allow media deletion from") {
@@ -746,11 +746,11 @@ struct UserAdminDetail: View {
 
     @ViewBuilder private var parental: some View {
         Section {
-            Picker("Highest allowed rating", selection: ratingSelection) {
+            // Grouped ratings ("PG-13/TV-14/…") can be long: MenuPickerRow keeps the title readable.
+            MenuPickerRow(title: "Highest allowed rating", selection: ratingSelection) {
                 Text("No limit").tag(-1)
                 ForEach(ratings.indices, id: \.self) { i in Text(ratings[i].label).tag(i) }
             }
-            .pickerStyle(.menu).tint(Color.secondary)
         } header: { Text("Maximum allowed parental rating") } footer: { Text("Titles rated higher are hidden from this user.") }
         Section("Block items with no or unrecognized rating") {
             ForEach(Self.unrated, id: \.0) { t in Toggle(t.1, isOn: member("BlockUnratedItems", t.0)) }
@@ -818,12 +818,8 @@ struct UserAdminDetail: View {
     }
 
     private func picker(_ label: String, _ key: String, _ options: [Named], help: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Picker(label, selection: text(key)) {
-                ForEach(options, id: \.self) { Text($0.name).tag($0.id) }
-            }
-            .pickerStyle(.menu).tint(Color.secondary)
-            Text(help).font(.caption).foregroundStyle(.secondary)
+        MenuPickerRow(title: label, help: help, selection: text(key)) {
+            ForEach(options, id: \.self) { Text($0.name).tag($0.id) }
         }
     }
 
@@ -1023,7 +1019,7 @@ struct DevicesView: View {
         List {
             ForEach(devices) { d in
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(d.customName?.isEmpty == false ? d.customName! : (d.name ?? "Device")).font(.headline)
+                    Text(d.customName.flatMap { $0.isEmpty ? nil : $0 } ?? d.name ?? "Device").font(.headline)
                     Text([d.appName, d.appVersion, d.lastUserName].compactMap { $0 }.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary)
                     if let last = d.dateLastActivated { Text("Last used \(last.formatted(.relative(presentation: .named)))").font(.caption2).foregroundStyle(.tertiary) }
                 }
@@ -1139,6 +1135,9 @@ struct LogTextView: View {
     @Environment(AppModel.self) private var model
     let name: String
     @State private var text = ""
+    /// The log split once on load, not on every keystroke in the filter.
+    @State private var lines: [Substring] = []
+    @State private var loading = true
     @State private var filter = ""
     @State private var errorsOnly = false
 
@@ -1157,15 +1156,20 @@ struct LogTextView: View {
             ToolbarItem { Toggle(isOn: $errorsOnly) { Image(systemName: "exclamationmark.triangle") } }
             ToolbarItem { ShareLink(item: text) }
         }
-        .overlay { if text.isEmpty { ProgressView() } }
+        // Only while loading: a failed or empty log no longer spins forever.
+        .overlay { if loading { ProgressView() } }
         .task {
+            guard text.isEmpty else { return }
+            loading = true
+            defer { loading = false }
             guard let data = try? await model.client?.send("GET", "/System/Logs/Log", query: ["name": name], timeout: 60) else { return }
             text = String(decoding: data, as: UTF8.self)
+            lines = text.split(separator: "\n", omittingEmptySubsequences: false)
         }
     }
 
     private var shown: String {
-        var lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        var lines = self.lines
         if errorsOnly { lines = lines.filter { $0.contains("[ERR]") || $0.contains("[WRN]") || $0.contains("[FTL]") } }
         if !filter.isEmpty { lines = lines.filter { $0.localizedCaseInsensitiveContains(filter) } }
         return lines.suffix(4000).joined(separator: "\n")
@@ -1177,6 +1181,7 @@ struct ActivityLogView: View {
     @State private var entries: [ActivityLogEntry] = []
     @State private var total = 0
     @State private var usersOnly = false
+    @State private var loadingMore = false
 
     var body: some View {
         List {
@@ -1222,9 +1227,14 @@ struct ActivityLogView: View {
 
     private func load(more: Bool) async {
         struct Page: Codable { var items: [ActivityLogEntry]?; var totalRecordCount: Int? }
+        // The last row can appear again before its page arrives: fetch each page once.
+        if more { guard !loadingMore else { return }; loadingMore = true }
+        defer { if more { loadingMore = false } }
+        let filter = usersOnly
         var q: [String: Any?] = ["startIndex": more ? entries.count : 0, "limit": 50]
-        if usersOnly { q["hasUserId"] = true }
-        guard let page = try? await model.client?.get("/System/ActivityLog/Entries", q, as: Page.self) else { return }
+        if filter { q["hasUserId"] = true }
+        guard let page = try? await model.client?.get("/System/ActivityLog/Entries", q, as: Page.self),
+              filter == usersOnly else { return }   // the filter changed meanwhile
         entries = (more ? entries : []) + (page.items ?? [])
         total = page.totalRecordCount ?? entries.count
     }

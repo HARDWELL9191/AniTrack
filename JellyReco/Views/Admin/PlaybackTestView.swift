@@ -127,17 +127,21 @@ final class PlaybackTester {
 
     func start(model: AppModel, libraries: [BaseItem], full: Bool) {
         guard let client = model.client else { return }
+        task?.cancel()
         failures = []
         done = 0
         passed = 0
+        total = 0
         isRunning = true
         UIApplication.shared.isIdleTimerDisabled = true
         task = Task {
             let items = await collect(client: client, libraries: libraries, full: full)
+            // After Stop, `cancel()` has already reset everything, and a new run may own the player.
+            guard !Task.isCancelled else { return }
             total = items.count
             for item in items {
-                if Task.isCancelled { break }
                 await test(item, client: client)
+                if Task.isCancelled { return }
                 done += 1
             }
             player.stop()
@@ -201,18 +205,24 @@ final class PlaybackTester {
             }
         }
 
-        // Wait for the first frames (or a failure).
-        guard await waitUntilPlaying(timeout: 20) else {
+        // Wait for the first frames (or a failure). Stopped meanwhile: not a playback problem.
+        let started = await waitUntilPlaying(timeout: 20)
+        if Task.isCancelled { return }
+        guard started else {
             let reason = player.state.error?.message ?? (log.last ?? "Didn't start within 20 s")
             failures.append(Failure(title: title, format: signature(item), problems: ["Won't play: \(reason)"] + log.suffix(3)))
             player.stop()
             return
         }
 
+        // After Stop the sleeps return at once: leave the player alone (a new run may be using it)
+        // and record nothing.
         for track in player.audioTracks {
             log = []
             player.selectTrack(track.id)
-            if !(await advances(seconds: 1.5)) || failed() {
+            let advanced = await advances(seconds: 1.5)
+            if Task.isCancelled { return }
+            if !advanced || failed() {
                 problems.append("Audio \(track.mpvID) (\(track.codec ?? "?") \(track.language ?? "")): \(log.last ?? "no sound/stalled")")
             }
         }
@@ -220,6 +230,7 @@ final class PlaybackTester {
             log = []
             player.selectSubtitle(track.id)
             try? await Task.sleep(nanoseconds: 1_200_000_000)
+            if Task.isCancelled { return }
             if failed() || player.lastError != nil {
                 problems.append("Subtitle \(track.mpvID) (\(track.codec ?? "?") \(track.language ?? "")): \(player.lastError?.message ?? log.last ?? "failed")")
                 player.clearLastError()

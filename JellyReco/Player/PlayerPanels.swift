@@ -56,7 +56,6 @@ struct ChaptersStrip: View {
     }
 }
 
-/// The season's episodes in a row above the timeline.
 /// Episodes, as a panel that opens on the right of the screen: a vertical list (thumbnail, number,
 /// title, length, progress, watched), the playing episode marked and scrolled into view, and a
 /// season menu for the other seasons of the show.
@@ -116,11 +115,15 @@ struct EpisodesStrip: View {
         .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
         .task {
             guard let client = model.client, let sid = controller.item.seriesId else { loading = false; return }
-            seasonId = controller.item.seasonId
             seasons = ((try? await client.seasons(seriesId: sid)) ?? []).filter { $0.locationType != "Virtual" }
         }
         .task(id: seasonId) {
             guard let client = model.client, let sid = controller.item.seriesId else { return }
+            // First the playing episode's season (no season yet would load the whole series first).
+            if seasonId == nil, let current = controller.item.seasonId {
+                seasonId = current
+                return
+            }
             loading = true
             let list = (try? await client.episodes(seriesId: sid, seasonId: seasonId)) ?? []
             episodes = list.filter { $0.locationType != "Virtual" }

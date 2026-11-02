@@ -21,9 +21,11 @@ struct ItemDetailView: View {
     @State private var subtitleIndex: Int?
     @State private var expanded = false
     @State private var showMediaInfo = false
-    @State private var loadError: String?
+    /// The item and content version the page last loaded completely.
+    @State private var loadedKey: String?
 
     private var current: BaseItem { detail ?? item }
+    private var loadKey: String { "\(item.id)#\(model.contentVersion)" }
 
     var body: some View {
         ScrollView {
@@ -54,6 +56,7 @@ struct ItemDetailView: View {
                         Image(systemName: model.isOnMyList(current) ? "bookmark.fill" : "bookmark")
                     }
                     .accessibilityLabel("My List")
+                    .accessibilityAddTraits(model.isOnMyList(current) ? .isSelected : [])
                 }
                 Button {
                     Task { await model.toggleFavorite(current) }
@@ -61,6 +64,8 @@ struct ItemDetailView: View {
                     Image(systemName: model.isFavorite(current) ? "heart.fill" : "heart")
                         .foregroundStyle(model.isFavorite(current) ? Theme.pink : .primary)
                 }
+                .accessibilityLabel("Favourite")
+                .accessibilityAddTraits(model.isFavorite(current) ? .isSelected : [])
                 Menu {
                     Button(model.isPlayed(current) ? "Mark as unwatched" : "Mark as watched",
                            systemImage: model.isPlayed(current) ? "eye.slash" : "checkmark.circle") {
@@ -76,11 +81,18 @@ struct ItemDetailView: View {
                 } label: {
                     Image(systemName: "ellipsis.circle")
                 }
+                .accessibilityLabel("More")
             }
         }
         // Loads again after playback / watched changes elsewhere (contentVersion), so the page
-        // never keeps showing the old "Resume from…" or watched state.
-        .task(id: "\(item.id)#\(model.contentVersion)") { await load() }
+        // never keeps showing the old "Resume from…" or watched state; coming back to the page
+        // (from a person, a genre…) with nothing changed doesn't load it all again.
+        .task(id: loadKey) {
+            guard loadedKey != loadKey else { return }
+            await load()
+        }
+        // Track numbers belong to one version: another version starts from its defaults.
+        .onChange(of: sourceIndex) { _, _ in audioIndex = nil; subtitleIndex = nil }
         .sheet(isPresented: $showMediaInfo) {
             MediaInfoSheet(item: current, sourceIndex: sourceIndex).presentationDetents([.medium, .large])
         }
@@ -118,7 +130,10 @@ struct ItemDetailView: View {
                         }
                         SelectableText(text: current.displayName, style: .title2, weight: .bold, lineLimit: 3)
                     }
-                    SelectableText(text: current.subtitleLine, style: .caption1, color: .secondaryLabel)
+                    let subtitle = current.subtitleLine
+                    if !subtitle.isEmpty {
+                        SelectableText(text: subtitle, style: .caption1, color: .secondaryLabel)
+                    }
                     HStack(spacing: 10) {
                         RatingLabel(item: current)
                         if let m = model.reco.match(for: current) {
@@ -177,6 +192,7 @@ struct ItemDetailView: View {
                         }
                         .buttonStyle(.glass)
                         .accessibilityLabel("Watched")
+                        .accessibilityAddTraits(model.isPlayed(current) ? .isSelected : [])
                     }
                     .controlSize(.large)
                 }
@@ -301,7 +317,8 @@ struct ItemDetailView: View {
                     EpisodeRow(episode: ep)
                 }
             }
-            if episodes.isEmpty && !seasons.isEmpty {
+            // Only while loading: a failed load or an empty season doesn't spin forever.
+            if episodes.isEmpty && episodesLoading {
                 HStack(spacing: 10) {
                     ProgressView()
                     Text("Loading episodes…").foregroundStyle(.secondary)
@@ -335,7 +352,8 @@ struct ItemDetailView: View {
                 Divider()
                 Button(model.isPlayed(selected) ? "Mark \(selected.displayName) unwatched" : "Mark \(selected.displayName) watched",
                        systemImage: model.isPlayed(selected) ? "circle" : "checkmark.circle") {
-                    Task { await model.togglePlayed(selected); await loadEpisodes() }
+                    // togglePlayed bumps contentVersion, which reloads the page and its episodes.
+                    Task { await model.togglePlayed(selected) }
                 }
             }
         } label: {
@@ -409,7 +427,8 @@ struct ItemDetailView: View {
                 Text("Cast & crew").font(.title3.bold()).padding(.horizontal)
                 ScrollView(.horizontal, showsIndicators: false) {
                     LazyHStack(alignment: .top, spacing: 14) {
-                        ForEach(people.prefix(40)) { p in
+                        // By position: one person can be listed twice (director and writer).
+                        ForEach(Array(people.prefix(40).enumerated()), id: \.offset) { _, p in
                             NavigationLink(value: PersonLink(id: p.id, name: p.name ?? "")) {
                                 VStack(spacing: 4) {
                                     RemoteImage(url: model.client?.personImageURL(p), placeholderSymbol: "person.fill")
@@ -417,7 +436,7 @@ struct ItemDetailView: View {
                                         .clipShape(Circle())
                                     Text(p.name ?? "").font(.caption.weight(.semibold)).lineLimit(2)
                                         .multilineTextAlignment(.center)
-                                    Text(p.role?.isEmpty == false ? p.role! : (p.type ?? ""))
+                                    Text(p.role.flatMap { $0.isEmpty ? nil : $0 } ?? p.type ?? "")
                                         .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                                 }
                                 .frame(width: 86)
@@ -460,7 +479,8 @@ struct ItemDetailView: View {
 
     private func infoRow(_ title: String, _ value: String) -> some View {
         GridRow {
-            Text(title).foregroundStyle(.secondary)
+            // The title column never gives up width to a long value (no one-letter-wide column).
+            Text(title).foregroundStyle(.secondary).fixedSize()
             Text(value).textSelection(.enabled)
         }
     }
@@ -485,6 +505,9 @@ struct ItemDetailView: View {
 
     private func load() async {
         guard let client = model.client else { return }
+        let key = loadKey
+        // A different item (the view reused for another page): start from a clean page.
+        if let shown = detail, shown.id != item.id { resetForNewItem() }
         do {
             let full = try await client.item(item.id)
             detail = full
@@ -514,13 +537,26 @@ struct ItemDetailView: View {
                 break
             }
             if [.movie, .series, .episode].contains(full.kind) {
-                extras = (try? await client.specialFeatures(full.id)) ?? []
+                // Extras don't change with watched state: fetched once per page.
+                if extras.isEmpty { extras = (try? await client.specialFeatures(full.id)) ?? [] }
                 // AI-ranked, local only: unwatched titles on your server closest to this one.
                 similar = Array(await model.reco.moreLike(full).prefix(16))
             }
+            if !Task.isCancelled { loadedKey = key }
         } catch {
-            if !AppModel.isCancellation(error) { loadError = error.localizedDescription; model.report(error) }
+            model.report(error)
         }
+    }
+
+    private func resetForNewItem() {
+        detail = nil
+        seasons = []; selectedSeason = nil
+        episodes = []; episodesSeason = nil; episodesLoading = false
+        nextUp = nil
+        similar = []; extras = []; children = []
+        sourceIndex = 0; audioIndex = nil; subtitleIndex = nil
+        expanded = false
+        loadedKey = nil
     }
 
     /// The selected season's episodes. Only the latest selection's answer is shown (switching
@@ -534,7 +570,8 @@ struct ItemDetailView: View {
         episodesLoading = true
         let seriesId = current.kind == .series ? current.id : (current.seriesId ?? current.parentId ?? current.id)
         let eps = (try? await client.episodes(seriesId: seriesId, seasonId: season)) ?? []
-        guard selectedSeason == season else { return }
+        // A cancelled load (the page reloading or going away) keeps what's shown.
+        guard selectedSeason == season, !Task.isCancelled else { return }
         episodesLoading = false
         episodes = eps.filter { (model.user?.configuration?.displayMissingEpisodes ?? false) || $0.locationType != "Virtual" }
     }
@@ -560,6 +597,7 @@ struct EpisodeRow: View {
     var body: some View {
         let data = model.userData(for: episode)
         let hideSpoiler = model.settings.hideSpoilers && !(data?.played ?? false)
+        let overview = episode.plainOverview   // strips HTML: once per render, not three times
         HStack(alignment: .top, spacing: 12) {
             Button { model.play(episode) } label: {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -579,6 +617,7 @@ struct EpisodeRow: View {
                     }
             }
             .buttonStyle(PressStyle())
+            .accessibilityLabel("Play \(episode.displayName)")
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Text(episode.indexNumber.map { "Episode \($0)" } ?? "Episode")
@@ -589,8 +628,8 @@ struct EpisodeRow: View {
                 Text(episode.displayName)
                     .font(.subheadline.weight(.semibold))
                     .lineLimit(2)
-                if (!hideSpoiler || expanded) && !episode.plainOverview.isEmpty {
-                    Text(episode.plainOverview)
+                if (!hideSpoiler || expanded) && !overview.isEmpty {
+                    Text(overview)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(expanded ? nil : 3)
@@ -600,7 +639,7 @@ struct EpisodeRow: View {
         }
         .contentShape(Rectangle())
         .onTapGesture {
-            guard !episode.plainOverview.isEmpty else { return }
+            guard !overview.isEmpty else { return }
             withAnimation(.snappy) { expanded.toggle() }
         }
         .itemActions(episode)
@@ -661,6 +700,7 @@ struct PersonView: View {
     @State private var movies: [BaseItem] = []
     @State private var shows: [BaseItem] = []
     @State private var expanded = false
+    @State private var loaded = false
 
     var body: some View {
         ScrollView {
@@ -689,18 +729,28 @@ struct PersonView: View {
         }
         .navigationTitle(name)
         .navigationBarTitleDisplayMode(.inline)
+        // Once per page (not again when coming back from a title), the three requests together.
         .task {
-            guard let client = model.client else { return }
-            person = try? await client.item(personId)
+            guard !loaded, let client = model.client else { return }
             var q = JellyfinClient.ItemQuery()
             q.personIds = [personId]
             q.sortBy = ["PremiereDate", "ProductionYear", "SortName"]
             q.sortOrder = "Descending"
             q.limit = 200
             q.includeItemTypes = [.movie]
-            movies = (try? await client.items(q).items) ?? []
-            q.includeItemTypes = [.series]
-            shows = (try? await client.items(q).items) ?? []
+            var showsQuery = q
+            showsQuery.includeItemTypes = [.series]
+            async let p = client.item(personId)
+            async let m = client.items(q)
+            async let s = client.items(showsQuery)
+            let fetchedPerson = try? await p
+            let fetchedMovies = (try? await m)?.items ?? []
+            let fetchedShows = (try? await s)?.items ?? []
+            guard !Task.isCancelled else { return }
+            person = fetchedPerson
+            movies = fetchedMovies
+            shows = fetchedShows
+            loaded = true
         }
     }
 }

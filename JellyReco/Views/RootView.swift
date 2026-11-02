@@ -63,7 +63,12 @@ struct MainTabView: View {
 
 struct LockView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.scenePhase) private var scenePhase
     @State private var failed = false
+    @State private var evaluating = false
+    /// Face ID asks by itself once the app is in front again: the lock appears while the app goes
+    /// to the background, when Face ID can't run (it used to fail there and wait for a tap).
+    @State private var askWhenActive = true
 
     var body: some View {
         ZStack {
@@ -82,10 +87,28 @@ struct LockView: View {
                 if failed { Text("Couldn't verify. Try again.").font(.footnote).foregroundStyle(.secondary) }
             }
         }
-        .task { await unlock() }
+        .task {
+            guard scenePhase == .active else { return }
+            askWhenActive = false
+            await unlock()
+        }
+        // Only after a real trip to the background: the Face ID prompt itself makes the app
+        // inactive for a moment, and cancelling it must not ask again straight away.
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .background {
+                askWhenActive = true
+            } else if phase == .active, askWhenActive {
+                askWhenActive = false
+                Task { await unlock() }
+            }
+        }
     }
 
     private func unlock() async {
+        guard !evaluating else { return }
+        evaluating = true
+        defer { evaluating = false }
+        failed = false
         let context = LAContext()
         var error: NSError?
         guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else {
@@ -143,7 +166,7 @@ struct SignInFlow: View {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Server address").font(.headline)
                         TextField("e.g. 192.168.1.20:8096 or jellyfin.example.com", text: $address)
-                    .keyboardDoneBar()
+                            .keyboardDoneBar()
                             .keyboardType(.URL)
                             .textContentType(.URL)
                             .textInputAutocapitalization(.never)
@@ -217,7 +240,7 @@ struct SignInFlow: View {
 
     private func connect() async {
         focused = false
-        guard let url = JellyfinClient.normalize(address) else { return }
+        guard !isConnecting, let url = JellyfinClient.normalize(address) else { return }
         isConnecting = true
         connectError = nil
         defer { isConnecting = false }
@@ -366,6 +389,7 @@ struct UserPickerView: View {
     }
 
     private func signIn() async {
+        guard !isWorking else { return }   // a second tap / Return while signing in
         isWorking = true
         error = nil
         defer { isWorking = false }

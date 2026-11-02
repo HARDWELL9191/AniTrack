@@ -81,7 +81,9 @@ struct LibraryAdminDetail: View {
         } message: {
             Text("Removes the library from Jellyfin. Your files on disk aren't deleted.")
         }
-        .task { await load() }
+        // Runs again when the page reappears (back from Download languages or an image settings
+        // page, another tab): reloading then would silently throw away the unsaved option edits.
+        .task { if !options.dirty { await load() } }
     }
 
     private func load() async {
@@ -164,6 +166,8 @@ struct AddLibrarySheet: View {
     @State private var typedPath = ""
     @State private var browsing = false
     @State private var options = LibraryOptionsModel()
+    /// The content type `options` were loaded for.
+    @State private var loadedType: String?
     @State private var error: String?
     @State private var working = false
 
@@ -219,8 +223,12 @@ struct AddLibrarySheet: View {
                 ServerPathPicker(files: false) { picked in if !paths.contains(picked) { paths.append(picked) } }
             }
             // A new library starts with jellyfin-web's defaults; the editor fills in the providers for the type.
+            // The task also runs when the sheet's page reappears (back from Download languages or an
+            // image settings page): only a new content type may reset the options then.
             .task(id: type) {
+                if type == loadedType && options.dirty { return }
                 await options.load(client: model.client, contentType: type, isNew: true, initial: LibraryOptionsModel.newLibraryDefaults)
+                if options.ready { loadedType = type }
             }
         }
     }
@@ -343,16 +351,24 @@ struct PluginRepositoriesView: View {
     var body: some View {
         List {
             if let message { Text(message).font(.footnote).foregroundStyle(.red) }
-            ForEach(repos.indices, id: \.self) { i in
-                let repo = repos[i]
+            ForEach(Array(repos.enumerated()), id: \.offset) { i, repo in
                 VStack(alignment: .leading, spacing: 3) {
                     Toggle(LibraryAdminDetail.string(repo, "Name") ?? "Repository", isOn: Binding(
                         get: { (LibraryAdminDetail.value(repo, "Enabled") as? Bool) ?? true },
-                        set: { on in repos[i]["Enabled"] = on; Task { await save() } }))
+                        set: { on in
+                            // A row can outlive a deletion or reload by a frame: never write past the end.
+                            guard repos.indices.contains(i) else { return }
+                            repos[i]["Enabled"] = on
+                            Task { await save() }
+                        }))
                     Text(LibraryAdminDetail.string(repo, "Url") ?? "").font(.caption.monospaced()).foregroundStyle(.secondary)
                 }
                 .swipeActions {
-                    Button(role: .destructive) { repos.remove(at: i); Task { await save() } } label: { Label("Delete", systemImage: "trash") }
+                    Button(role: .destructive) {
+                        guard repos.indices.contains(i) else { return }
+                        repos.remove(at: i)
+                        Task { await save() }
+                    } label: { Label("Delete", systemImage: "trash") }
                 }
             }
         }
@@ -362,8 +378,10 @@ struct PluginRepositoriesView: View {
             TextField("Name", text: $newName)
             TextField("Repository URL", text: $newURL).textInputAutocapitalization(.never)
             Button("Add") {
-                repos.append(["Name": newName, "Url": newURL, "Enabled": true])
-                newName = ""; newURL = ""
+                let url = newURL.trimmingCharacters(in: .whitespaces)
+                defer { newName = ""; newURL = "" }
+                guard !url.isEmpty else { return }   // an empty URL would be saved as a broken repository
+                repos.append(["Name": newName, "Url": url, "Enabled": true])
                 Task { await save() }
             }
             Button("Cancel", role: .cancel) {}
