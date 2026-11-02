@@ -41,7 +41,10 @@ struct ForYouView: View {
                 handled = 0
                 await discovery.build(sourceId, genre: nil)
             }
-            .task(id: sourceId) { await discovery.ensureBuilt(sourceId) }
+            // Per account too: after switching accounts the library id (or "All") can stay the same.
+            .task(id: "\(model.store.currentServerId ?? "")|\(model.client?.userId ?? "")|\(sourceId)") {
+                await discovery.ensureBuilt(sourceId)
+            }
             .onChange(of: sourceId) { _, _ in index = 0; handled = 0; genre = nil }
             .onChange(of: genre) { _, new in
                 index = 0
@@ -113,7 +116,6 @@ struct ForYouView: View {
         }
         .buttonStyle(.glass)
     }
-
 
     private func symbol(for source: RecoEngine.Source?) -> String {
         guard let source, source.id != RecoSource.all else { return "square.grid.2x2" }
