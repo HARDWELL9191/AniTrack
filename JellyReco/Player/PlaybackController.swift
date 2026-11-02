@@ -613,7 +613,6 @@ final class PlaybackController {
     @ObservationIgnored private var audioNeedsReload = false
     @ObservationIgnored private var audioInterrupted = false
     @ObservationIgnored private var resumeAfterInterruption = false
-    @ObservationIgnored private var pausedAt: Date?
 
     /// Takes the audio session back and restarts mpv's audio output (no 15 s limit).
     private func restoreAudio(reason: String) {
@@ -969,24 +968,23 @@ final class PlaybackController {
         autoplayStreak = 0
     }
 
-    /// Resumes with working sound: after a call, Siri, an alarm or another app's audio, or a long
-    /// pause, iOS may have taken the audio session away; mpv's audio output is then restarted
-    /// first (it otherwise stayed silent until the video was reopened).
+    /// Resumes with working sound: after a call, Siri, an alarm, another app's audio, a route
+    /// change while paused or leaving the app, iOS may have taken the audio session away; mpv's
+    /// audio output is then restarted first (it otherwise stayed silent until the video was
+    /// reopened). A plain pause in the app keeps the output as it is: restarting it there only
+    /// made the sound come back 2-3 s late.
     func play() {
-        let pausedFor = pausedAt.map { Date().timeIntervalSince($0) } ?? 0
         if videoNeedsRefresh {
             refreshAfterBackground()
-        } else if audioNeedsReload || pausedFor > 20 {
-            restoreAudio(reason: audioNeedsReload ? "audio was interrupted" : "resumed after a pause")
+        } else if audioNeedsReload {
+            restoreAudio(reason: "audio was interrupted")
         } else {
             try? AVAudioSession.sharedInstance().setActive(true)
         }
-        pausedAt = nil
         player.play()
     }
 
     func pause() {
-        if !player.isPaused { pausedAt = Date() }
         player.pause()
     }
 
