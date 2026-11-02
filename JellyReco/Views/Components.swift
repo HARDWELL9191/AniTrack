@@ -701,9 +701,15 @@ struct SelectableText: UIViewRepresentable {
             self.outsideTap = nil
         }
 
+        /// Same as a tap on empty space: the Copy menu fades away with its own animation, then the
+        /// selection goes.
         @objc func clearSelection() {
             guard let textView else { return }
-            UIView.performWithoutAnimation { textView.selectedTextRange = nil }
+            for case let menu as UIEditMenuInteraction in textView.interactions { menu.dismissMenu() }
+            DispatchQueue.main.async { [weak textView] in
+                guard let textView, textView.selectedRange.length > 0 else { return }
+                UIView.performWithoutAnimation { textView.selectedTextRange = nil }
+            }
         }
 
         func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
