@@ -234,6 +234,11 @@ jobs:
         run: |
           mkdir -p media/zlib && cp samples/render/render_pgs_zlib.mkv "media/zlib/Zlib Test (2020).mkv"
           if [ -f samples/render/render_vobsub_zlib.mkv ]; then mkdir -p media/vobzlib && cp samples/render/render_vobsub_zlib.mkv "media/vobzlib/Vobsub Zlib (2021).mkv"; fi
+          # External VobSub (.idx/.sub) next to a video, extracted the way DVD rippers keep them.
+          if command -v mkvextract >/dev/null || sudo apt-get install -y -qq mkvtoolnix >/dev/null; then
+            mkdir -p media/extidx && cp samples/render/render_srt.mkv "media/extidx/Ext Idx (2023).mkv"
+            mkvextract samples/render/render_vobsub.mkv tracks 1:"media/extidx/Ext Idx (2023).en.idx" >/dev/null && ls media/extidx
+          fi
           # An external .sup next to a video, as Jellyfin users keep them.
           mkdir -p media/extsup && cp samples/render/render_srt.mkv "media/extsup/Ext Sup (2022).mkv" && cp samples/render/subs.sup "media/extsup/Ext Sup (2022).en.sup"
           docker run -d --name jf -p 8096:8096 -v "$PWD/media:/media" jellyfin/jellyfin:latest
@@ -354,6 +359,16 @@ jobs:
           else
             echo "NO SUBTITLE FILE FROM JELLYFIN" | tee -a rendertest.log
           fi
+          # Jellyfin's copy of a zlib VobSub track (it serves a clean Matroska file) and of an
+          # external .idx/.sub, added over HTTP as the app would.
+          for f in jfsubs/*.mks jfsubs/*.dvdsub; do
+            [ -f "$f" ] || continue
+            [ "$(basename "$f")" = wrapped.mks ] && continue
+            [ "$(head -c 1 "$f" | xxd -p)" = "1a" ] || continue   # Matroska only
+            echo "=== Jellyfin VobSub copy: $f ($(head -c 4 "$f" | xxd -p))" | tee -a rendertest.log
+            RENDERTEST_LOG=v RENDERTEST_SUBURL="http://127.0.0.1:8765/$(basename "$f")" ./rendertest --fonts "$PWD/fonts" "Helvetica" samples/render/render_vobsub_zlib.mkv 2>&1 \
+              | grep -i -E "PASS|FAIL|sub-add|external|demux|lavf|open|error" | head -30 | tee -a rendertest.log || true
+          done
           RENDERTEST_DEMUXER=lavf ./rendertest --fonts "$PWD/fonts" "Helvetica" samples/render/*.mkv samples/render/*.ts 2>&1 | tee -a rendertest.log || true
 
       - name: Publish format test log to the ci-logs branch
