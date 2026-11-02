@@ -436,7 +436,7 @@ struct ItemRow: View {
                             MatchBubble(value: m)
                         }
                     }
-                    if model.isPlayed(item) { Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.accent) }
+                    if model.isPlayed(item) { Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.accentGradient) }
                     if model.isFavorite(item) { Image(systemName: "heart.fill").foregroundStyle(Theme.pink) }
                 }
             }
@@ -467,7 +467,7 @@ struct AlphabetScrubber: View {
                         .font(.system(size: min(11, rowHeight - 2), weight: active == l ? .heavy : .semibold))
                         .foregroundStyle(active == l ? Color.white : Theme.accent)
                         .frame(width: 20, height: rowHeight)
-                        .background { if active == l { Circle().fill(Theme.accent) } }
+                        .background { if active == l { Circle().fill(Theme.accentGradient) } }
                 }
             }
             .padding(.vertical, 6)
@@ -566,7 +566,7 @@ struct FilterSheet: View {
             Text(text)
                 .font(.caption.weight(.semibold))
                 .padding(.horizontal, 10).padding(.vertical, 6)
-                .background(on ? Theme.accent : Color.secondary.opacity(0.15), in: Capsule())
+                .background(on ? AnyShapeStyle(Theme.accentGradient) : AnyShapeStyle(Color.secondary.opacity(0.15)), in: Capsule())
                 .foregroundStyle(on ? .white : .primary)
         }
         .buttonStyle(.plain)
@@ -739,7 +739,7 @@ private struct FolderRow: View {
         HStack(spacing: 12) {
             Image(systemName: "folder.fill")
                 .font(.title3)
-                .foregroundStyle(Theme.accent)
+                .foregroundStyle(Theme.accentGradient)
                 .frame(width: 44, height: 44)
                 .glassEffect(.regular.tint(Theme.accent.opacity(0.15)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             VStack(alignment: .leading, spacing: 2) {
@@ -777,8 +777,8 @@ private struct FileRow: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 0)
-                if data?.played ?? false { Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.accent) }
-                if showsPlay { Image(systemName: "play.circle.fill").font(.title2).foregroundStyle(Theme.accent) }
+                if data?.played ?? false { Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.accentGradient) }
+                if showsPlay { Image(systemName: "play.circle.fill").font(.title2).foregroundStyle(Theme.accentGradient) }
             }
             .contentShape(Rectangle())
         }

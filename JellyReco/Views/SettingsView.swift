@@ -140,7 +140,7 @@ struct AccountsView: View {
                                 }
                                 Spacer()
                                 if user.id == model.store.currentUserId && server.id == model.store.currentServerId {
-                                    Image(systemName: "checkmark").foregroundStyle(Theme.accent)
+                                    Image(systemName: "checkmark").foregroundStyle(Theme.accentGradient)
                                 }
                             }
                         }
