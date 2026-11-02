@@ -575,6 +575,8 @@ struct SelectableText: UIViewRepresentable {
         view.setContentHuggingPriority(.defaultHigh, for: .vertical)
 
         let coordinator = context.coordinator
+        view.delegate = coordinator
+        coordinator.textView = view
         // A double tap selects a word (the text view's own); a single tap waits for it to fail.
         let double = UITapGestureRecognizer(target: nil, action: nil)
         double.numberOfTapsRequired = 2
@@ -638,9 +640,19 @@ struct SelectableText: UIViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
-    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+    static func dismantleUIView(_ view: UITextView, coordinator: Coordinator) {
+        coordinator.removeOutsideTap()
+    }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate, UITextViewDelegate {
         var onTap: (() -> Void)?
         weak var single: UITapGestureRecognizer?
+        weak var textView: UITextView?
+        /// The tap began while text was selected: it only clears the selection (as in other apps),
+        /// it doesn't also expand or collapse the text.
+        private var tapClearsSelection = false
+        /// While text is selected: a tap anywhere else on the screen clears the selection.
+        private var outsideTap: UITapGestureRecognizer?
 
         /// The font is only rebuilt when its inputs change, not on every update.
         private var fontKey: (style: UIFont.TextStyle, weight: UIFont.Weight, italic: Bool, category: UIContentSizeCategory)?
@@ -657,9 +669,59 @@ struct SelectableText: UIViewRepresentable {
             return font
         }
 
-        @objc func tapped() { onTap?() }
+        @objc func tapped() {
+            if tapClearsSelection { tapClearsSelection = false; return }
+            onTap?()
+        }
 
-        // Alongside the text view's own selection gestures, never instead of them.
+        // Selection made or cleared: watch for a tap outside the text only while something is selected.
+        func textViewDidChangeSelection(_ textView: UITextView) {
+            if textView.selectedRange.length > 0 { installOutsideTap(in: textView) } else { removeOutsideTap() }
+        }
+
+        private func installOutsideTap(in textView: UITextView) {
+            guard outsideTap == nil, let window = textView.window else { return }
+            let tap = UITapGestureRecognizer(target: self, action: #selector(tappedOutside))
+            tap.cancelsTouchesInView = false
+            tap.delegate = self
+            window.addGestureRecognizer(tap)
+            outsideTap = tap
+        }
+
+        func removeOutsideTap() {
+            guard let outsideTap else { return }
+            outsideTap.view?.removeGestureRecognizer(outsideTap)
+            self.outsideTap = nil
+        }
+
+        @objc private func tappedOutside() {
+            // After the tap's own action (a button, another text) has run.
+            DispatchQueue.main.async { [weak self] in
+                guard let textView = self?.textView, textView.selectedRange.length > 0 else { return }
+                textView.selectedTextRange = nil
+            }
+        }
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+            if gestureRecognizer === single {
+                tapClearsSelection = (textView?.selectedRange.length ?? 0) > 0
+                return true
+            }
+            if gestureRecognizer === outsideTap {
+                guard let textView, let touched = touch.view else { return true }
+                // Taps in this text (handled by the text view itself) or on the Copy / Look Up menu
+                // don't count as "outside".
+                var view: UIView? = touched
+                while let current = view {
+                    if current === textView || NSStringFromClass(type(of: current)).contains("Menu") { return false }
+                    view = current.superview
+                }
+                return true
+            }
+            return true
+        }
+
+        // Alongside the text view's own selection gestures (and anything else), never instead of them.
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
                                shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
     }
