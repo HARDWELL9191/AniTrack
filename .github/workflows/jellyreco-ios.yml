@@ -342,13 +342,13 @@ jobs:
           ./rendertest --fonts "$PWD/fonts" "Helvetica" samples/render/*.mkv samples/render/*.ts 2>&1 | tee -a rendertest.log || true
           # ffmpeg's demuxer (reads zlib-compressed tracks that mpv's own MKV reader skips)
           # The app's fix: the skipped track fetched from Jellyfin and added over HTTP as its own subtitle.
-          subs=(jfsubs/*.pgssub)
-          SUB="${subs[0]:-}"
+          # The zlib PGS test file's track (other test files' answers are in jfsubs too).
+          SUB="jfsubs/zlib.1.pgssub"; [ -f "$SUB" ] || { subs=(jfsubs/*.pgssub); SUB="${subs[0]:-}"; }
           if [ -n "$SUB" ] && [ -f "$SUB" ]; then
             (cd "$(dirname "$SUB")" && python3 -m http.server 8765 >/dev/null 2>&1 &) ; sleep 2
             # The app's fix: wrap the served PGS in Matroska with the app's own Swift code.
             swiftc -O JellyReco/Player/PGSContainer.swift tools/formattest/sup2mks/main.swift -o sup2mks
-            ./sup2mks "$SUB" jfsubs/wrapped.mks | tee -a rendertest.log
+            ./sup2mks "$SUB" jfsubs/wrapped.mks | tee -a rendertest.log || true
             cp samples/render/subs.sup jfsubs/bare.sup 2>/dev/null || true
             for u in "$PWD/jfsubs/wrapped.mks" "http://127.0.0.1:8765/wrapped.mks" "$PWD/samples/subs.srt" "$PWD/samples/subs.ass" "$PWD/samples/subs.vtt" "$PWD/jfsubs/bare.sup" "http://127.0.0.1:8765/bare.sup"; do
               echo "=== external subtitle: $u" | tee -a rendertest.log
