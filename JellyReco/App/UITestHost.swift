@@ -1,4 +1,5 @@
 import SwiftUI
+import CoreText
 import MPVUI
 import AVFoundation
 
@@ -246,17 +247,30 @@ private struct FontFallbackHost: View {
         let log = LogBox()
         p.logHandler = { msg in
             let m = msg.message.trimmingCharacters(in: .whitespacesAndNewlines)
-            if m.contains("fontselect") || m.contains("Glyph 0x") || m.contains("fallback") || m.contains("font provider")
-                || m.contains("Using font provider") || m.contains("fonts dir") {
-                if !log.lines.contains(m) { log.lines.append(m) }
+            let lower = (msg.prefix + " " + m).lowercased()
+            if lower.contains("ass") || lower.contains("font") || lower.contains("glyph") {
+                if log.lines.count < 150 { log.lines.append("[\(msg.prefix)] \(m)") }
             }
         }
         p.load(url, playAutomatically: true, startTime: nil)
         for _ in 0..<150 where p.duration <= .zero { try? await Task.sleep(for: .milliseconds(100)) }
         p.loadExternalSubtitle(srt, selecting: .primary)
-        try? await Task.sleep(for: .seconds(6))
+        try? await Task.sleep(for: .seconds(15))
         p.pause()
-        status = "READY fonts=\(SubtitleFonts.prepare().map { "\($0.family) @ \((try? FileManager.default.contentsOfDirectory(atPath: $0.directory))?.joined(separator: ",") ?? "")" } ?? "none") || "
+        // What Core Text itself picks for each character (the font libass is told to look for).
+        let base = CTFontCreateWithName("HelveticaNeue" as CFString, 24, nil)
+        var ct: [String] = []
+        for ch in ["～", "〜", "♪", "♥", "★", "→", "※", "①", "「", "あ", "漢", "们", "한", "Ж", "ạ", "ש", "م", "ส", "न", "😊", "‼", "❤"] {
+            let str = ch as CFString
+            let f = CTFontCreateForString(base, str, CFRange(location: 0, length: CFStringGetLength(str)))
+            let fam = CTFontCopyFamilyName(f) as String
+            let ps = CTFontCopyPostScriptName(f) as String
+            let url = CTFontCopyAttribute(f, kCTFontURLAttribute) as? URL
+            let readable = url.map { FileManager.default.isReadableFile(atPath: $0.path) } ?? false
+            let size = url.flatMap { (try? FileManager.default.attributesOfItem(atPath: $0.path)[.size] as? NSNumber)?.intValue } ?? -1
+            ct.append("CT \(ch) -> \(fam) / \(ps) / \(url?.path ?? "no url") readable=\(readable) size=\(size)")
+        }
+        status = "READY " + ct.joined(separator: " || ") + " || fonts=\(SubtitleFonts.prepare().map { "\($0.family) @ \((try? FileManager.default.contentsOfDirectory(atPath: $0.directory))?.joined(separator: ",") ?? "")" } ?? "none") || "
             + log.lines.joined(separator: " || ")
     }
 }
