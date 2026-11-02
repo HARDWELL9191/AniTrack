@@ -38,10 +38,14 @@ struct MyListView: View {
             }
         }
         .navigationTitle("My List")
-        .refreshable { await model.loadAccountStorage(); await loadServerItems() }
-        .task(id: model.myList.map(\.id)) {
+        .refreshable { await model.loadAccountStorage(); await loadServerItems(reload: true) }
+        .task(id: model.myList.map(\.id) + ["library:\(model.reco.libraryRevision)"]) {
             if model.reco.libraryItems.isEmpty { await model.reco.ensureBuilt() }
-            indexLibrary()
+            // Only when the library changed (it used to re-index every title on each list change).
+            if indexedRevision != model.reco.libraryRevision {
+                indexLibrary()
+                indexedRevision = model.reco.libraryRevision
+            }
             await loadServerItems()
         }
         .sheet(item: $detail) { ExternalDetailSheet(title: $0) }
@@ -136,24 +140,32 @@ struct MyListView: View {
 
     @State private var byTMDB: [String: BaseItem] = [:]
     @State private var byIMDb: [String: BaseItem] = [:]
-    @State private var byTitle: [String: BaseItem] = [:]
+    @State private var byTitle: [String: [BaseItem]] = [:]
+    @State private var indexedRevision = -1
 
     /// The server copy of a For You pick, if it has been added since (TMDB/IMDb id, then title).
     private func ownedItem(for ext: ExternalTitle) -> BaseItem? {
         if let hit = byTMDB["\(ext.isMovie ? "m" : "s"):\(ext.sourceId)"] { return hit }
         if let imdb = ext.imdbId, let hit = byIMDb[imdb] { return hit }
-        return byTitle["\(ext.isMovie ? "m" : "s"):\(TitleKey.make(ext.title))"]
+        guard let sameName = byTitle["\(ext.isMovie ? "m" : "s"):\(TitleKey.make(ext.title))"] else { return nil }
+        // By name only within a year (a remake isn't the film you have); a show by its name
+        // (its later seasons are the same show), as For You decides what you already have.
+        let sameYear = sameName.first { item in
+            guard let a = ext.year, let b = item.productionYear else { return true }
+            return abs(a - b) <= 1
+        }
+        return sameYear ?? (ext.isMovie ? nil : sameName.first)
     }
 
     private func indexLibrary() {
-        var t: [String: BaseItem] = [:], i: [String: BaseItem] = [:], n: [String: BaseItem] = [:]
+        var t: [String: BaseItem] = [:], i: [String: BaseItem] = [:], n: [String: [BaseItem]] = [:]
         for item in model.reco.libraryItems {
             let kind = item.kind == .series ? "s" : "m"
             for (key, value) in item.providerIds ?? [:] {
                 if key.caseInsensitiveCompare("Tmdb") == .orderedSame { t["\(kind):\(value)"] = item }
                 if key.caseInsensitiveCompare("Imdb") == .orderedSame { i[value] = item }
             }
-            n["\(kind):\(TitleKey.make(item.displayName))"] = item
+            n["\(kind):\(TitleKey.make(item.displayName))", default: []].append(item)
         }
         byTMDB = t; byIMDb = i; byTitle = n
     }
@@ -163,9 +175,10 @@ struct MyListView: View {
         return ownedItem(for: ext) != nil
     }
 
-    private func loadServerItems() async {
+    /// `reload`: pull to refresh reads every title again (watched state, artwork), not only new ones.
+    private func loadServerItems(reload: Bool = false) async {
         guard let client = model.client else { return }
-        let ids = model.myList.compactMap(\.serverId).filter { serverItems[$0] == nil }
+        let ids = model.myList.compactMap(\.serverId).filter { reload || serverItems[$0] == nil }
         guard !ids.isEmpty else { return }
         // In batches of 100: one request with every id got too long for the server past ~240
         // titles, failed, and every server title then showed as removed.
