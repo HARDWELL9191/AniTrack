@@ -1,12 +1,14 @@
 name: libmpv build
 
-# Builds MPVUI's native Libmpv.xcframework (GPL libmpv + FFmpeg) from source,
-# unchanged, at the pinned MPVUI release. Later steps can patch the sources.
+# Builds MPVUI's native Libmpv.xcframework (GPL libmpv + FFmpeg) from source at the
+# pinned MPVUI release, plus JellyReco's own mpv patches (libmpv/patches/mpv, applied
+# after MPVUI's, in file-name order).
 on:
   push:
     branches: [libmpv-build]
     paths:
       - ".github/workflows/libmpv-build.yml"
+      - "libmpv/**"
   workflow_dispatch:
     inputs:
       publish:
@@ -22,7 +24,8 @@ env:
   MPVUI_COMMIT: "0cb499c"
   # Slices the app needs: iOS device + iOS simulator (arm64 and x86_64, like the published artifact).
   MPV_SLICES: "ios,isimulator"
-  RELEASE_TAG: "libmpv-custom-0.8.0"
+  # One release per build, so the app's package checksum always names exactly one file.
+  RELEASE_TAG: "libmpv-jr-${{ github.run_number }}"
 
 jobs:
   libmpv:
@@ -42,6 +45,34 @@ jobs:
         run: |
           git log -1 --format='%H %s'
           case "$(git rev-parse HEAD)" in "$MPVUI_COMMIT"*) ;; *) echo "::error::unexpected MPVUI commit"; exit 1;; esac
+
+      - name: Check out JellyReco patches
+        uses: actions/checkout@v6
+        with:
+          path: jr
+          sparse-checkout: libmpv
+
+      - name: Add JellyReco patches to MPVUI's patch list
+        run: |
+          set -e
+          python3 - <<'PY'
+          import hashlib, json, pathlib, shutil
+          lock_path = pathlib.Path("mpvui/Build/Inputs.lock.json")
+          lock = json.loads(lock_path.read_text())
+          mpv = next(s for s in lock["sources"] if s["id"] == "mpv")
+          for src in sorted(pathlib.Path("jr/libmpv/patches/mpv").glob("*.patch")):
+              dest = pathlib.Path("mpvui/Build/Patches/mpv") / src.name
+              shutil.copyfile(src, dest)
+              mpv["patches"].append({
+                  "id": src.stem,
+                  "path": f"Build/Patches/mpv/{src.name}",
+                  "platforms": ["apple"],
+                  "sha256": hashlib.sha256(dest.read_bytes()).hexdigest(),
+              })
+              print("added", src.name)
+          lock_path.write_text(json.dumps(lock, indent=2) + "\n")
+          PY
+          python3 -c "import json;d=json.load(open('mpvui/Build/Inputs.lock.json'));print([p['id'] for p in d['sources'][0]['patches']][-3:])"
 
       - name: Show toolchain
         run: |
@@ -65,13 +96,6 @@ jobs:
           nasm -v
           glslc --version
 
-      - name: Restore download cache
-        uses: actions/cache/restore@v5
-        with:
-          path: |
-            mpvui/.build/mpvbuild/downloads
-            mpvui/.build/mpvbuild/git
-          key: mpvbuild-inputs-${{ hashFiles('mpvui/Build/Inputs.lock.json') }}
 
       - name: Doctor and bootstrap (meson, ninja, pkgconf)
         working-directory: mpvui
@@ -85,14 +109,6 @@ jobs:
           make build ARGS="--slices $MPV_SLICES" 2>&1 | tee ../build.log
           echo "Build took $(( ($(date +%s) - START) / 60 )) min"
 
-      - name: Save download cache
-        if: always()
-        uses: actions/cache/save@v5
-        with:
-          path: |
-            mpvui/.build/mpvbuild/downloads
-            mpvui/.build/mpvbuild/git
-          key: mpvbuild-inputs-${{ hashFiles('mpvui/Build/Inputs.lock.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Collect artifact
         run: |
@@ -142,11 +158,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -e
-          NOTES="Libmpv.xcframework built from source on GitHub Actions from LePips/MPVUI ${MPVUI_REF} (${MPVUI_COMMIT}), unmodified. Slices: ${MPV_SLICES}. Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}. sha256: $(cut -d' ' -f1 out/Libmpv.xcframework.zip.sha256)"
+          PATCHES=$(cd jr/libmpv/patches/mpv && ls *.patch | tr '\n' ' ')
+          NOTES="Libmpv.xcframework built from source on GitHub Actions from LePips/MPVUI ${MPVUI_REF} (${MPVUI_COMMIT}) plus JellyReco patches: ${PATCHES}. Commit ${GITHUB_SHA}. Slices: ${MPV_SLICES}. Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}. sha256: $(cut -d' ' -f1 out/Libmpv.xcframework.zip.sha256)"
           if gh release view "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$RELEASE_TAG" out/* --clobber -R "$GITHUB_REPOSITORY"
             gh release edit "$RELEASE_TAG" --notes "$NOTES" --prerelease -R "$GITHUB_REPOSITORY"
           else
             gh release create "$RELEASE_TAG" out/* --prerelease --target "$GITHUB_SHA" \
-              --title "Custom Libmpv (MPVUI ${MPVUI_REF})" --notes "$NOTES" -R "$GITHUB_REPOSITORY"
+              --title "JellyReco Libmpv (MPVUI ${MPVUI_REF}) #${GITHUB_RUN_NUMBER}" --notes "$NOTES" -R "$GITHUB_REPOSITORY"
           fi
