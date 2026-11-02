@@ -126,6 +126,9 @@ final class AppModel {
             libraries = fetchedViews ?? libraries
             serverInfo = fetchedInfo
             await loadAccountStorage()
+            // Match % on every poster from the start: the saved library snapshot is read at once and
+            // a fresh one in the background (it used to wait until a details page or For You asked).
+            if client === self.client { reco.warmUp() }
             // Autoplay of the next episode is a Jellyfin account setting: follow it. Applied after
             // the synced settings (they'd put an older value back) and not as a change made here
             // (that skipped the import of the server's settings and uploaded this device's instead).

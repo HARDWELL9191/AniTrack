@@ -230,6 +230,13 @@ final class RecoEngine {
         }
     }
 
+    /// Signed in (launch, account switch): start the engine without waiting for a screen to ask.
+    /// The first step of a build is the snapshot saved on disk, so match % shows within moments.
+    func warmUp() {
+        guard buildTask == nil, !built else { return }
+        Task { await self.build(force: false) }
+    }
+
     /// Re-reads the libraries in the background when the last read is over 15 minutes old (or
     /// never finished), so titles added to the server since are known as yours.
     func refreshIfStale() {
