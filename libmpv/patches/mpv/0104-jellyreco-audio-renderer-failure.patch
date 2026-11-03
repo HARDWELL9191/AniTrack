@@ -1,0 +1,79 @@
+diff --git a/audio/out/ao_avfoundation.m b/audio/out/ao_avfoundation.m
+index 79b7898..5d5ca8e 100644
+--- a/audio/out/ao_avfoundation.m
++++ b/audio/out/ao_avfoundation.m
+@@ -47,6 +47,8 @@
+ - (void)invalidate;
+ @end
+ 
++static void *renderer_status_context = &renderer_status_context;
++
+ @interface AVPLoader : NSObject <AVAssetResourceLoaderDelegate> {
+     struct ao *ao;
+ @public
+@@ -1163,6 +1165,47 @@ static int control(struct ao *ao, enum aocontrol cmd, void *arg)
+         ao_request_reload(ao);
+     }
+ }
++// A failed renderer stays silent for good while the synchronizer clock (and so the video) keeps
++// running; only a flush or a new renderer brings sound back. Apple: "If the status is failed,
++// check the value of the renderer's error property"; the status is key-value observable.
++- (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object
++                        change:(NSDictionary *)change context:(void *)context {
++    if (context != renderer_status_context) {
++        [super observeValueForKeyPath:keyPath ofObject:object change:change context:context];
++        return;
++    }
++    @synchronized(self) {
++        if (!ao)
++            return;
++        AVSampleBufferAudioRenderer *renderer = object;
++        if (renderer.status != AVQueuedSampleBufferRenderingStatusFailed)
++            return;
++        NSError *error = renderer.error;
++        MP_ERR(ao, "audio renderer failed (%s %ld: %s), reloading audio output\n",
++               error ? error.domain.UTF8String : "-", error ? (long)error.code : 0L,
++               error ? error.localizedDescription.UTF8String : "unknown");
++        // A renderer that fails again right away (session still unavailable) is retried once a
++        // second rather than in a tight loop.
++        static _Atomic int64_t last_reload_ns;
++        int64_t now = mp_time_ns();
++        int64_t wait = atomic_load(&last_reload_ns) + MP_TIME_S_TO_NS(1) - now;
++        if (wait <= 0) {
++            atomic_store(&last_reload_ns, now);
++            ao_request_reload(ao);
++            return;
++        }
++        [self retain];
++        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, wait), dispatch_get_main_queue(), ^{
++            @synchronized(self) {
++                if (ao) {
++                    atomic_store(&last_reload_ns, mp_time_ns());
++                    ao_request_reload(ao);
++                }
++            }
++            [self release];
++        });
++    }
++}
+ - (void)invalidate {
+     @synchronized(self) {
+         ao = NULL;
+@@ -1456,6 +1499,8 @@ static int init(struct ao *ao)
+     }
+ #endif
+     [center addObserver:p->observer selector:@selector(handleRestartNotification:) name:AVSampleBufferAudioRendererWasFlushedAutomaticallyNotification object:p->renderer];
++    [p->renderer addObserver:p->observer forKeyPath:@"status"
++                     options:NSKeyValueObservingOptionNew context:renderer_status_context];
+ 
+     return CONTROL_OK;
+ 
+@@ -1521,6 +1566,8 @@ static void uninit(struct ao *ao)
+             p->feed_timer = NULL;
+         }
+ #endif
++        [p->renderer removeObserver:p->observer forKeyPath:@"status"
++                            context:renderer_status_context];
+         [p->renderer release];
+         [p->synchronizer release];
+         dispatch_release(p->queue);
