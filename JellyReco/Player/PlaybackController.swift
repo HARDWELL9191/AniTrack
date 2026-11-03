@@ -109,12 +109,14 @@ final class PlaybackController {
             // Info messages only carry the ASS header the app asks mpv to print (see
             // requestASSHeader); Playback info keeps showing warnings and errors as before.
             if msg.level == .info {
+                self.noteAudioFailure(msg.message)   // "Audio: no audio" is an info message
                 self.collectASSHeader(msg)
                 return
             }
             let line = JellyfinClient.redacted("[\(msg.prefix)] \(msg.message.trimmingCharacters(in: .whitespacesAndNewlines))")
             self.noteSkippedTrack(msg.message)
             self.noteDecodeError(msg.message)
+            self.noteAudioFailure(msg.message)
             // A message repeating every frame would push everything else out of Playback info.
             if self.diagnostics.suffix(4).contains(line) { return }
             self.diagnostics.append(line)
@@ -223,6 +225,8 @@ final class PlaybackController {
         }
         skippedEmbedded = []
         pendingSubtitleSelection = nil
+        wantedAudio = nil   // track numbers belong to the previous file
+        audioRecoveries = 0
         skippedSegments = []
         activeSegment = nil
         // A countdown left running would read the cleared value as "finished" and skip ahead.
@@ -669,6 +673,9 @@ final class PlaybackController {
 
     func reloadAudio(reason: String) {
         guard Date().timeIntervalSince(lastAudioReload) > 15 else { return }
+        // Switching audio track opens a new audio output (and can change the route): a restart
+        // in the middle of that left mpv with no sound at all, on every track.
+        guard Date().timeIntervalSince(audioSwitchedAt) > 5 else { return }
         lastAudioReload = Date()
         driftStrikes = 0
         player.executeCommand("ao-reload")
@@ -689,6 +696,7 @@ final class PlaybackController {
                         self.audioNeedsReload = true
                         return
                     }
+                    if Date().timeIntervalSince(self.audioSwitchedAt) < 5 { return }   // the track switch itself
                     self.lastAudioReload = .distantPast
                     self.reloadAudio(reason: "audio route changed")
                 }
@@ -903,8 +911,34 @@ final class PlaybackController {
             Task { await restartConversion(audioIndex: index) }
             return
         }
+        audioSwitchedAt = Date()
+        wantedAudio = id
+        audioRecoveries = 0
+        try? AVAudioSession.sharedInstance().setActive(true)   // the new output needs the session
         player.selectTrack(id)
         reportProgressInBackground()
+    }
+
+    /// When the audio track was last switched, and the track asked for.
+    @ObservationIgnored private var audioSwitchedAt = Date.distantPast
+    @ObservationIgnored private var wantedAudio: MPVMediaTrackIdentifier?
+    @ObservationIgnored private var audioRecoveries = 0
+
+    /// mpv couldn't open the audio output for a track ("no sound"), which also turns the track
+    /// off, so switching back stayed silent: the session is taken back and the track turned on
+    /// again (twice at most per switch).
+    private func noteAudioFailure(_ message: String) {
+        guard message.contains("Could not open/initialize audio device") || message.contains("Audio: no audio") else { return }
+        guard audioRecoveries < 2, let id = wantedAudio ?? player.audioTracks.first(where: \.isSelected)?.id else { return }
+        audioRecoveries += 1
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard let self, !self.stopped else { return }
+            try? AVAudioSession.sharedInstance().setActive(true)
+            self.audioSwitchedAt = Date()
+            self.player.selectTrack(id)
+            self.diagnostics.append("[JellyReco] Audio output failed: turned the audio track on again")
+        }
     }
 
     /// While the server converts, a different audio track means a new conversion with that track,
