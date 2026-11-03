@@ -314,10 +314,14 @@ private struct AudioSwitchHost: View {
             let text = msg.message.trimmingCharacters(in: .whitespacesAndNewlines)
             let lower = text.lowercased()
             // Everything about audio, plus every warning or error.
-            let audio = msg.prefix.hasPrefix("ao") || msg.prefix.hasPrefix("ad") || msg.prefix.hasPrefix("af")
-                || lower.contains("audio") || lower.contains("ao:") || lower.contains("aid")
+            // The lines that tell what happened to audio (not the track list or decoder probing).
+            let keys = ["delaying audio", "ao:", "audio ready", "starting audio", "refresh track", "restart", "reinit",
+                        "spdif", "underrun", "no audio", "no sound", "falling back", "stalled", "eof", "seek", "resync",
+                        "audio_status", "audio=", "avplayer", "renderer", "format", "pts"]
             let serious = msg.level == .error || msg.level == .warning || msg.level == .fatal
-            guard audio || serious else { return }
+            let wanted = msg.prefix.hasPrefix("ao") || keys.contains(where: { lower.contains($0) })
+            guard (wanted || serious), !lower.contains("--aid="), !lower.contains("codec list") else { return }
+            if let last = log.lines.last, last.hasSuffix(text), text.hasPrefix("delaying audio") { return }
             log.lines.append(String(format: "%.1f", Date().timeIntervalSince(start)) + " [\(msg.prefix)] \(text)")
         }
         p.load(url, playAutomatically: true, startTime: nil)
@@ -334,7 +338,7 @@ private struct AudioSwitchHost: View {
             let sel = p.audioTracks.first(where: \.isSelected).map { "\($0.mpvID)" } ?? "none"
             let lines = log.lines
             log.lines = []
-            report.append("\(label): aid=\(sel) ao=\(d.output ?? "-") codec=\(d.codec ?? "-") out=\(d.outputFormat ?? "-")/\(d.outputChannels ?? "-") native=\(d.nativePath ?? "-") state=\(p.state) pos=\(String(format: "%.1f", Double(p.position.components.seconds) + Double(p.position.components.attoseconds) / 1e18)) || " + lines.suffix(14).joined(separator: " | "))
+            report.append("\(label): aid=\(sel) ao=\(d.output ?? "-") codec=\(d.codec ?? "-") out=\(d.outputFormat ?? "-")/\(d.outputChannels ?? "-") native=\(d.nativePath ?? "-") state=\(p.state) pos=\(String(format: "%.1f", Double(p.position.components.seconds) + Double(p.position.components.attoseconds) / 1e18)) || " + lines.prefix(25).joined(separator: " | "))
         }
         func select(_ i: Int) { if i < tracks.count { p.selectTrack(tracks[i].id) } }
         snapshot("start")
