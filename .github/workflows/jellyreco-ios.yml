@@ -53,6 +53,8 @@ jobs:
       - name: Build (unsigned)
         run: |
           set -o pipefail
+          # Version = run number minus runs that never became a release (68 was cancelled, 69 a test run).
+          N=$(( ${{ github.run_number }} - 2 ))
           xcodebuild \
             -project JellyReco.xcodeproj \
             -scheme JellyReco \
@@ -65,8 +67,8 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            MARKETING_VERSION="1.0.${{ github.run_number }}" \
-            CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
+            MARKETING_VERSION="1.0.$N" \
+            CURRENT_PROJECT_VERSION="$N" \
             build 2>&1 | tee build.log | grep -E "error:|warning: unre|BUILD (SUCCEEDED|FAILED)" || true
           grep -q "BUILD SUCCEEDED" build.log
 
@@ -133,7 +135,7 @@ jobs:
           cp JellyReco/Assets.xcassets/Logo.imageset/Logo.png /tmp/altstore/icon.png
           cd /tmp/altstore
           git init -q && git checkout -q -b altstore
-          git add -A && git -c user.name=ci -c user.email=ci@local commit -qm "JellyReco build ${{ github.run_number }}"
+          git add -A && git -c user.name=ci -c user.email=ci@local commit -qm "JellyReco build $(( ${{ github.run_number }} - 2 ))"
           git push -qf "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" altstore:altstore
 
       - name: Upload build log on failure
