@@ -171,7 +171,7 @@ jobs:
           path: samples
       - name: Serve the subtitle test files
         run: |
-          (cd samples && nohup python3 -m http.server 8765 >/dev/null 2>&1 &)
+          (cd samples && nohup python3 "$GITHUB_WORKSPACE/tools/formattest/range_server.py" 8765 >/dev/null 2>&1 &)
           sleep 2
           curl -sfI http://127.0.0.1:8765/render/render_pgs.mkv | head -1
           ls samples/render
