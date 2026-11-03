@@ -1,0 +1,51 @@
+diff --git a/options/options.c b/options/options.c
+index 0e7444a..1bea2f3 100644
+--- a/options/options.c
++++ b/options/options.c
+@@ -345,6 +345,7 @@ const struct m_sub_options mp_subtitle_sub_opts = {
+         {"sub-scale-by-window", OPT_BOOL(sub_scale_by_window)},
+         {"sub-scale-with-window", OPT_BOOL(sub_scale_with_window)},
+         {"sub-ass-scale-with-window", OPT_BOOL(ass_scale_with_window)},
++        {"sub-ass-force-font", OPT_BOOL(ass_force_font)},
+         {"sub", OPT_SUBSTRUCT(sub_style, sub_style_conf)},
+         {"sub-clear-on-seek", OPT_BOOL(sub_clear_on_seek)},
+         {"teletext-page", OPT_INT(teletext_page), M_RANGE(-1, 999), .flags = UPDATE_SUB_FILT},
+@@ -360,6 +361,7 @@ const struct m_sub_options mp_subtitle_sub_opts = {
+         .sub_speed = 1.0,
+         .sub_image_bottom = -1.0,
+         .sub_image_top = -1.0,
++        .ass_force_font = true,
+         .ass_enabled = true,
+         .sub_fix_timing_threshold = 210,
+         .sub_fix_timing_keep = 400,
+diff --git a/options/options.h b/options/options.h
+index b7ff8de..aa18cfa 100644
+--- a/options/options.h
++++ b/options/options.h
+@@ -112,6 +112,7 @@ struct mp_subtitle_opts {
+     bool sub_scale_by_window;
+     bool sub_scale_with_window;
+     bool ass_scale_with_window;
++    bool ass_force_font;
+     struct osd_style_opts *sub_style;
+     float sub_scale;
+     bool sub_scale_signs;
+diff --git a/sub/sd_ass.c b/sub/sd_ass.c
+index 3510884..65eedd7 100644
+--- a/sub/sd_ass.c
++++ b/sub/sd_ass.c
+@@ -672,10 +672,12 @@ static void configure_ass(struct sd *sd, struct mp_osd_res *dim,
+     ass_set_shaper(priv, opts->sub_shaper);
+     int set_force_flags = 0;
+     if (total_override) {
+-        set_force_flags |= ASS_OVERRIDE_BIT_FONT_NAME
+-                            | ASS_OVERRIDE_BIT_FONT_SIZE_FIELDS
++        set_force_flags |= ASS_OVERRIDE_BIT_FONT_SIZE_FIELDS
+                             | ASS_OVERRIDE_BIT_COLORS
+                             | ASS_OVERRIDE_BIT_BORDER;
++        // --sub-ass-force-font=no: forced styling keeps each ASS style's own font
++        if (converted || opts->ass_force_font)
++            set_force_flags |= ASS_OVERRIDE_BIT_FONT_NAME;
+         if (!opts->sub_scale_signs)
+             set_force_flags |= ASS_OVERRIDE_BIT_SELECTIVE_FONT_SCALE;
+ #if LIBASS_VERSION >= 0x01703020
