@@ -115,6 +115,7 @@ final class PlaybackController {
             let line = JellyfinClient.redacted("[\(msg.prefix)] \(msg.message.trimmingCharacters(in: .whitespacesAndNewlines))")
             self.noteSkippedTrack(msg.message)
             self.noteDecodeError(msg.message)
+            self.noteAudioFailure(msg.message)
             // A message repeating every frame would push everything else out of Playback info.
             if self.diagnostics.suffix(4).contains(line) { return }
             self.diagnostics.append(line)
@@ -202,6 +203,9 @@ final class PlaybackController {
         phase = .loading
         didApplyTracks = false
         playingSince = nil
+        lastAudio = nil      // track numbers belong to the previous file
+        lostAudio = nil
+        audioRecoveries = 0
         externalSubs = []
         loadGeneration &+= 1
         // A newer open (a second tap on Next, closing the player) makes this one give up after
@@ -555,6 +559,7 @@ final class PlaybackController {
         }
         if state == .playing && playingSince == nil { playingSince = Date() }
         if state == .playing { hasPlayed = true }
+        if let a = player.audioTracks.first(where: \.isSelected)?.id { lastAudio = a }
         // Track lists arrive in pieces: wait until subtitles are known (or 3 s of playback)
         // before choosing, otherwise the subtitle choice is made against an empty list.
         let expectsSubs = streams.contains(where: \.isSubtitle)
@@ -719,6 +724,8 @@ final class PlaybackController {
                     Task { @MainActor in
                         try? await Task.sleep(nanoseconds: 300_000_000)
                         guard !self.stopped else { return }
+                        // A track turned off during the call gets its chances again now.
+                        if self.lostAudio != nil { self.audioRecoveries = 0; self.restoreLostAudio() }
                         if resume { self.play() }   // restarts the audio output first
                     }
                 default: break
@@ -904,8 +911,48 @@ final class PlaybackController {
             Task { await restartConversion(audioIndex: index) }
             return
         }
+        lastAudio = id
+        lostAudio = nil
+        audioRecoveries = 0
         player.selectTrack(id)
         reportProgressInBackground()
+    }
+
+    /// The audio track playing (or last asked for), and one mpv turned off because its audio
+    /// output couldn't be opened.
+    @ObservationIgnored private var lastAudio: MPVMediaTrackIdentifier?
+    @ObservationIgnored private var lostAudio: MPVMediaTrackIdentifier?
+    @ObservationIgnored private var audioRecoveries = 0
+
+    /// mpv couldn't open the audio output (for a new track, or when restarting it, e.g. while a
+    /// call still holds the audio): it then turns the audio track off for good ("Could not
+    /// open/initialize audio device -> no sound." in player/audio.c). The track is turned on
+    /// again: right away, or when the call / interruption ends (twice at most each time).
+    private func noteAudioFailure(_ message: String) {
+        guard message.contains("Could not open/initialize audio device")
+                || message.contains("Error reinitializing audio") else { return }
+        guard let id = lastAudio else { return }
+        lostAudio = id
+        guard !audioInterrupted else { return }      // when the interruption ends
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            self?.restoreLostAudio()
+        }
+    }
+
+    private func restoreLostAudio() {
+        guard !stopped, let id = lostAudio, audioRecoveries < 2 else { return }
+        do {
+            try AVAudioSession.sharedInstance().setActive(true)
+        } catch {
+            diagnostics.append("[JellyReco] Audio session: \(error.localizedDescription) (trying again when audio is free)")
+            return
+        }
+        audioRecoveries += 1
+        lostAudio = nil
+        audioNeedsReload = false     // the track opens a fresh audio output
+        player.selectTrack(id)
+        diagnostics.append("[JellyReco] Audio output failed: turned the audio track on again")
     }
 
     /// While the server converts, a different audio track means a new conversion with that track,
@@ -1013,6 +1060,7 @@ final class PlaybackController {
     /// reopened). A plain pause in the app keeps the output as it is: restarting it there only
     /// made the sound come back 2-3 s late.
     func play() {
+        if lostAudio != nil { audioRecoveries = 0; restoreLostAudio() }
         if videoNeedsRefresh {
             refreshAfterBackground()
         } else if audioNeedsReload {
