@@ -50,8 +50,8 @@ fi
 make render_ass_colored.mkv $VB -i colored.ass -map 0 -map 1 -c:v libx264 -preset ultrafast -c:s ass
 # Audio track switching: 40 s, six audio tracks as anime and film rips carry them: AAC stereo,
 # Opus stereo / 5.1 / 7.1 (libopus, like fansub and BD remuxes), FLAC stereo, E-AC-3 5.1.
-VA="-f lavfi -i testsrc2=size=640x360:rate=24:duration=40"
-T() { echo "-f lavfi -i sine=frequency=$1:sample_rate=48000:duration=40,aformat=channel_layouts=$2"; }
+VA="-f lavfi -i testsrc2=size=640x360:rate=24:duration=150"
+T() { echo "-f lavfi -i sine=frequency=$1:sample_rate=48000:duration=150,aformat=channel_layouts=$2"; }
 make audio_switch.mkv $VA $(T 300 stereo) $(T 400 stereo) $(T 500 5.1) $(T 600 7.1) $(T 700 stereo) $(T 800 5.1) \
   -map 0 -map 1 -map 2 -map 3 -map 4 -map 5 -map 6 -c:v libx264 -preset ultrafast \
   -c:a:0 aac -c:a:1 libopus -b:a:1 128k -c:a:2 libopus -b:a:2 256k -mapping_family:a:2 1 \
