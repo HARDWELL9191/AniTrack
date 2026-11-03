@@ -77,8 +77,8 @@ let package = Package(
         // LIBMPV_BINARY_BEGIN (the CI checks this pair against the release)
         .binaryTarget(
             name: "Libmpv-GPL",
-            url: "https://github.com/HARDWELL9191/AniTrack/releases/download/libmpv-jr-5/Libmpv.xcframework.zip",
-            checksum: "95323815e2ac183eead99bf2709184bcf72157d56ae89db3ed2579859d46dd3a"
+            url: "https://github.com/HARDWELL9191/AniTrack/releases/download/libmpv-jr-6/Libmpv.xcframework.zip",
+            checksum: "de5fca736bad59a6e7d4a0cc1d27879d05811b555796b7548af30cfa082612d2"
         ),
         // LIBMPV_BINARY_END
     ],
