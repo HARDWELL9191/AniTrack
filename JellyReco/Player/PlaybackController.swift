@@ -100,7 +100,7 @@ final class PlaybackController {
                                                                   output: .sampleBuffer))   // renderer is automatic (see open())
         player.setDiagnosticsEnabled(true)
         attachLog()
-        appliedSubtitleProperties = ["sub-ass-override": model.settings.subtitleASSMode, "sub-ass-style-overrides": ""]
+        appliedSubtitleProperties = Self.initialSubtitleProperties(model.settings)
     }
 
     private func attachLog() {
@@ -131,7 +131,8 @@ final class PlaybackController {
             "sub-auto": "no",
             "sid": "no",
             "sub-codepage": "auto",
-            "sub-ass-override": settings.subtitleASSMode,
+            "sub-ass-override": Self.mpvASSOverride(settings.subtitleASSMode),
+            "sub-ass-force-font": Self.mpvASSForceFont(settings.subtitleASSMode),
             "sub-scale": String(format: "%.2f", settings.subtitleSize),
             "sub-color": settings.subtitleColor.mpvHex,
             "sub-bold": settings.subtitleBold ? "yes" : "no",
@@ -612,7 +613,7 @@ final class PlaybackController {
         player.logHandler = nil
         player.stop()
         player = MPVPlayer(configuration: Self.configuration(settings: settings, output: output))
-        appliedSubtitleProperties = ["sub-ass-override": settings.subtitleASSMode, "sub-ass-style-overrides": ""]
+        appliedSubtitleProperties = Self.initialSubtitleProperties(settings)
         hwdecAlternated = false
         layoutKind = nil
         assHeaderRequested = nil
@@ -984,7 +985,7 @@ final class PlaybackController {
     /// swapped for a text one in the same language, so every file looks the same. Only for the
     /// automatic choice: a subtitle picked on the item page is kept.
     private func textAlternative(to index: Int) -> Int? {
-        guard settings.subtitleASSMode == "force", index >= 0,
+        guard Self.mpvASSOverride(settings.subtitleASSMode) == "force", index >= 0,
               let picture = streams.first(where: { $0.isSubtitle && $0.index == index }),
               Self.isPictureSubtitle(picture.codec) else { return nil }
         let language = picture.language?.lowercased()
@@ -1152,6 +1153,19 @@ final class PlaybackController {
     /// What was last given to mpv (changing sub-ass-override reloads the subtitles, so only on change).
     @ObservationIgnored private var appliedSubtitleProperties: [String: String] = [:]
 
+    /// mpv's sub-ass-override for the Styled subtitles setting. "Force my style, keep fonts" is
+    /// mpv's force mode with sub-ass-force-font=no (JellyReco's libmpv patch 0103): everything
+    /// Force my style sets, except that each ASS style keeps its own font.
+    static func mpvASSOverride(_ mode: String) -> String { mode == "forcefonts" ? "force" : mode }
+    static func mpvASSForceFont(_ mode: String) -> String { mode == "forcefonts" ? "no" : "yes" }
+
+    /// The subtitle properties a new player starts with (as set by configuration(settings:)).
+    static func initialSubtitleProperties(_ settings: AppSettings) -> [String: String] {
+        ["sub-ass-override": mpvASSOverride(settings.subtitleASSMode),
+         "sub-ass-force-font": mpvASSForceFont(settings.subtitleASSMode),
+         "sub-ass-style-overrides": ""]
+    }
+
     private func setSubtitleProperty(_ name: String, _ value: String) {
         guard appliedSubtitleProperties[name] != value else { return }
         appliedSubtitleProperties[name] = value
@@ -1185,7 +1199,7 @@ final class PlaybackController {
         let zoom = filled ? fillScale : 1
         let k = textScale
         var scale = settings.subtitleSize / zoom
-        var override = settings.subtitleASSMode
+        var override = Self.mpvASSOverride(settings.subtitleASSMode)
         let pos: Double
         var marginY = 22.0                       // mpv's default gap above / below text lines (720 lines)
         var marginX = 25.0                       // and to the sides
@@ -1259,6 +1273,7 @@ final class PlaybackController {
         setSubtitleProperty("sub-image-bottom-mode", pictureBottomMode)
         setSubtitleProperty("sub-image-top", String(format: "%.2f", pictureTop < 0 ? -1 : min(60, pictureTop)))
         setSubtitleProperty("sub-ass-override", override)
+        setSubtitleProperty("sub-ass-force-font", Self.mpvASSForceFont(settings.subtitleASSMode))
         setSubtitleProperty("sub-ass-style-overrides", styleOverrides)   // reloads the subtitles when it changes
         setSubtitleProperty("sub-margin-y", String(Int(marginY.rounded())))
         setSubtitleProperty("sub-margin-x", String(Int(marginX.rounded())))

@@ -238,11 +238,12 @@ final class AppSettings {
     var subtitleBold: Bool { didSet { save(subtitleBold, "subtitleBold") } }
     var subtitlePosition: Int { didSet { save(subtitlePosition, "subtitlePosition") } } // 0...100 (mpv sub-pos)
     var overrideASSStyles: Bool { didSet { save(overrideASSStyles, "overrideASSStyles") } }
-    /// mpv's sub-ass-override for styled (ASS/SSA) subtitles: "no", "scale", "force" or "strip".
+    /// Styled (ASS/SSA) subtitles: mpv's sub-ass-override "no", "scale", "force" or "strip", or
+    /// "forcefonts" (force, keeping each style's own font; see PlaybackController.mpvASSOverride).
     var subtitleASSMode: String {
         didSet {
             save(subtitleASSMode, "subtitleASSMode")
-            if !isApplyingRemote { overrideASSStyles = subtitleASSMode == "force" }
+            if !isApplyingRemote { overrideASSStyles = subtitleASSMode == "force" || subtitleASSMode == "forcefonts" }
         }
     }
     /// Outline thickness for plain text subtitles (mpv sub-border-size).
@@ -372,7 +373,7 @@ final class AppSettings {
         subtitlePosition = i("subtitlePosition", 100)
         overrideASSStyles = b("overrideASSStyles", false)
         subtitleASSMode = { let v = s("subtitleASSMode", b("overrideASSStyles", false) ? "force" : "scale")
-            return ["no", "scale", "force", "strip"].contains(v) ? v : "scale" }()
+            return ["no", "scale", "force", "forcefonts", "strip"].contains(v) ? v : "scale" }()
         subtitleOutlineSize = db("subtitleOutlineSize", 3)
         stereoDownmix = b("stereoDownmix", false)
 

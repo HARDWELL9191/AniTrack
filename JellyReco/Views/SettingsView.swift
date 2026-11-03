@@ -655,10 +655,11 @@ struct SubtitleSettingsView: View {
                     Text("Keep their own styling").tag("no")
                     Text("Keep styling, use my size").tag("scale")
                     Text("Force my style").tag("force")
+                    Text("Force my style, keep fonts").tag("forcefonts")
                     Text("Plain text").tag("strip")
                 }
             } footer: {
-                Text("Styled subtitles are ASS/SSA (typical for anime typesetting). They keep their own fonts, colours and positions unless you choose Force my style or Plain text.")
+                Text("Styled subtitles are ASS/SSA (typical for anime typesetting). They keep their own fonts, colours and positions unless you choose Force my style or Plain text. Force my style, keep fonts uses your size, colour and outline with each file's own fonts.")
             }
         }
         .navigationTitle("Subtitles")
