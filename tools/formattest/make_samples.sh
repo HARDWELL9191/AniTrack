@@ -51,7 +51,7 @@ make render_ass_colored.mkv $VB -i colored.ass -map 0 -map 1 -c:v libx264 -prese
 # Audio track switching: 40 s, six audio tracks of every kind the player handles differently
 # (PCM AAC/FLAC/Opus/TrueHD, AC-3 and E-AC-3 through the native compressed path), each its own tone.
 VA="-f lavfi -i testsrc2=size=640x360:rate=24:duration=40"
-T() { echo "-f lavfi -i sine=frequency=$1:sample_rate=48000:duration=40$2"; }
+T() { echo "-f lavfi -i sine=frequency=$1:sample_rate=48000:duration=40${2:-}"; }
 make audio_switch.mkv $VA $(T 300) $(T 400 ,aformat=channel_layouts=5.1) $(T 500 ,aformat=channel_layouts=5.1) \
   $(T 600 ,aformat=channel_layouts=5.1) $(T 700) $(T 800) \
   -map 0 -map 1 -map 2 -map 3 -map 4 -map 5 -map 6 -c:v libx264 -preset ultrafast \
