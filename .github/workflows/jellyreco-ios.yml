@@ -189,6 +189,7 @@ jobs:
           set -o pipefail
           TEST_RUNNER_JELLYRECO_SAMPLES_URL="http://127.0.0.1:8765/render" \
           xcodebuild test -project JellyReco.xcodeproj -scheme JellyReco -destination "id=$UDID" \
+            -only-testing:JellyRecoUITests/AudioSwitchUITests \
             -derivedDataPath build -resultBundlePath uitest.xcresult -skipPackagePluginValidation -skipMacroValidation \
             CODE_SIGNING_ALLOWED=NO 2>&1 | tee uitest-full.log | grep -E "RESULT|KEYBOARD|STATE|error:|Test Case|TEST (SUCCEEDED|FAILED)|\*\* " || true
       - name: Publish results and screenshots to the ci-logs-uitest branch

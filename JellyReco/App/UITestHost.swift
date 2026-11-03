@@ -35,7 +35,9 @@ struct UITestHost: View {
     var body: some View {
         ZStack {
             Color.clear
-            if mode == "subrender" {
+            if mode == "audioswitch" {
+                AudioSwitchHost(settings: model.settings)
+            } else if mode == "subrender" {
                 SubtitleRenderHost(settings: model.settings)
             } else if mode == "fonttest" {
                 FontFallbackHost(settings: model.settings)
@@ -274,5 +276,83 @@ private struct FontFallbackHost: View {
         }
         status = "READY " + ct.joined(separator: " || ") + " || fonts=\(SubtitleFonts.prepare().map { "\($0.family) @ \((try? FileManager.default.contentsOfDirectory(atPath: $0.directory))?.joined(separator: ",") ?? "")" } ?? "none") || "
             + log.lines.joined(separator: " || ")
+    }
+}
+
+
+/// UI test only: plays a file with six audio tracks (AAC, E-AC-3, AC-3, TrueHD, FLAC, Opus) with
+/// the app's own player configuration and switches between them in the patterns people use
+/// (to a track and back, quickly twice, while paused), recording after each switch what mpv
+/// reports: the selected track, the audio output, its format, the clock, and every audio message.
+private struct AudioSwitchHost: View {
+    let settings: AppSettings
+    @State private var player: MPVPlayer?
+    @State private var status = "starting"
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            if let player { MPVVideoPlayer(player: player).ignoresSafeArea() }
+            VStack {
+                Text(status).font(.system(size: 6)).foregroundStyle(Color(white: 0.35))
+                    .accessibilityIdentifier("audioswitch-state")
+                Spacer()
+            }
+        }
+        .task { await run() }
+    }
+
+    private func run() async {
+        let env = ProcessInfo.processInfo.environment
+        guard let s = env["JELLYRECO_SAMPLE"], let url = URL(string: s) else { status = "FAIL no sample"; return }
+        let p = MPVPlayer(configuration: PlaybackController.configuration(settings: settings, output: .sampleBuffer, logLevel: .verbose))
+        p.setDiagnosticsEnabled(true)
+        player = p
+        let log = LogBox()
+        let start = Date()
+        p.logHandler = { msg in
+            let text = msg.message.trimmingCharacters(in: .whitespacesAndNewlines)
+            let lower = text.lowercased()
+            // Everything about audio, plus every warning or error.
+            let audio = msg.prefix.hasPrefix("ao") || msg.prefix.hasPrefix("ad") || msg.prefix.hasPrefix("af")
+                || lower.contains("audio") || lower.contains("ao:") || lower.contains("aid")
+            let serious = msg.level == .error || msg.level == .warning || msg.level == .fatal
+            guard audio || serious else { return }
+            log.lines.append(String(format: "%.1f", Date().timeIntervalSince(start)) + " [\(msg.prefix)] \(text)")
+        }
+        p.load(url, playAutomatically: true, startTime: nil)
+        for _ in 0..<150 where p.audioTracks.count < 6 || p.duration <= .zero {
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        let tracks = p.audioTracks
+        guard tracks.count >= 2 else { status = "FAIL tracks=\(tracks.count) state=\(p.state)"; return }
+        try? await Task.sleep(for: .seconds(2))
+
+        var report: [String] = []
+        func snapshot(_ label: String) {
+            let d = p.playbackDiagnostics.audio
+            let sel = p.audioTracks.first(where: \.isSelected).map { "\($0.mpvID)" } ?? "none"
+            let lines = log.lines
+            log.lines = []
+            report.append("\(label): aid=\(sel) ao=\(d.output ?? "-") codec=\(d.codec ?? "-") out=\(d.outputFormat ?? "-")/\(d.outputChannels ?? "-") native=\(d.nativePath ?? "-") state=\(p.state) pos=\(String(format: "%.1f", Double(p.position.components.seconds) + Double(p.position.components.attoseconds) / 1e18)) || " + lines.suffix(14).joined(separator: " | "))
+        }
+        func select(_ i: Int) { if i < tracks.count { p.selectTrack(tracks[i].id) } }
+        snapshot("start")
+        // To each track and back to the first.
+        for i in 1..<tracks.count {
+            select(i); try? await Task.sleep(for: .seconds(2.5)); snapshot("to \(i + 1)")
+            select(0); try? await Task.sleep(for: .seconds(2.5)); snapshot("back to 1 from \(i + 1)")
+        }
+        // Compressed (native path) to PCM and back, quickly.
+        for (a, b) in [(1, 3), (2, 0), (1, 2), (3, 1)] where max(a, b) < tracks.count {
+            select(a); try? await Task.sleep(for: .milliseconds(150)); select(b)
+            try? await Task.sleep(for: .seconds(2.5)); snapshot("quick \(a + 1)>\(b + 1)")
+        }
+        // While paused, then play.
+        p.pause(); try? await Task.sleep(for: .seconds(1))
+        select(1); try? await Task.sleep(for: .seconds(1)); select(0); try? await Task.sleep(for: .seconds(1))
+        p.play(); try? await Task.sleep(for: .seconds(2.5)); snapshot("paused 2>1 then play")
+        p.pause()
+        status = "READY " + report.joined(separator: " ## ")
     }
 }
