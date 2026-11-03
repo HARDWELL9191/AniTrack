@@ -342,20 +342,23 @@ private struct AudioSwitchHost: View {
         }
         func select(_ i: Int) { if i < tracks.count { p.selectTrack(tracks[i].id) } }
         snapshot("start")
-        // To each track and back to the first.
+        // Tracks: 1 AAC 2.0, 2 Opus 2.0, 3 Opus 5.1, 4 Opus 7.1, 5 FLAC 2.0, 6 E-AC-3 5.1.
         for i in 1..<tracks.count {
             select(i); try? await Task.sleep(for: .seconds(2.5)); snapshot("to \(i + 1)")
             select(0); try? await Task.sleep(for: .seconds(2.5)); snapshot("back to 1 from \(i + 1)")
         }
-        // Compressed (native path) to PCM and back, quickly.
-        for (a, b) in [(1, 3), (2, 0), (1, 2), (3, 1)] where max(a, b) < tracks.count {
+        // Between the Opus tracks and to the others.
+        for (a, b) in [(1, 2), (2, 3), (3, 1), (1, 5), (5, 2), (2, 4), (4, 3)] where max(a, b) < tracks.count {
+            select(a); try? await Task.sleep(for: .seconds(2.5)); snapshot("to \(a + 1)")
+            select(b); try? await Task.sleep(for: .seconds(2.5)); snapshot("\(a + 1)>\(b + 1)")
+        }
+        for (a, b) in [(1, 2), (2, 0), (3, 1)] where max(a, b) < tracks.count {
             select(a); try? await Task.sleep(for: .milliseconds(150)); select(b)
             try? await Task.sleep(for: .seconds(2.5)); snapshot("quick \(a + 1)>\(b + 1)")
         }
-        // While paused, then play.
         p.pause(); try? await Task.sleep(for: .seconds(1))
-        select(1); try? await Task.sleep(for: .seconds(1)); select(0); try? await Task.sleep(for: .seconds(1))
-        p.play(); try? await Task.sleep(for: .seconds(2.5)); snapshot("paused 2>1 then play")
+        select(2); try? await Task.sleep(for: .seconds(1)); select(1); try? await Task.sleep(for: .seconds(1))
+        p.play(); try? await Task.sleep(for: .seconds(2.5)); snapshot("paused 3>2 then play")
         p.pause()
         status = "READY " + report.joined(separator: " ## ")
     }

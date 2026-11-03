@@ -48,14 +48,14 @@ if command -v mkvmerge >/dev/null; then
   mkvinfo render_pgs_zlib.mkv | grep -i -A2 "compression" | head -4
 fi
 make render_ass_colored.mkv $VB -i colored.ass -map 0 -map 1 -c:v libx264 -preset ultrafast -c:s ass
-# Audio track switching: 40 s, six audio tracks of every kind the player handles differently
-# (PCM AAC/FLAC/Opus/TrueHD, AC-3 and E-AC-3 through the native compressed path), each its own tone.
+# Audio track switching: 40 s, six audio tracks as anime and film rips carry them: AAC stereo,
+# Opus stereo / 5.1 / 7.1 (libopus, like fansub and BD remuxes), FLAC stereo, E-AC-3 5.1.
 VA="-f lavfi -i testsrc2=size=640x360:rate=24:duration=40"
-T() { echo "-f lavfi -i sine=frequency=$1:sample_rate=48000:duration=40${2:-}"; }
-make audio_switch.mkv $VA $(T 300) $(T 400 ,aformat=channel_layouts=5.1) $(T 500 ,aformat=channel_layouts=5.1) \
-  $(T 600 ,aformat=channel_layouts=5.1) $(T 700) $(T 800) \
+T() { echo "-f lavfi -i sine=frequency=$1:sample_rate=48000:duration=40,aformat=channel_layouts=$2"; }
+make audio_switch.mkv $VA $(T 300 stereo) $(T 400 stereo) $(T 500 5.1) $(T 600 7.1) $(T 700 stereo) $(T 800 5.1) \
   -map 0 -map 1 -map 2 -map 3 -map 4 -map 5 -map 6 -c:v libx264 -preset ultrafast \
-  -c:a:0 aac -c:a:1 eac3 -c:a:2 ac3 -c:a:3 truehd -strict -2 -c:a:4 flac -c:a:5 libopus \
-  -metadata:s:a:0 title=AAC -metadata:s:a:1 title=EAC3 -metadata:s:a:2 title=AC3 -metadata:s:a:3 title=TrueHD \
-  -metadata:s:a:4 title=FLAC -metadata:s:a:5 title=Opus
+  -c:a:0 aac -c:a:1 libopus -b:a:1 128k -c:a:2 libopus -b:a:2 256k -mapping_family:a:2 1 \
+  -c:a:3 libopus -b:a:3 320k -mapping_family:a:3 1 -c:a:4 flac -c:a:5 eac3 \
+  -metadata:s:a:0 title=AAC -metadata:s:a:1 title="Opus 2.0" -metadata:s:a:2 title="Opus 5.1" \
+  -metadata:s:a:3 title="Opus 7.1" -metadata:s:a:4 title=FLAC -metadata:s:a:5 title=EAC3
 ls -la
