@@ -1,0 +1,18 @@
+wizard ready (HTTP 200)
+{"LocalAddress":"http://172.17.0.2:8096","ServerName":"348c4015ee8b","Version":"12.4.0","ProductName":"Jellyfin Server","OperatingSystem":"","Id":"cf9aa313d7ad4aeea56ab6fb0540d5ed","StartupWizardCompleted":false}
+  POST /Startup/Configuration -> 204
+  GET /Startup/User -> 200
+  POST /Startup/User -> 204
+  POST /Startup/RemoteAccess -> 204
+  POST /Startup/Complete -> 204
+  POST /Users/AuthenticateByName -> 200
+token ok: 32 chars
+zlib eceb31a5d254e4f28d55148316c64b5c eceb31a5d254e4f28d55148316c64b5c 0 Video h264 False
+zlib eceb31a5d254e4f28d55148316c64b5c eceb31a5d254e4f28d55148316c64b5c 1 Subtitle PGSSUB False
+FETCH zlib sub#1 as .pgssub -> HTTP 200, 902 bytes, starts with 'PG'
+FETCH zlib sub#1 as .sup -> HTTP 200, 902 bytes, starts with 'PG'
+PROBE out/zlib.1.pgssub: hdmv_pgs_subtitle
+PROBE out/zlib.1.sup: hdmv_pgs_subtitle
+[22:23:54.392] [INF] [10] Jellyfin.Server.Migrations.JellyfinMigrationService: Seed migration null-FixLibrarySubtitleDownloadLanguages.
+[22:24:04.448] [INF] [6] MediaBrowser.MediaEncoding.Subtitles.SubtitleEncoder: /usr/lib/jellyfin-ffmpeg/ffmpeg -nostdin -y -i file:"/media/zlib/Zlib Test (2020).mkv" -map 0:1 -an -vn -c:s copy -flush_packets 1 "/config/data/subtitles/ec/eceb31a5-d254-e4f2-8d55-148316c64b5c/1.sup"
+[22:24:04.472] [INF] [21] MediaBrowser.MediaEncoding.Subtitles.SubtitleEncoder: ffmpeg subtitle extraction completed for file:"/media/zlib/Zlib Test (2020).mkv" to /config/data/subtitles/ec/eceb31a5-d254-e4f2-8d55-148316c64b5c/1.sup
