@@ -237,7 +237,7 @@ jobs:
           rm -rf src-tauri/target/release/bundle
 
       - name: Build the AppImage
-        run: ./tools/ci_run.sh "AppImage build" npx tauri build --bundles appimage --config src-tauri/version.json
+        run: ./tools/ci_run.sh "AppImage build" npx tauri build --verbose --bundles appimage --config src-tauri/version.json
 
       - name: Tests
         working-directory: jellyreco/src-tauri

@@ -33,7 +33,8 @@ $SUDO apt-get install -y --no-install-recommends \
   libwayland-dev wayland-protocols libegl-dev libgl-dev libgbm-dev libdrm-dev libva-dev libvdpau-dev libvulkan-dev \
   libpulse-dev libasound2-dev libpipewire-0.3-dev libjpeg-dev zlib1g-dev libuchardet-dev liblcms2-dev libzimg-dev \
   libbluray-dev libarchive-dev libdvdnav-dev librubberband-dev libsecret-1-dev \
-  libfuse2t64 xvfb xauth x11-utils imagemagick
+  libfuse2t64 xvfb xauth x11-utils imagemagick \
+  ocl-icd-libopencl1
 echo "::endgroup::"
 
 echo "::group::FFmpeg $FFMPEG_SERIES (BtbN, GPL, shared)"
@@ -109,6 +110,15 @@ python3 -I -m zipfile -e "$WORK/wheels/onnxruntime_ep_openvino-$OPENVINO_EP_VERS
 rm -rf "$AI/openvino" && mkdir -p "$AI/openvino"
 find "$WORK/openvino/onnxruntime_ep_openvino" -maxdepth 1 -type f ! -name "*.py" ! -name "libonnxruntime_providers_openvino_plugin.so.*" -exec cp {} "$AI/openvino/" \;
 [ -f "$AI/openvino/libonnxruntime_providers_openvino_plugin.so" ] && [ -f "$AI/openvino/libopenvino_intel_npu_plugin.so" ] || { echo "::error::OpenVINO plugin files missing"; exit 1; }
+# The AppImage bundler stops at any library whose dependencies it can't find: name them here instead.
+# (OpenVINO's GPU plugin needs the OpenCL loader, libOpenCL.so.1, installed above; like Vulkan's
+# loader it only finds the PC's own driver.)
+missing=""
+for so in $(find "$AI" -name "*.so*" -type f); do
+  m=$(LD_LIBRARY_PATH="$AI:$AI/openvino" ldd "$so" 2>/dev/null | grep "not found" || true)
+  [ -n "$m" ] && missing="$missing $(basename "$so"):$(echo "$m" | awk '{print $1}' | tr '\n' ' ')"
+done
+[ -z "$missing" ] || { echo "::error::AI libraries with dependencies the build machine doesn't have:$missing"; exit 1; }
 MODEL="https://huggingface.co/BAAI/bge-small-en-v1.5/resolve/main"
 curl -fsSL "$MODEL/onnx/model.onnx" -o "$AI/model.onnx"
 curl -fsSL "$MODEL/vocab.txt" -o "$AI/vocab.txt"

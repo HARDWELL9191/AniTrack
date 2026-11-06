@@ -97,13 +97,14 @@ $OpenVinoVersion = "1.8.1"
 $WebGpuVersion = "0.5.0"
 $ModelRepo = "https://huggingface.co/BAAI/bge-small-en-v1.5/resolve/main"
 function Get-Wheel($name, $version) {
-  python -m pip download "$name==$version" --platform $WheelPlatform --only-binary=:all: --python-version 3.12 --no-deps -d $work
+  # (Output goes to the log, not into the function's result: only the folder is returned.)
+  python -m pip download "$name==$version" --platform $WheelPlatform --only-binary=:all: --python-version 3.12 --no-deps -d $work | Out-Host
   if ($LASTEXITCODE -ne 0) { throw "pip download $name failed" }
   $wheel = Get-ChildItem $work -Filter "$($name.Replace('-', '_'))-$version-*$WheelPlatform.whl" | Select-Object -First 1
   if (-not $wheel) { throw "$name wheel not found" }
   $unzip = Join-Path $work "$name-$Arch"
-  Expand-Archive -Path $wheel.FullName -DestinationPath $unzip -Force
-  $unzip
+  Expand-Archive -Path $wheel.FullName -DestinationPath $unzip -Force | Out-Null
+  return $unzip
 }
 function Copy-FromWheel($unzip, $folder, $files, $dest) {
   foreach ($f in $files) {
