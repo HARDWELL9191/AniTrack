@@ -71,7 +71,7 @@
       "resources/mpv/": "mpv/"
     },
     "shortDescription": "JellyReco",
-    "longDescription": "A Jellyfin client with an mpv player (every video, audio and subtitle format) and personal picks from an on-device AI. Windows on Arm and Linux x86_64.",
+    "longDescription": "A Jellyfin client with an mpv player (every video, audio and subtitle format) and personal picks from an on-device AI. Windows on Arm, Windows x64 and Linux x86_64.",
     "copyright": "Unofficial Jellyfin client",
     "windows": {
       "nsis": {

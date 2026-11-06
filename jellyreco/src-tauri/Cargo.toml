@@ -1,7 +1,7 @@
 [package]
 name = "jellyreco"
 version = "1.0.0"
-description = "JellyReco: a Jellyfin client for Windows on Arm with an mpv engine and personal picks"
+description = "JellyReco: a Jellyfin client for Windows (Arm and x64) and Linux with an mpv engine and personal picks"
 edition = "2021"
 rust-version = "1.92"
 

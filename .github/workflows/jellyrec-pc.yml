@@ -1,9 +1,9 @@
 name: JellyReco PC
 
-# Windows on Arm (.exe installer) and Linux x86_64 (AppImage) from the same commit, in one run:
-# both platforms always ship together, with the same version number (1.0.<run number>), and the
-# "JellyReco PC (latest build)" release holds both files. (The file keeps its old name so the
-# build numbers carry on; GitHub counts them per workflow file.)
+# Windows on Arm and Windows x64 (.exe installers) and Linux x86_64 (AppImage) from the same commit,
+# in one run: all three always ship together, with the same version number (1.0.<run number>), and
+# the "JellyReco PC (latest build)" release holds all three files. (The file keeps its old name so
+# the build numbers carry on; GitHub counts them per workflow file.)
 
 on:
   push:
@@ -53,14 +53,28 @@ jobs:
           echo "::notice::My List, Not for me and Already seen round-trip between the Windows and iPhone apps"
 
   windows:
-    # Windows 11 on Arm (Snapdragon-class), so the app, libmpv and the checks all run natively on ARM64.
-    runs-on: windows-11-arm
+    # Each installer is built and checked natively on its own architecture: Windows 11 on Arm
+    # (Snapdragon-class) for ARM64, Windows Server 2025 for x64. The app, libmpv and the checks all
+    # run as they will on that PC.
+    name: windows (${{ matrix.arch }})
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - arch: arm64
+            runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+          - arch: x64
+            runner: windows-2025
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.runner }}
     defaults:
       run:
         shell: pwsh
         working-directory: jellyreco
     env:
       GITHUB_TOKEN: ${{ github.token }}
+      JR_ARCH: ${{ matrix.arch }}
     steps:
       - uses: actions/checkout@v6
 
@@ -74,17 +88,17 @@ jobs:
         with:
           python-version: "3.14"
 
-      - name: Rust (aarch64-pc-windows-msvc)
+      - name: Rust (${{ matrix.target }})
         run: |
           if (-not (Get-Command rustup -ErrorAction SilentlyContinue)) {
-            Invoke-WebRequest https://static.rust-lang.org/rustup/dist/aarch64-pc-windows-msvc/rustup-init.exe -OutFile rustup-init.exe
+            Invoke-WebRequest https://static.rust-lang.org/rustup/dist/${{ matrix.target }}/rustup-init.exe -OutFile rustup-init.exe
             ./rustup-init.exe -y --profile minimal --default-toolchain stable
             "$env:USERPROFILE\.cargo\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
             $env:PATH = "$env:USERPROFILE\.cargo\bin;$env:PATH"
           }
           rustup toolchain install stable --profile minimal
           rustup default stable
-          rustup target add aarch64-pc-windows-msvc
+          rustup target add ${{ matrix.target }}
           rustc -vV
           node -v
 
@@ -94,13 +108,13 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             jellyreco/src-tauri/target
-          key: cargo-jellyreco-arm64-${{ hashFiles('jellyreco/src-tauri/Cargo.lock') }}
-          restore-keys: cargo-jellyreco-arm64-
+          key: cargo-jellyreco-${{ matrix.arch }}-${{ hashFiles('jellyreco/src-tauri/Cargo.lock') }}
+          restore-keys: cargo-jellyreco-${{ matrix.arch }}-
 
       - name: Install packages
         run: npm ci
 
-      - name: Playback engine (libmpv ARM64) and on-device AI files
+      - name: Playback engine (libmpv ${{ matrix.arch }}) and on-device AI files
         run: ./tools/prepare_deps.ps1
 
       - name: Version (1.0.<build number>, the same for both platforms)
@@ -111,15 +125,15 @@ jobs:
           "{`"version`": `"$v`"}" | Out-File -Encoding ascii src-tauri/version.json
           # Installers left by earlier builds come back with the cache: remove them, so only this
           # build's installer can be published (an old 1.0.0 one was picked before).
-          Remove-Item -Recurse -Force src-tauri/target/aarch64-pc-windows-msvc/release/bundle -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force src-tauri/target/${{ matrix.target }}/release/bundle -ErrorAction SilentlyContinue
 
       - name: Build the installer
-        run: npx tauri build --target aarch64-pc-windows-msvc --bundles nsis --config src-tauri/version.json
+        run: npx tauri build --target ${{ matrix.target }} --bundles nsis --config src-tauri/version.json
 
       # Same target and profile as the installer build, so these reuse what it compiled.
       - name: Tests
         working-directory: jellyreco/src-tauri
-        run: cargo test --release --lib --target aarch64-pc-windows-msvc
+        run: cargo test --release --lib --target ${{ matrix.target }}
 
       # Every container / video codec / audio codec / subtitle format in the test set must play to the
       # end through the exact libmpv-2.dll the installer ships, with every audio and subtitle track found.
@@ -129,42 +143,42 @@ jobs:
           if (-not $env:FFMPEG_EXE) { throw "no ffmpeg.exe for the test media" }
           python -I ../tools/make_test_media.py $env:FFMPEG_EXE "$env:RUNNER_TEMP/media"
           if ($LASTEXITCODE -ne 0) { throw "making test media failed" }
-          cargo build --release --example mpv_check --target aarch64-pc-windows-msvc
+          cargo build --release --example mpv_check --target ${{ matrix.target }}
           if ($LASTEXITCODE -ne 0) { throw "mpv_check build failed" }
-          python -I ../tools/mpv_check.py target/aarch64-pc-windows-msvc/release/examples/mpv_check.exe resources/mpv/libmpv-2.dll "$env:RUNNER_TEMP/media" "$env:RUNNER_TEMP/mpv-report.json"
+          python -I ../tools/mpv_check.py target/${{ matrix.target }}/release/examples/mpv_check.exe resources/mpv/libmpv-2.dll "$env:RUNNER_TEMP/media" "$env:RUNNER_TEMP/mpv-report.json"
           if ($LASTEXITCODE -ne 0) { throw "playback check failed" }
 
-      - name: AI check (real model, this runner has no NPU so it runs on the CPU)
+      - name: AI check (real model; this runner has no NPU or GPU, so it runs on the CPU)
         working-directory: jellyreco/src-tauri
         run: |
-          cargo build --release --example embed_check --target aarch64-pc-windows-msvc
-          python -I ../tools/ai_check.py target/aarch64-pc-windows-msvc/release/examples/embed_check.exe resources/ai "$env:RUNNER_TEMP/ai-check"
+          cargo build --release --example embed_check --target ${{ matrix.target }}
+          python -I ../tools/ai_check.py target/${{ matrix.target }}/release/examples/embed_check.exe resources/ai "$env:RUNNER_TEMP/ai-check"
           if ($LASTEXITCODE -ne 0) { throw "AI check failed" }
 
       - name: Collect the .exe
         run: |
           # Exactly this build's installer (its name carries the version), and the app inside it must
           # report this version: otherwise the build fails instead of publishing an old one.
-          $setup = @(Get-ChildItem src-tauri/target/aarch64-pc-windows-msvc/release/bundle/nsis -Filter "*_$($env:APP_VERSION)_*.exe")
-          if ($setup.Count -ne 1) { Get-ChildItem src-tauri/target/aarch64-pc-windows-msvc/release/bundle/nsis | Format-Table Name; throw "Expected one installer for $env:APP_VERSION, found $($setup.Count)" }
+          $setup = @(Get-ChildItem src-tauri/target/${{ matrix.target }}/release/bundle/nsis -Filter "*_$($env:APP_VERSION)_*.exe")
+          if ($setup.Count -ne 1) { Get-ChildItem src-tauri/target/${{ matrix.target }}/release/bundle/nsis | Format-Table Name; throw "Expected one installer for $env:APP_VERSION, found $($setup.Count)" }
           $setup = $setup[0]
-          $built = (Get-Item src-tauri/target/aarch64-pc-windows-msvc/release/jellyreco.exe).VersionInfo.ProductVersion
+          $built = (Get-Item src-tauri/target/${{ matrix.target }}/release/jellyreco.exe).VersionInfo.ProductVersion
           Write-Host "Installer: $($setup.Name) · app version $built"
           if (-not "$built".StartsWith($env:APP_VERSION)) { throw "The app is version $built, expected $env:APP_VERSION" }
           New-Item -ItemType Directory -Force out | Out-Null
-          Copy-Item $setup.FullName out/JellyReco-Setup-arm64.exe
+          Copy-Item $setup.FullName out/JellyReco-Setup-${{ matrix.arch }}.exe
           Get-ChildItem out | Format-Table Name, Length
 
       - uses: actions/upload-artifact@v7
         with:
-          name: JellyReco-Windows-ARM64
-          path: jellyreco/out/JellyReco-Setup-arm64.exe
+          name: JellyReco-Windows-${{ matrix.arch }}
+          path: jellyreco/out/JellyReco-Setup-${{ matrix.arch }}.exe
           if-no-files-found: error
 
       - uses: actions/upload-artifact@v7
         if: ${{ always() }}
         with:
-          name: JellyReco-playback-report
+          name: JellyReco-playback-report-${{ matrix.arch }}
           path: ${{ runner.temp }}/mpv-report.json
           if-no-files-found: ignore
 
@@ -314,7 +328,7 @@ jobs:
             ${{ runner.temp }}/app.log
           if-no-files-found: ignore
 
-  # Both builds passed: one release with both files, so the two platforms never drift apart.
+  # All builds passed: one release with all three files, so the platforms never drift apart.
   publish:
     needs: [sync-check, windows, linux]
     if: github.ref == 'refs/heads/jellyreco'
@@ -322,13 +336,17 @@ jobs:
     steps:
       - uses: actions/download-artifact@v8
         with:
-          name: JellyReco-Windows-ARM64
+          name: JellyReco-Windows-arm64
+          path: out
+      - uses: actions/download-artifact@v8
+        with:
+          name: JellyReco-Windows-x64
           path: out
       - uses: actions/download-artifact@v8
         with:
           name: JellyReco-Linux-x86_64
           path: out
-      - name: Publish "JellyReco PC (latest build)" with both files
+      - name: Publish "JellyReco PC (latest build)" with all three files
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -336,8 +354,11 @@ jobs:
           ls -la out
           chmod +x out/JellyReco-x86_64.AppImage
           NOTES="Version 1.0.${{ github.run_number }} · $(date -u '+%Y-%m-%d %H:%M UTC') · ${GITHUB_SHA::7}
-          Windows on Arm: JellyReco-Setup-arm64.exe · Linux x86_64: JellyReco-x86_64.AppImage"
+          Windows on Arm (Snapdragon): JellyReco-Setup-arm64.exe · Windows x64 (Intel / AMD): JellyReco-Setup-x64.exe · Linux x86_64: JellyReco-x86_64.AppImage"
           gh release delete jellyreco-pc-latest --yes --cleanup-tag -R "$GITHUB_REPOSITORY" 2>/dev/null || true
           gh release delete jellyrec-pc-latest --yes --cleanup-tag -R "$GITHUB_REPOSITORY" 2>/dev/null || true   # the old, misnamed one
-          gh release create jellyreco-pc-latest out/JellyReco-Setup-arm64.exe out/JellyReco-x86_64.AppImage -R "$GITHUB_REPOSITORY" \
+          for f in JellyReco-Setup-arm64.exe JellyReco-Setup-x64.exe JellyReco-x86_64.AppImage; do
+            [ -s "out/$f" ] || { echo "::error::$f is missing"; exit 1; }
+          done
+          gh release create jellyreco-pc-latest out/JellyReco-Setup-arm64.exe out/JellyReco-Setup-x64.exe out/JellyReco-x86_64.AppImage -R "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" --title "JellyReco PC 1.0.${{ github.run_number }} (latest build)" --notes "$NOTES" --prerelease

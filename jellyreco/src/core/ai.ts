@@ -1,13 +1,13 @@
 // On-device overview similarity (AniReco's engine): bge-small-en-v1.5 in the app's Rust side with
-// ONNX Runtime, on the Snapdragon NPU (QNN) when it can, otherwise the CPU. This file is the
-// TypeScript side: what to embed and the vector math.
+// ONNX Runtime, on the best hardware the PC has: an NPU (Snapdragon or Intel Core Ultra), then any
+// GPU, then the CPU. This file is the TypeScript side: what to embed and the vector math.
 
 import { numericId } from "./api";
 import type { Item } from "./types";
 
 export interface EngineStatus {
-  /** "npu" (every layer on the Snapdragon NPU), "npu+cpu" (NPU with CPU help), "cpu", or "off". */
-  backend: "npu" | "npu+cpu" | "cpu" | "off";
+  /** "npu" (every layer on the NPU), "npu+cpu" (NPU with CPU help), "gpu", "cpu", or "off". */
+  backend: "npu" | "npu+cpu" | "gpu" | "cpu" | "off";
   detail: string;
 }
 
