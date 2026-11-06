@@ -4,7 +4,8 @@
 #    decoders) and libmpv 0.41 built against it, installed to $PREFIX and registered with ldconfig,
 #    so the app links libmpv and the AppImage bundler copies it with everything it needs.
 #  - The on-device AI: ONNX Runtime (CPU, uses AVX2/AVX-512 where the CPU has them) plus its WebGPU
-#    plugin (any Vulkan GPU: AMD, Intel, Nvidia), and the bge-small model with fixed shapes.
+#    plugin (any Vulkan GPU: AMD, Intel, Nvidia), Intel's OpenVINO plugin in ai/openvino (Core Ultra
+#    NPU, with Intel's NPU driver installed), and the bge-small model with fixed shapes.
 # Writes FFMPEG_BIN (for the playback check) to $GITHUB_ENV when that's set.
 set -euo pipefail
 # A failure shows up as an annotation on the run, with the line and the command.
@@ -18,6 +19,7 @@ MPV_TAG="v0.41.0"
 FFMPEG_SERIES="${FFMPEG_SERIES:-8}"
 ORT_VERSION="1.31.1"
 WEBGPU_EP_VERSION="0.5.0"
+OPENVINO_EP_VERSION="1.8.1"
 SUDO=""; [ "$(id -u)" -ne 0 ] && SUDO="sudo"
 mkdir -p "$WORK"
 
@@ -89,18 +91,24 @@ $SUDO ldconfig
 ls -la "$PREFIX/lib/libmpv.so"*
 echo "::endgroup::"
 
-echo "::group::On-device AI (ONNX Runtime $ORT_VERSION + WebGPU plugin $WEBGPU_EP_VERSION, bge-small)"
+echo "::group::On-device AI (ONNX Runtime $ORT_VERSION + WebGPU plugin $WEBGPU_EP_VERSION + OpenVINO plugin $OPENVINO_EP_VERSION, bge-small)"
 AI="$APP/src-tauri/resources/ai"
 mkdir -p "$AI" "$WORK/wheels"
 python3 -m pip download --no-deps --only-binary=:all: --platform manylinux_2_28_x86_64 --python-version 3.12 \
-  -d "$WORK/wheels" "onnxruntime==$ORT_VERSION" "onnxruntime-ep-webgpu==$WEBGPU_EP_VERSION"
-rm -rf "$WORK/ort" "$WORK/webgpu"
+  -d "$WORK/wheels" "onnxruntime==$ORT_VERSION" "onnxruntime-ep-webgpu==$WEBGPU_EP_VERSION" "onnxruntime-ep-openvino==$OPENVINO_EP_VERSION"
+rm -rf "$WORK/ort" "$WORK/webgpu" "$WORK/openvino"
 python3 -I -m zipfile -e "$WORK/wheels/onnxruntime-$ORT_VERSION-cp312-cp312-manylinux_2_28_x86_64.whl" "$WORK/ort"
 python3 -I -m zipfile -e "$WORK/wheels/onnxruntime_ep_webgpu-$WEBGPU_EP_VERSION-py3-none-manylinux_2_28_x86_64.whl" "$WORK/webgpu"
 cp "$WORK/ort/onnxruntime/capi/libonnxruntime.so.$ORT_VERSION" "$AI/libonnxruntime.so"
 cp "$WORK/ort/onnxruntime/capi/libonnxruntime_providers_shared.so" "$AI/"
 cp "$WORK/webgpu/onnxruntime_ep_webgpu/libonnxruntime_providers_webgpu.so" "$AI/"
 cp "$WORK/webgpu/onnxruntime_ep_webgpu-$WEBGPU_EP_VERSION.dist-info/licenses/ThirdPartyNotices.txt" "$AI/WebGPU_ThirdPartyNotices.txt"
+# OpenVINO: the plugin and its runtime as Intel ships them (they find each other through $ORIGIN);
+# the plugin's two versioned copies (.so.1, .so.1.x.y) are the same file and aren't needed.
+python3 -I -m zipfile -e "$WORK/wheels/onnxruntime_ep_openvino-$OPENVINO_EP_VERSION-py3-none-manylinux_2_28_x86_64.whl" "$WORK/openvino"
+rm -rf "$AI/openvino" && mkdir -p "$AI/openvino"
+find "$WORK/openvino/onnxruntime_ep_openvino" -maxdepth 1 -type f ! -name "*.py" ! -name "libonnxruntime_providers_openvino_plugin.so.*" -exec cp {} "$AI/openvino/" \;
+[ -f "$AI/openvino/libonnxruntime_providers_openvino_plugin.so" ] && [ -f "$AI/openvino/libopenvino_intel_npu_plugin.so" ] || { echo "::error::OpenVINO plugin files missing"; exit 1; }
 MODEL="https://huggingface.co/BAAI/bge-small-en-v1.5/resolve/main"
 curl -fsSL "$MODEL/onnx/model.onnx" -o "$AI/model.onnx"
 curl -fsSL "$MODEL/vocab.txt" -o "$AI/vocab.txt"

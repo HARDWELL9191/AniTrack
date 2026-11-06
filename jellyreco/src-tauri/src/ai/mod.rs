@@ -2,9 +2,15 @@
 //!
 //! Model: BAAI bge-small-en-v1.5 (sentence embeddings, 384 numbers per show; MTEB 62.2 against
 //! all-MiniLM-L6-v2's 56.3 at a similar size), run with ONNX Runtime.
-//! Snapdragon NPU first (Qualcomm's QNN execution provider plugin, HTP backend), then the NPU with
-//! the CPU covering any layer the NPU can't run, then the CPU alone. Every show is embedded once
-//! and kept in a small binary file, so the model only runs for shows it hasn't seen.
+//! Hardware, best first (each step only when its plugin ships with the build and finds hardware):
+//!  1. NPU: Snapdragon (Qualcomm's QNN plugin, Windows on Arm) or Intel Core Ultra (Intel's OpenVINO
+//!     plugin, Windows x64 and Linux; loaded on Intel processors only). The whole model on the NPU
+//!     first, then the NPU with the CPU covering any layer it can't run.
+//!  2. GPU: ONNX Runtime's WebGPU plugin on any DirectX 12 (Windows) or Vulkan (Linux) GPU from
+//!     AMD, Nvidia, Intel or Qualcomm, a discrete card first; software renderers are skipped.
+//!  3. CPU.
+//! Every show is embedded once and kept in a small binary file, so the model only runs for shows it
+//! hasn't seen.
 
 mod store;
 pub mod tokenizer;
@@ -28,6 +34,8 @@ const STORE_FILE: &str = "embeddings-bge-small-v1.bin";
 
 /// Qualcomm's QNN execution provider (the onnxruntime-qnn plugin).
 const QNN_EP: &str = "QNNExecutionProvider";
+/// Intel's OpenVINO execution provider (the onnxruntime-ep-openvino plugin).
+const OPENVINO_EP: &str = "OpenVINOExecutionProvider";
 
 #[derive(Clone, Serialize)]
 pub struct Status {
@@ -37,9 +45,10 @@ pub struct Status {
 }
 
 pub struct Paths {
-    /// Folder with onnxruntime.dll (and the QNN libraries), model.onnx and vocab.txt.
+    /// Folder with ONNX Runtime and its plugins (QNN, OpenVINO in openvino/, WebGPU), model.onnx
+    /// and vocab.txt.
     pub resources: PathBuf,
-    /// Where the vector file and the NPU's compiled graph are kept.
+    /// Where the vector file and the NPU's compiled graph / cache are kept.
     pub data: PathBuf,
 }
 
@@ -181,12 +190,43 @@ impl Engine {
                 Err(e) => notes.push(format!("QNN plugin: {}", short_reason(&e.to_string()))),
             }
         }
-        // Linux: any Vulkan GPU (Nvidia, AMD, Intel) through ONNX Runtime's WebGPU plugin.
-        #[cfg(target_os = "linux")]
-        if let Some(plugin) = ["libonnxruntime_providers_webgpu.so", "onnxruntime_providers_webgpu.so"].iter().map(|n| dir.join(n)).find(|p| p.exists()) {
+        // Intel Core Ultra NPU: Intel's OpenVINO plugin (in its own folder with the OpenVINO runtime).
+        // Only Intel processors have this NPU, so elsewhere the large runtime isn't even loaded.
+        let openvino_plugin = ["onnxruntime_providers_openvino_plugin.dll", "libonnxruntime_providers_openvino_plugin.so"]
+            .iter()
+            .map(|n| dir.join("openvino").join(n))
+            .find(|p| p.exists());
+        if let Some(plugin) = openvino_plugin.filter(|_| intel_cpu()) {
+            match env.register_ep_library("openvino", &plugin) {
+                Ok(()) => {
+                    for (backend, npu_only) in [("npu", true), ("npu+cpu", false)] {
+                        match self.openvino_npu_session(&env, &model, npu_only) {
+                            Ok(session) => {
+                                let detail = if npu_only { "Intel NPU (OpenVINO)" } else { "Intel NPU with CPU help (OpenVINO)" };
+                                return Ok((finish(session, tokenizer, env)?, Status { backend: backend.into(), detail: detail.into() }));
+                            }
+                            Err(e) => {
+                                let none = e == NO_INTEL_NPU;
+                                notes.push(format!("{backend}: {}", short_reason(&e)));
+                                if none { break; }
+                            }
+                        }
+                    }
+                }
+                Err(e) => notes.push(format!("OpenVINO plugin: {}", short_reason(&e.to_string()))),
+            }
+        }
+        // Any GPU (AMD, Nvidia, Intel, Qualcomm) through ONNX Runtime's WebGPU plugin: DirectX 12 on
+        // Windows, Vulkan on Linux.
+        let webgpu_plugin = ["onnxruntime_providers_webgpu.dll", "libonnxruntime_providers_webgpu.so", "onnxruntime_providers_webgpu.so"]
+            .iter()
+            .map(|n| dir.join(n))
+            .find(|p| p.exists());
+        if let Some(plugin) = webgpu_plugin {
             match self.gpu_session(&env, &model, &plugin) {
                 Ok((session, name)) => {
-                    return Ok((finish(session, tokenizer, env)?, Status { backend: "gpu".into(), detail: format!("GPU: {name} (WebGPU over Vulkan)") }));
+                    let api = if cfg!(windows) { "WebGPU over DirectX 12" } else { "WebGPU over Vulkan" };
+                    return Ok((finish(session, tokenizer, env)?, Status { backend: "gpu".into(), detail: format!("GPU: {name} ({api})") }));
                 }
                 Err(e) => notes.push(format!("GPU: {}", short_reason(&e))),
             }
@@ -200,12 +240,16 @@ impl Engine {
 
     /// A session on the GPU through the WebGPU plugin. The plugin takes one GPU at a time, so with
     /// several (e.g. a Radeon or GeForce card plus the processor's own graphics) it gets the best one:
-    /// a discrete card first.
-    #[cfg(target_os = "linux")]
+    /// a discrete card first. Software renderers (Windows' WARP, Mesa's llvmpipe) don't count: the
+    /// CPU path is faster than a GPU emulated on the CPU.
     fn gpu_session(&self, env: &ort::environment::Environment, model: &Path, plugin: &Path) -> Result<(Session, String), String> {
         env.register_ep_library("webgpu", plugin).map_err(|e| format!("plugin: {e}"))?;
-        let is_gpu = |d: &ort::device::Device<'_>| d.ep().is_ok_and(|ep| ep.to_ascii_lowercase().contains("webgpu")) && d.hardware_device().ty() == DeviceType::GPU;
-        let best = env.devices().filter(|d| is_gpu(d)).enumerate().min_by_key(|(i, d)| (gpu_rank(d), *i)).map(|(i, _)| i).ok_or("no Vulkan GPU found")?;
+        let is_gpu = |d: &ort::device::Device<'_>| {
+            d.ep().is_ok_and(|ep| ep.to_ascii_lowercase().contains("webgpu"))
+                && d.hardware_device().ty() == DeviceType::GPU
+                && !SOFTWARE_GPU_VENDORS.contains(&gpu_facts(d).0)
+        };
+        let best = env.devices().filter(|d| is_gpu(d)).enumerate().min_by_key(|(i, d)| (gpu_rank(d), *i)).map(|(i, _)| i).ok_or("no GPU found")?;
         let chosen = || env.devices().filter(|d| is_gpu(d)).nth(best);
         let name = chosen().map(|d| gpu_name(&d)).unwrap_or_else(|| "GPU".into());
         let options: Vec<(String, String)> = Vec::new();
@@ -217,6 +261,38 @@ impl Engine {
             .commit_from_file(model)
             .map_err(|e| e.to_string())?;
         Ok((session, name))
+    }
+
+    /// The Intel NPU through OpenVINO. OpenVINO compiles the model for the NPU the first time and
+    /// keeps the result in its cache folder, so later starts are quick.
+    fn openvino_npu_session(&self, env: &ort::environment::Environment, model: &Path, npu_only: bool) -> Result<Session, String> {
+        let is_npu = |d: &ort::device::Device<'_>| {
+            d.ep().is_ok_and(|ep| ep == OPENVINO_EP)
+                && (d.hardware_device().ty() == DeviceType::NPU || ep_metadata(d, c"ov_device").is_some_and(|v| v.starts_with("NPU")))
+        };
+        if !env.devices().any(|d| is_npu(&d)) {
+            return Err(NO_INTEL_NPU.into());
+        }
+        let cache = self.paths.data.join("openvino-cache");
+        let attempt = |use_cache: bool| -> Result<Session, String> {
+            let mut options: Vec<(String, String)> = Vec::new();
+            if use_cache && std::fs::create_dir_all(&cache).is_ok() {
+                options.push((format!("{OPENVINO_EP}.cache_dir"), cache.display().to_string()));
+            }
+            let mut b = base_builder(env)?;
+            if npu_only {
+                b = b.with_config_entry("session.disable_cpu_ep_fallback", "1").map_err(|e| e.to_string())?;
+            }
+            b.with_devices(env.devices().filter(|d| is_npu(d)), Some(&options))
+                .map_err(|e| e.to_string())?
+                .commit_from_file(model)
+                .map_err(|e| e.to_string())
+        };
+        // The cache isn't essential: run without it rather than lose the NPU.
+        attempt(true).or_else(|first| {
+            let _ = std::fs::remove_dir_all(&cache);
+            attempt(false).map_err(|e| format!("{e} (first try: {first})"))
+        })
     }
 
     fn npu_session(&self, env: &ort::environment::Environment, model: &Path, backend: &Path, npu_only: bool) -> Result<Session, String> {
@@ -270,7 +346,7 @@ fn base_builder(env: &ort::environment::Environment) -> Result<ort::session::bui
         .map_err(|e| e.to_string())?
         .with_optimization_level(GraphOptimizationLevel::Level3)
         // Snapdragon: 2 threads (the NPU does the work). Elsewhere: up to 4 of the CPU's cores.
-        .and_then(|b| b.with_intra_threads(if cfg!(windows) { 2 } else { std::thread::available_parallelism().map(|n| n.get().clamp(1, 4)).unwrap_or(2) }))
+        .and_then(|b| b.with_intra_threads(if cfg!(all(windows, target_arch = "aarch64")) { 2 } else { std::thread::available_parallelism().map(|n| n.get().clamp(1, 4)).unwrap_or(2) }))
         // Static shapes (the NPU needs them): one show at a time, 128 tokens.
         .and_then(|b| b.with_dimension_override("batch_size", 1))
         .and_then(|b| b.with_dimension_override("sequence_length", SEQ_LEN as i64))
@@ -319,16 +395,17 @@ fn embed(l: &mut Loaded, text: &str) -> Result<Vec<f32>, String> {
     Ok(pooled.iter().map(|x| x / norm).collect())
 }
 
+const NO_INTEL_NPU: &str = "no Intel NPU found";
+
 /// PCI vendor ids.
-#[cfg(target_os = "linux")]
 const AMD: u32 = 0x1002;
-#[cfg(target_os = "linux")]
 const NVIDIA: u32 = 0x10de;
-#[cfg(target_os = "linux")]
 const INTEL: u32 = 0x8086;
+const QUALCOMM: u32 = 0x5143;
+/// Software GPUs: Microsoft's WARP (Windows) and Mesa's llvmpipe / lavapipe (Vulkan's id for Mesa).
+const SOFTWARE_GPU_VENDORS: [u32; 2] = [0x1414, 0x10005];
 
 /// The GPU's PCI vendor id and whether ONNX Runtime found it to be a discrete card (if it says).
-#[cfg(target_os = "linux")]
 fn gpu_facts(d: &ort::device::Device<'_>) -> (u32, Option<bool>) {
     use ort::AsPointer;
     let hw = d.hardware_device();
@@ -347,8 +424,22 @@ fn gpu_facts(d: &ort::device::Device<'_>) -> (u32, Option<bool>) {
     }
 }
 
+/// A value the execution provider attached to its device (e.g. OpenVINO's "ov_device": "NPU").
+fn ep_metadata(d: &ort::device::Device<'_>, key: &std::ffi::CStr) -> Option<String> {
+    use ort::AsPointer;
+    let api = ort::api();
+    // SAFETY: read-only ONNX Runtime getters on a live device; the strings belong to the device.
+    unsafe {
+        let kv = (api.EpDevice_EpMetadata)(d.ptr());
+        if kv.is_null() {
+            return None;
+        }
+        let v = (api.GetKeyValue)(kv, key.as_ptr());
+        (!v.is_null()).then(|| std::ffi::CStr::from_ptr(v).to_string_lossy().into_owned())
+    }
+}
+
 /// Lower is better: a discrete card, then a Radeon/GeForce, then other GPUs, integrated graphics last.
-#[cfg(target_os = "linux")]
 fn gpu_rank(d: &ort::device::Device<'_>) -> u8 {
     match gpu_facts(d) {
         (_, Some(true)) => 0,
@@ -358,14 +449,33 @@ fn gpu_rank(d: &ort::device::Device<'_>) -> u8 {
     }
 }
 
-#[cfg(target_os = "linux")]
 fn gpu_name(d: &ort::device::Device<'_>) -> String {
     let (vendor, _) = gpu_facts(d);
     match vendor {
         AMD => "AMD Radeon".into(),
         NVIDIA => "Nvidia GeForce".into(),
         INTEL => "Intel".into(),
+        QUALCOMM => "Qualcomm Adreno".into(),
         _ => d.hardware_device().vendor().unwrap_or("GPU").to_string(),
+    }
+}
+
+/// Whether this is an Intel processor (the only ones with an Intel NPU).
+fn intel_cpu() -> bool {
+    #[cfg(target_arch = "x86_64")]
+    {
+        #[allow(unused_unsafe)]
+        // SAFETY: CPUID leaf 0 exists on every x86_64 processor.
+        let r = unsafe { core::arch::x86_64::__cpuid(0) };
+        let mut vendor = [0u8; 12];
+        vendor[..4].copy_from_slice(&r.ebx.to_le_bytes());
+        vendor[4..8].copy_from_slice(&r.edx.to_le_bytes());
+        vendor[8..].copy_from_slice(&r.ecx.to_le_bytes());
+        &vendor == b"GenuineIntel"
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        false
     }
 }
 
