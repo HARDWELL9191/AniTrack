@@ -12,7 +12,7 @@ permissions:
 
 env:
   # The release number: version 1.0.N, build N (AltStore offers a build with a higher number).
-  JR_BUILD: "70"
+  JR_BUILD: "71"
 
 jobs:
   build:

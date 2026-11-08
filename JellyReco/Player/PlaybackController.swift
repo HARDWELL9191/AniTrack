@@ -66,6 +66,9 @@ final class PlaybackController {
     @ObservationIgnored private var ticker: Task<Void, Never>?
     @ObservationIgnored private var lastReport = Date.distantPast
     @ObservationIgnored private var lastPaused = true
+    /// The position the server last got from this player, and the last keep-alive while paused.
+    @ObservationIgnored private var lastReportedSeconds = 0.0
+    @ObservationIgnored private var lastPing = Date.distantPast
     @ObservationIgnored private var didApplyTracks = false
     @ObservationIgnored private var triedMetal = false
     @ObservationIgnored private var triedTranscode = false
@@ -339,6 +342,7 @@ final class PlaybackController {
             lastPaused = player.isPaused
             lastReport = Date()
             updateNowPlaying()
+            lastReportedSeconds = reportedSeconds
             await client.reportStart(report())
             lastReport = Date()
         } catch {
@@ -583,12 +587,25 @@ final class PlaybackController {
 
         if state == .ended { await handleEnded() }
 
+        // The position goes to the server while playing (every 10 s), on pause / play and on a seek
+        // while paused, but isn't repeated while paused: a player left paused (or suspended in the
+        // background) kept re-sending its old spot every 10 s, and once the movie was finished on
+        // another device that put the old resume point back on a played item ("played" stays set,
+        // Jellyfin's UpdatePlayState only saves the position). While paused, only the keep-alive
+        // ping goes out, which holds a paused transcode open without touching the watch data.
         let paused = player.isPaused
-        if paused != lastPaused || Date().timeIntervalSince(lastReport) >= 10 {
+        let now = Date()
+        let seekedWhilePaused = paused && abs(reportedSeconds - lastReportedSeconds) > 2
+        if paused != lastPaused || (!paused && now.timeIntervalSince(lastReport) >= 10) || seekedWhilePaused {
             lastPaused = paused
-            lastReport = Date()
+            lastReport = now
+            lastReportedSeconds = reportedSeconds
             if phase == .playing { reportProgressInBackground() }
             updateNowPlaying()
+        } else if paused, phase == .playing, now.timeIntervalSince(lastPing) >= 10, let id = playSessionId {
+            lastPing = now
+            let client = client
+            Task { await client.pingSession(id) }
         }
     }
 
@@ -1681,14 +1698,28 @@ final class PlaybackController {
         let transcoding = method == .transcode ? playSessionId : nil
         let live = source?.liveStreamId
         playSessionId = nil
+        // Closed after sitting paused for a minute or more: another device may have played the item
+        // since (finished it, or watched further). If the server's resume point is no longer the one
+        // this player sent, the stop report is left out so it doesn't put the old spot back.
+        let satPaused = !failed && player.isPaused && Date().timeIntervalSince(lastReport) >= 60
+        let sentTicks = Fmt.ticks(lastReportedSeconds)
+        let itemId = item.id
         return {
-            await client.reportStopped(final)
+            var movedOn = false
+            if satPaused, let server = try? await client.item(itemId).userData {
+                movedOn = abs((server.playbackPositionTicks ?? 0) - sentTicks) > 30 * 10_000_000
+            }
+            if !movedOn { await client.reportStopped(final) }
             if let transcoding { await client.stopEncoding(playSessionId: transcoding) }
             if let live { await client.closeLiveStream(live) }
         }
     }
 
+    /// The position reports carry (the start position until playback has really begun).
+    private var reportedSeconds: Double { hasPlayed ? currentSeconds : openedAt }
+
     private func reportProgressInBackground() {
+        lastReportedSeconds = reportedSeconds
         let r = report()
         let client = client
         Task { await client.reportProgress(r) }
@@ -1703,7 +1734,7 @@ final class PlaybackController {
             itemId: item.id,
             mediaSourceId: source?.id,
             playSessionId: playSessionId,
-            positionTicks: Fmt.ticks(hasPlayed ? currentSeconds : openedAt),
+            positionTicks: Fmt.ticks(reportedSeconds),
             isPaused: player.isPaused,
             isMuted: player.isMuted,
             playMethod: method.rawValue,
