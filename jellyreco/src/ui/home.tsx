@@ -22,6 +22,13 @@ export function HomePage({ refreshKey }: { refreshKey: number }) {
           <h1>{greeting()}, {model.user?.Name}</h1>
           <div className="muted small">{model.server?.name}</div>
         </div>
+        {/* Reloads every shelf from the server (also F5 / Ctrl+R): picks up what was watched on
+            other devices while the app stayed open. */}
+        <div className="page-head-actions">
+          <button className="glass-button" title="Refresh (F5)" onClick={() => model.dataChanged()}>
+            <Icon name="refresh" size={15} /> Refresh
+          </button>
+        </div>
       </header>
       {!model.views.length && <Empty icon="folder" title="No libraries" text="This account can't see any libraries yet." />}
       {sections.map((s) => <Section key={s} section={s} refreshKey={refreshKey + model.dataVersion} />)}
