@@ -125,6 +125,9 @@ export class PlayerController {
   private started = false;
   private unsub: (() => void) | null = null;
   private progressTimer: ReturnType<typeof setInterval> | null = null;
+  /** When the server last got this player's position, and which position that was. */
+  private lastProgressAt = 0;
+  private lastReportedPosition = 0;
   private countdownTimer: ReturnType<typeof setInterval> | null = null;
   private skippedSegments = new Set<string>();
   private reportedStart = false;
@@ -486,6 +489,8 @@ export class PlayerController {
     this.applyFit(this.state.videoFit);
     if (!this.reportedStart) {
       this.reportedStart = true;
+      this.lastProgressAt = Date.now();
+      this.lastReportedPosition = this.state.position;
       void api.reportStart(this.progressBody()).catch(() => {});
       this.onDataChanged?.();
     }
@@ -663,12 +668,27 @@ export class PlayerController {
     if (this.progressTimer) clearInterval(this.progressTimer);
     if (!this.state.active) return;
     this.reportProgress();
-    this.progressTimer = setInterval(() => this.reportProgress(), 10_000);
+    this.progressTimer = setInterval(() => this.progressTick(), 10_000);
+  }
+
+  /** The position goes to the server while playing (every 10 s), on pause / play and on a seek,
+   *  but isn't repeated while paused: a player left paused kept re-sending its old spot every 10 s,
+   *  and once the item was finished on another device that put the old resume point back on a
+   *  played item (Jellyfin's UpdatePlayState saves the position and leaves "played" set). While
+   *  paused, only the keep-alive ping goes out, which holds a paused transcode open without
+   *  touching the watch data. */
+  private progressTick() {
+    const st = this.state;
+    if (!st.paused || Math.abs(st.position - this.lastReportedPosition) > 2) { this.reportProgress(); return; }
+    const api = this.getApi();
+    if (api && st.playSessionId && this.reportedStart) void api.pingTranscode(st.playSessionId).catch(() => {});
   }
 
   private reportProgress(event?: string) {
     const api = this.getApi();
     if (!api || !this.state.item || !this.reportedStart || this.state.item.Id.startsWith("local:")) return;
+    this.lastProgressAt = Date.now();
+    this.lastReportedPosition = this.state.position;
     void api.reportProgress(this.progressBody(event ? { EventName: event } : {})).catch(() => {});
   }
 
@@ -679,8 +699,15 @@ export class PlayerController {
     this.progressTimer = null;
     if (!api || !st.item || !this.reportedStart) return;
     this.reportedStart = false;
+    // Closed after sitting paused for a minute or more: another device may have played the item
+    // since (finished it, or watched further). If the server's resume point is no longer the one
+    // this player sent, the stop report is left out so it doesn't put the old spot back.
+    const satPaused = st.paused && !st.ended && Date.now() - this.lastProgressAt >= 60_000;
+    const sent = secondsToTicks(this.lastReportedPosition);
     try {
-      await api.reportStopped({
+      const server = satPaused ? await api.item(st.item.Id).catch(() => null) : null;
+      const movedOn = !!server && Math.abs((server.UserData?.PlaybackPositionTicks ?? 0) - sent) > 30 * 10_000_000;
+      if (!movedOn) await api.reportStopped({
         ItemId: st.item.Id, MediaSourceId: st.mediaSource?.Id, PlaySessionId: st.playSessionId,
         PositionTicks: secondsToTicks(st.position), LiveStreamId: st.mediaSource?.LiveStreamId ?? undefined,
         NowPlayingQueue: st.queue.slice(0, 100).map((q) => ({ Id: q.Id, PlaylistItemId: q.PlaylistItemId ?? q.Id })),
