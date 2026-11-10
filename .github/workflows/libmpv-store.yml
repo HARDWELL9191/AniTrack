@@ -1,0 +1,36 @@
+name: libmpv store (one-time move)
+
+# One-time move of the engine in use (release libmpv-jr-6) onto this branch. The commit it makes also
+# removes this workflow, so the branch ends up holding only the engine files.
+on:
+  push:
+    branches: [libmpv-binaries]
+    paths: [".github/workflows/libmpv-store.yml"]
+
+permissions:
+  contents: write
+
+jobs:
+  store:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Copy libmpv-jr-6 from Releases, checked against its checksum and the one the app pins
+        run: |
+          set -euo pipefail
+          mkdir -p libmpv-jr-6
+          gh release download libmpv-jr-6 -R "$GITHUB_REPOSITORY" -D libmpv-jr-6
+          ls -la libmpv-jr-6
+          (cd libmpv-jr-6 && sha256sum -c <(awk '{print $1"  Libmpv.xcframework.zip"}' Libmpv.xcframework.zip.sha256))
+          echo "de5fca736bad59a6e7d4a0cc1d27879d05811b555796b7548af30cfa082612d2  libmpv-jr-6/Libmpv.xcframework.zip" | sha256sum -c -
+      - name: Commit the files (and remove this workflow)
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898299+github-actions[bot]@users.noreply.github.com"
+          git rm -q .github/workflows/libmpv-store.yml
+          git add libmpv-jr-6
+          git commit -q -m "libmpv-jr-6: the engine JellyReco for iPhone uses, moved from Releases (sha256 de5fca73…)"
+          git push origin HEAD:libmpv-binaries
