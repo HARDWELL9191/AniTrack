@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       publish:
-        description: "Publish the zip as the libmpv-custom-0.8.0 prerelease"
+        description: "Store the build on the libmpv-binaries branch (libmpv-jr-<run number>/)"
         type: boolean
         default: true
 
@@ -24,8 +24,9 @@ env:
   MPVUI_COMMIT: "0cb499c"
   # Slices the app needs: iOS device + iOS simulator (arm64 and x86_64, like the published artifact).
   MPV_SLICES: "ios,isimulator"
-  # One release per build, so the app's package checksum always names exactly one file.
-  RELEASE_TAG: "libmpv-jr-${{ github.run_number }}"
+  # One folder per build on the libmpv-binaries branch (not in Releases, which list only the apps),
+  # so the app's package URL and checksum always name exactly one file.
+  STORE_DIR: "libmpv-jr-${{ github.run_number }}"
 
 jobs:
   libmpv:
@@ -152,18 +153,22 @@ jobs:
             mpvui/.build/mpvbuild/logs
           if-no-files-found: ignore
 
-      - name: Publish prerelease ${{ env.RELEASE_TAG }}
+      - name: Store on the libmpv-binaries branch (${{ env.STORE_DIR }}/)
         if: github.event_name == 'push' || inputs.publish
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
-          set -e
+          set -euo pipefail
           PATCHES=$(cd jr/libmpv/patches/mpv && ls *.patch | tr '\n' ' ')
-          NOTES="Libmpv.xcframework built from source on GitHub Actions from LePips/MPVUI ${MPVUI_REF} (${MPVUI_COMMIT}) plus JellyReco patches: ${PATCHES}. Commit ${GITHUB_SHA}. Slices: ${MPV_SLICES}. Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}. sha256: $(cut -d' ' -f1 out/Libmpv.xcframework.zip.sha256)"
-          if gh release view "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" out/* --clobber -R "$GITHUB_REPOSITORY"
-            gh release edit "$RELEASE_TAG" --notes "$NOTES" --prerelease -R "$GITHUB_REPOSITORY"
-          else
-            gh release create "$RELEASE_TAG" out/* --prerelease --target "$GITHUB_SHA" \
-              --title "JellyReco Libmpv (MPVUI ${MPVUI_REF}) #${GITHUB_RUN_NUMBER}" --notes "$NOTES" -R "$GITHUB_REPOSITORY"
-          fi
+          git clone -q --depth 1 --branch libmpv-binaries \
+            "https://x-access-token:${{ github.token }}@github.com/${GITHUB_REPOSITORY}.git" store
+          cd store
+          test ! -e "$STORE_DIR" || { echo "::error::$STORE_DIR already exists on libmpv-binaries"; exit 1; }
+          mkdir "$STORE_DIR"
+          cp ../out/* "$STORE_DIR/"
+          (cd "$STORE_DIR" && shasum -a 256 -c <(awk '{print $1"  Libmpv.xcframework.zip"}' Libmpv.xcframework.zip.sha256))
+          git config user.name "github-actions[bot]"
+          git config user.email "41898299+github-actions[bot]@users.noreply.github.com"
+          git add "$STORE_DIR"
+          git commit -q -m "$STORE_DIR: Libmpv.xcframework from LePips/MPVUI ${MPVUI_REF} (${MPVUI_COMMIT}) + JellyReco patches: ${PATCHES}(source ${GITHUB_SHA::7}, run ${GITHUB_RUN_ID}); sha256 $(cut -d' ' -f1 "$STORE_DIR/Libmpv.xcframework.zip.sha256")"
+          git push -q origin HEAD:libmpv-binaries
+          URL="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/libmpv-binaries/$STORE_DIR/Libmpv.xcframework.zip"
+          echo "::notice::Package.swift: url \"$URL\", checksum \"$(cut -d' ' -f1 "$STORE_DIR/Libmpv.xcframework.zip.sha256")\""
