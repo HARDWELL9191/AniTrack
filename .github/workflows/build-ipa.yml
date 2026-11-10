@@ -9,6 +9,10 @@ on:
       - "README.md"
   workflow_dispatch:
 
+# Publishing the "AniReco (latest build)" release needs write access to the repo's releases.
+permissions:
+  contents: write
+
 jobs:
   build:
     # GitHub's Xcode 27 image (macOS 27, Apple Silicon) — iOS 27 SDK.
@@ -87,6 +91,19 @@ jobs:
           name: AniReco-ipa
           path: AniReco.ipa
           if-no-files-found: error
+
+      # Every build of main replaces the "AniReco (latest build)" release, so the newest IPA is always
+      # on the repo's Releases page next to JellyReco's. (A pre-release, like JellyReco's builds.)
+      - name: Publish "AniReco (latest build)"
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          NOTES="AniReco for iPhone, build #${{ github.run_number }} from ${GITHUB_SHA::7}. Install AniReco.ipa with AltStore or Sideloadly."
+          gh release delete anireco-latest --yes --cleanup-tag -R "$GITHUB_REPOSITORY" 2>/dev/null || true
+          gh release create anireco-latest AniReco.ipa -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "AniReco (latest build)" --notes "$NOTES" --prerelease
 
       - name: Upload build log on failure
         if: failure()
