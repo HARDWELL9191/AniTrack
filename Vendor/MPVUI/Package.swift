@@ -7,7 +7,8 @@ import PackageDescription
 // GitHub Actions plus JellyReco's mpv patches (libmpv/patches/mpv on the libmpv-build branch,
 // workflow "libmpv build"). Android and test targets are left out.
 //
-// To move to a new library build: put its release's zip URL and sha256 below.
+// The builds are kept on the repo's libmpv-binaries branch (libmpv-jr-<build number>/), not in its
+// Releases. To move to a new library build: put its zip URL and sha256 below.
 let package = Package(
     name: "MPVUI",
     platforms: [
@@ -74,10 +75,10 @@ let package = Package(
             publicHeadersPath: "include",
             linkerSettings: [.linkedFramework("AppKit", .when(platforms: [.macOS]))]
         ),
-        // LIBMPV_BINARY_BEGIN (the CI checks this pair against the release)
+        // LIBMPV_BINARY_BEGIN (SwiftPM only accepts the zip if its sha256 matches the checksum)
         .binaryTarget(
             name: "Libmpv-GPL",
-            url: "https://github.com/HARDWELL9191/AniTrack/releases/download/libmpv-jr-6/Libmpv.xcframework.zip",
+            url: "https://raw.githubusercontent.com/HARDWELL9191/AniTrack/libmpv-binaries/libmpv-jr-6/Libmpv.xcframework.zip",
             checksum: "de5fca736bad59a6e7d4a0cc1d27879d05811b555796b7548af30cfa082612d2"
         ),
         // LIBMPV_BINARY_END
