@@ -728,7 +728,7 @@ final class AppModel {
         anilistMigration = Task {
             defer { anilistMigration = nil }
             var incomplete = false
-            func stillHere() -> Bool { !Task.isCancelled && client === account && anilist.viewer?.id == viewerId }
+            @MainActor func stillHere() -> Bool { !Task.isCancelled && client === account && anilist.viewer?.id == viewerId }
             for (index, t) in toPlan.enumerated() {
                 guard stillHere() else { return }
                 if index > 0 { try? await Task.sleep(nanoseconds: AniListService.writeSpacing) }
