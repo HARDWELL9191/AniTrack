@@ -51,6 +51,10 @@ jobs:
           "$RUNNER_TEMP/sync-check" "$RUNNER_TEMP/sync"
           node tools/sync_check/gen.ts read "$RUNNER_TEMP/sync"
           echo "::notice::My List, Not for me and Already seen round-trip between the Windows and iPhone apps"
+      # For You on the Anime / Anime Movies libraries runs on AniList (as in AniReco and on the
+      # iPhone): the recommender against live AniList with a made-up list (no account needed).
+      - name: AniList picks (Anime / Anime Movies libraries)
+        run: node tools/anilist_check.ts
 
   windows:
     # Each installer is built and checked natively on its own architecture: Windows 11 on Arm

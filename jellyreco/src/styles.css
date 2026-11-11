@@ -1252,3 +1252,12 @@ html.platform-linux.video-mode .player :is(button, [role="button"], .pd-button, 
   transition-property: opacity, transform !important;
   background-image: none;
 }
+
+/* AniList: "How did you like it?" (1–10) and the login form */
+.rate-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin: 16px 0 10px; }
+.rate-grid .glass-button { justify-content: center; font-size: 17px; font-weight: 650; min-height: 44px; }
+.rate-grid .rate-high { color: var(--high, #34c759); }
+.rate-grid .rate-mid { color: #ff9f0a; }
+.rate-grid .rate-low { color: var(--low, #ff453a); }
+.anilist-login { display: grid; gap: 12px; width: 100%; }
+.anilist-login code { padding: 1px 6px; border-radius: 6px; background: var(--press); }

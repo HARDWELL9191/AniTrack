@@ -114,6 +114,79 @@ fn accounts_path(app: &tauri::AppHandle) -> std::path::PathBuf {
     app.path().app_data_dir().unwrap_or_default().join("accounts.bin")
 }
 
+// MARK: AniList login (For You on the Anime libraries)
+
+const ANILIST_WINDOW: &str = "anilist-login";
+
+/// The access token from AniList's redirect: jellyreco://auth#access_token=…&token_type=Bearer&…
+fn anilist_token_from_redirect(url: &tauri::Url) -> Option<String> {
+    if url.scheme() != "jellyreco" {
+        return None;
+    }
+    let raw = url.fragment().or(url.query())?;
+    raw.split('&').find_map(|pair| pair.strip_prefix("access_token=")).filter(|t| !t.is_empty()).map(str::to_string)
+}
+
+/// AniList's own login page in a small window of the app (its implicit grant, the iPhone's way and
+/// with the same AniList client). When AniList sends the browser to jellyreco://auth#access_token=…
+/// the window catches it before anything opens, closes, and the token comes back. The page gets no
+/// access to the app (that window isn't in any capability).
+#[tauri::command]
+async fn anilist_login(app: tauri::AppHandle, client_id: String) -> Result<String, String> {
+    use std::sync::mpsc;
+    use std::sync::Mutex;
+    let id: u64 = client_id.trim().parse().map_err(|_| "That isn't an AniList client ID (it's a number).".to_string())?;
+    let url: tauri::Url = format!("https://anilist.co/api/v2/oauth/authorize?client_id={id}&response_type=token")
+        .parse()
+        .map_err(|e| format!("{e}"))?;
+    if let Some(old) = app.get_webview_window(ANILIST_WINDOW) {
+        let _ = old.destroy();
+    }
+    let (tx, rx) = mpsc::channel::<Result<String, String>>();
+    // One answer only: the token, an error, or "closed".
+    let sender = Arc::new(Mutex::new(Some(tx)));
+    let answer = {
+        let sender = sender.clone();
+        move |result: Result<String, String>| {
+            if let Some(tx) = sender.lock().ok().and_then(|mut s| s.take()) {
+                let _ = tx.send(result);
+            }
+        }
+    };
+    let on_redirect = answer.clone();
+    let closer = app.clone();
+    let window = tauri::WebviewWindowBuilder::new(&app, ANILIST_WINDOW, tauri::WebviewUrl::External(url))
+        .title("Log in with AniList")
+        .inner_size(560.0, 780.0)
+        .min_inner_size(420.0, 520.0)
+        .center()
+        .focused(true)
+        .on_navigation(move |next| {
+            if next.scheme() != "jellyreco" {
+                return true;
+            }
+            on_redirect(anilist_token_from_redirect(next).ok_or_else(|| "AniList didn't send an access token back.".to_string()));
+            let app = closer.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Some(w) = app.get_webview_window(ANILIST_WINDOW) {
+                    let _ = w.destroy();
+                }
+            });
+            false
+        })
+        .build()
+        .map_err(|e| format!("Couldn't open AniList's login page: {e}"))?;
+    let on_close = answer.clone();
+    window.on_window_event(move |event| {
+        if let tauri::WindowEvent::Destroyed = event {
+            on_close(Err("cancelled".into()));
+        }
+    });
+    tauri::async_runtime::spawn_blocking(move || rx.recv().unwrap_or_else(|_| Err("cancelled".into())))
+        .await
+        .map_err(|e| format!("{e}"))?
+}
+
 /// Battery saver on: the AI part pauses.
 #[tauri::command]
 fn power_saver() -> bool {
@@ -321,8 +394,27 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             mpv_info, mpv_start, mpv_command, mpv_set, mpv_get, mpv_destroy, ai_status, ai_cached, ai_vectors, accounts_load,
-            accounts_save, power_saver, device_name, platform, launch_file, set_app_icon, write_text_file, read_file_base64
+            accounts_save, power_saver, device_name, platform, launch_file, set_app_icon, write_text_file, read_file_base64, anilist_login
         ])
         .run(tauri::generate_context!())
         .expect("error while running JellyReco");
+}
+
+#[cfg(test)]
+mod anilist_login_tests {
+    use super::anilist_token_from_redirect;
+
+    #[test]
+    fn token_from_anilist_redirect() {
+        let url: tauri::Url = "jellyreco://auth#access_token=eyJ0eXAi.abc-DEF_123&token_type=Bearer&expires_in=31536000".parse().unwrap();
+        assert_eq!(anilist_token_from_redirect(&url).as_deref(), Some("eyJ0eXAi.abc-DEF_123"));
+    }
+
+    #[test]
+    fn no_token_elsewhere() {
+        let page: tauri::Url = "https://anilist.co/api/v2/oauth/authorize?client_id=1&response_type=token".parse().unwrap();
+        assert_eq!(anilist_token_from_redirect(&page), None);
+        let denied: tauri::Url = "jellyreco://auth#error=access_denied".parse().unwrap();
+        assert_eq!(anilist_token_from_redirect(&denied), None);
+    }
 }

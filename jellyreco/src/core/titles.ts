@@ -6,7 +6,9 @@
 // whole list unreadable. Everything written from here goes through `externalTitle()` /
 // `listEntry*()` so it always has every required field with the right type.
 
-export type TitleSource = "tmdbMovie" | "tmdbTV";
+/** "anilist": an AniList anime (For You on the Anime / Anime Movies libraries); `sourceId` is its
+ *  AniList id. Those live on your AniList account and are never written to the server's lists. */
+export type TitleSource = "tmdbMovie" | "tmdbTV" | "anilist";
 
 /** Swift `ExternalTitle` (JellyReco/AI/External/ExternalTitle.swift). */
 export interface ExternalTitle {
@@ -34,6 +36,8 @@ export interface ExternalTitle {
   /** TMDB certification ("PG-13", "TV-MA", "12"…) and its country ("US"), as the iPhone saves them. */
   ageRating?: string | null;
   ageRatingCountry?: string | null;
+  /** AniList's format ("TV", "MOVIE", "OVA"…); AniList titles only. */
+  format?: string | null;
 }
 
 /** Swift `MyListEntry` (JellyReco/App/MyList.swift): a title on your server or a For You pick. */
@@ -47,9 +51,13 @@ export interface MyListEntry {
 
 /** "tmdbTV:1429" / "tmdbMovie:603" (the iPhone's id). */
 export const titleId = (t: { source: TitleSource; sourceId: number }) => `${t.source}:${t.sourceId}`;
-export const isMovie = (t: ExternalTitle) => t.source === "tmdbMovie";
-export const isAnime = (t: ExternalTitle) => t.originalLanguage === "ja" && t.genres.includes("Animation");
-export const tmdbWebUrl = (t: ExternalTitle) => `https://www.themoviedb.org/${isMovie(t) ? "movie" : "tv"}/${t.sourceId}`;
+export const isAniList = (t: { source: TitleSource }) => t.source === "anilist";
+export const isMovie = (t: ExternalTitle) => (t.source === "anilist" ? t.format === "MOVIE" : t.source === "tmdbMovie");
+export const isAnime = (t: ExternalTitle) => t.source === "anilist" || (t.originalLanguage === "ja" && t.genres.includes("Animation"));
+/** The title's page: TMDB, or AniList for AniList titles. */
+export const tmdbWebUrl = (t: ExternalTitle) => (t.source === "anilist" ? `https://anilist.co/anime/${t.sourceId}` : `https://www.themoviedb.org/${isMovie(t) ? "movie" : "tv"}/${t.sourceId}`);
+/** Where the score and the page come from. */
+export const siteName = (t: ExternalTitle) => (t.source === "anilist" ? "AniList" : "TMDB");
 
 /** My List entry id, as on the iPhone ("server:<id>" or the title id). */
 export const entryId = (e: MyListEntry) => (e.serverId ? `server:${e.serverId}` : e.external ? titleId(e.external) : `x:${e.addedAt}`);
@@ -69,6 +77,7 @@ export function metaLine(t: ExternalTitle): string {
   const parts: string[] = [isAnime(t) ? (isMovie(t) ? "Anime movie" : "Anime") : isMovie(t) ? "Movie" : "TV show"];
   if (t.year) parts.push(String(t.year));
   if (t.seasons && !isMovie(t)) parts.push(t.seasons === 1 ? "1 season" : `${t.seasons} seasons`);
+  if (t.source === "anilist" && t.episodes && !isMovie(t)) parts.push(t.episodes === 1 ? "1 episode" : `${t.episodes} episodes`);
   if (t.runtime && isMovie(t) && t.runtime > 0) parts.push(t.runtime >= 60 ? `${Math.floor(t.runtime / 60)}h ${t.runtime % 60}m` : `${t.runtime}m`);
   return parts.join(" · ");
 }
@@ -78,7 +87,8 @@ const int = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? Math.
 const str = (v: unknown) => (typeof v === "string" ? v : null);
 const strs = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
 
-/** A complete, valid ExternalTitle from anything (drops what Swift couldn't read). */
+/** A complete, valid ExternalTitle from anything (drops what Swift couldn't read). TMDB titles only:
+ *  AniList titles live on your AniList account, never in the lists saved on the server. */
 export function externalTitle(raw: unknown): ExternalTitle | null {
   if (!raw || typeof raw !== "object") return null;
   const r = raw as Record<string, unknown>;

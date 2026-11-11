@@ -9,7 +9,8 @@ import { getSocket } from "../core/socket";
 import type { Item, ItemsResult, MediaStream, RemoteImage, RemoteSearchResult, RemoteSubtitle, SessionInfo, SyncPlayGroup } from "../core/types";
 import { bitrate, bytes, dateOnly, languageName, streamLabel } from "./fmt";
 import { cardImage, Cover, Dropdown, Empty, Field, Modal, Segmented, Spinner, Toggle, useAction, useLoad } from "./components";
-import { type ExternalTitle, isMovie, metaLine, resized, titleId, tmdbWebUrl } from "../core/titles";
+import { type Media, ageExplanation, displayTitle, coverURL } from "../core/anilist";
+import { type ExternalTitle, isAniList, isMovie, metaLine, resized, siteName, titleId, tmdbWebUrl } from "../core/titles";
 import { TitleCard, titleAction, WhyText } from "./foryou";
 import { Icon } from "./icons";
 import { type Sheet, ui, useModel, useUI } from "./state";
@@ -42,6 +43,7 @@ function SheetView({ sheet }: { sheet: Sheet }) {
     case "confirm": return <Confirm sheet={sheet} close={close} />;
     case "prompt": return <Prompt sheet={sheet} close={close} />;
     case "tmdb": return <TmdbSheet key={titleId(sheet.item)} item={sheet.item} close={close} />;
+    case "anilistRate": return <AniListRate media={sheet.media} close={close} />;
     case "share": return null;
   }
 }
@@ -77,18 +79,23 @@ function Prompt({ sheet, close }: { sheet: Extract<Sheet, { kind: "prompt" }>; c
 function TmdbSheet({ item, close }: { item: ExternalTitle; close: () => void }) {
   const model = useModel();
   const tmdb = model.tmdb;
-  const { data: d, error } = useLoad(() => tmdb.extras(item), [titleId(item)]);
+  const anilist = isAniList(item);
+  // AniList titles come complete (no TMDB lookup); their "More like this" is AniList's fans'.
+  const { data: d, error } = useLoad(async () => (anilist ? null : tmdb.extras(item)), [titleId(item)]);
   const { data: more } = useLoad(async () => {
+    if (anilist) return model.anilist.moreLike(item.sourceId);
     const c = model.discoveryContext();
     return c ? model.discovery.moreLike(c, item) : [];
   }, [titleId(item)]);
   const t = d?.title ?? item;
   const st = model.storage;
-  const onList = !!st?.hasTitle(t);
-  const out = !!st?.notForMe.some((x) => titleId(x) === titleId(t));
-  const seen = !!st?.seenElsewhere.some((x) => titleId(x) === titleId(t));
+  const ani = model.anilist;
+  const onList = anilist ? ani.isPlanned(t.sourceId) : !!st?.hasTitle(t);
+  const out = anilist ? ani.dismissed.has(t.sourceId) : !!st?.notForMe.some((x) => titleId(x) === titleId(t));
+  const seen = anilist ? ani.entry(t.sourceId)?.status === "COMPLETED" : !!st?.seenElsewhere.some((x) => titleId(x) === titleId(t));
   const openUrl = async (url: string) => { const { openUrl: o } = await import("@tauri-apps/plugin-opener"); await o(url); };
-  const meta = [metaLine(t), t.episodes && !isMovie(t) ? `${t.episodes} episodes` : null, t.status, t.score ? `★ ${t.score.toFixed(1)}` : null].filter(Boolean).join(" · ");
+  const age = anilist ? ageExplanation(ani.ages.get(t.sourceId)) : null;
+  const meta = [metaLine(t), t.episodes && !isMovie(t) && !anilist ? `${t.episodes} episodes` : null, t.status, t.score ? `★ ${t.score.toFixed(1)}${anilist ? " AniList" : ""}` : null, age].filter(Boolean).join(" · ");
   return (
     <Modal title={t.title} onClose={close} width={900}>
       <div className="tmdb-sheet">
@@ -96,7 +103,7 @@ function TmdbSheet({ item, close }: { item: ExternalTitle; close: () => void }) 
         <div className="tmdb-top">
           <Cover url={resized(t.posterURL, "w500")} width={200} height={300} radius={16} icon="film" />
           <div className="tmdb-text">
-            <span className="chip chip-muted"><Icon name="cloudDown" size={12} /> Not on your server</span>
+            <span className="chip chip-muted"><Icon name="cloudDown" size={12} /> {anilist ? "Not on your server or your AniList list" : "Not on your server"}</span>
             <h2>{t.title}{t.year ? <span className="muted"> ({t.year})</span> : null}</h2>
             {d?.tagline && <p className="tagline">{d.tagline}</p>}
             <div className="muted small">{meta}</div>
@@ -105,10 +112,12 @@ function TmdbSheet({ item, close }: { item: ExternalTitle; close: () => void }) 
             {d?.networks.length ? <p className="muted small">{d.networks.join(", ")}</p> : null}
             <div className="row-line wrap">
               <button className={`glass-button ${onList ? "" : "prominent"}`} onClick={() => void titleAction(model, t, "myList")}><Icon name="bookmark" size={15} /> {onList ? "On My List" : "Add to My List"}</button>
-              <button className="glass-button" onClick={() => void titleAction(model, t, seen ? "undoSeen" : "seen")}><Icon name="eye" size={15} /> {seen ? "Seen ✓" : "Already seen"}</button>
+              {anilist
+                ? <button className="glass-button" disabled={seen} onClick={() => void titleAction(model, t, "seen")}><Icon name="eye" size={15} /> {seen ? "Completed ✓" : "Already seen"}</button>
+                : <button className="glass-button" onClick={() => void titleAction(model, t, seen ? "undoSeen" : "seen")}><Icon name="eye" size={15} /> {seen ? "Seen ✓" : "Already seen"}</button>}
               <button className="glass-button danger" onClick={() => void titleAction(model, t, out ? "undoNotForMe" : "notForMe")}><Icon name="thumbsDown" size={15} /> {out ? "Undo Not for me" : "Not for me"}</button>
               {d?.trailer && <button className="glass-button" onClick={() => void openUrl(d.trailer!)}><Icon name="film" size={15} /> Trailer</button>}
-              <button className="glass-button" onClick={() => void openUrl(tmdbWebUrl(t))}><Icon name="external" size={15} /> TMDB</button>
+              <button className="glass-button" onClick={() => void openUrl(tmdbWebUrl(t))}><Icon name="external" size={15} /> {siteName(t)}</button>
               {t.imdbId && <button className="glass-button" onClick={() => void openUrl(`https://www.imdb.com/title/${t.imdbId}/`)}><Icon name="external" size={15} /> IMDb</button>}
             </div>
           </div>
@@ -122,11 +131,33 @@ function TmdbSheet({ item, close }: { item: ExternalTitle; close: () => void }) 
           </section>
         )}
         {!!more?.length && (
-          <section><h3>More like this <span className="muted small">(not on your server)</span></h3>
+          <section><h3>More like this <span className="muted small">({anilist ? "not on your server or your AniList list" : "not on your server"})</span></h3>
             <div className="cast-row">{more.map((m) => <TitleCard key={titleId(m)} t={m} width={130} />)}</div>
           </section>
         )}
       </div>
+    </Modal>
+  );
+}
+
+/** "How did you like it?" after Already seen on an AniList pick (AniReco's rating prompt). */
+function AniListRate({ media, close }: { media: Media; close: () => void }) {
+  const model = useModel();
+  const [saving, setSaving] = useState(false);
+  const done = () => { if (model.anilist.ratePrompt?.id === media.id) model.anilist.ratePrompt = null; close(); };
+  return (
+    <Modal title="How did you like it?" onClose={done} width={460}>
+      <div className="row-line">
+        <Cover url={coverURL(media) ?? undefined} width={56} height={80} radius={8} icon="film" />
+        <div><strong>{displayTitle(media, model.anilist.language)}</strong><div className="muted small">Your score sharpens your picks the most.</div></div>
+      </div>
+      <div className="rate-grid">
+        {Array.from({ length: 10 }, (_, i) => i + 1).map((v) => (
+          <button key={v} className={`glass-button rate-${v >= 8 ? "high" : v >= 5 ? "mid" : "low"}`} disabled={saving}
+            onClick={async () => { setSaving(true); const ok = await model.anilist.rate(media, v); setSaving(false); if (ok) { model.toast(`Scored ${v}/10 on AniList`, "success"); done(); } }}>{v}</button>
+        ))}
+      </div>
+      <button className="link-button" onClick={done}>Skip</button>
     </Modal>
   );
 }

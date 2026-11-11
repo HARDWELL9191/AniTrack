@@ -14,6 +14,7 @@ import darkIcon from "../assets/app-icon-dark.png";
 import lightIcon from "../assets/app-icon-light.png";
 import { Icon } from "./icons";
 import { ui, useModel } from "./state";
+import { AniListLogin } from "./foryou";
 
 type Section = "account" | "display" | "home" | "playback" | "player" | "subtitles" | "forYou" | "devices" | "about";
 const SECTIONS: { id: Section; label: string; icon: string }[] = [
@@ -44,7 +45,7 @@ export function SettingsPage() {
           {section === "playback" && <PlaybackSettings />}
           {section === "player" && <PlayerSettings />}
           {section === "subtitles" && <SubtitleSettings />}
-          {section === "forYou" && <ForYouSettings />}
+          {section === "forYou" && <><ForYouSettings /><AniListSettings /></>}
           {section === "devices" && <DevicesSettings />}
           {section === "about" && <About />}
         </div>
@@ -412,6 +413,32 @@ function ForYouSettings() {
         <button className="glass-button" onClick={() => { model.discovery.reset(); model.reco.loadedAt = 0; model.toast("Picks will be rebuilt", "success"); }}><Icon name="refresh" size={15} /> Rebuild picks now</button>
         <button className="glass-button" onClick={() => ui.openSheet({ kind: "confirm", title: "Reset Not for me on For You picks?", text: "Titles you passed on can be suggested again.", confirmLabel: "Reset", danger: true, run: async () => { await model.storage?.clear("notforme"); model.tasteChanged(); } })}>Reset "Not for me" on For You picks</button>
       </div>
+    </Group>
+  );
+}
+
+/** For You on the libraries named Anime and Anime Movies: your AniList account, as in AniReco. */
+function AniListSettings() {
+  const model = useModel();
+  const set = useSet();
+  const s = model.settings;
+  const ani = model.anilist;
+  const changed = <K extends "anilistHideChinese" | "anilistIncludeUnreleased">(key: K, v: boolean) => { set(key, v); ani.invalidatePicks(); };
+  return (
+    <Group title="AniList (Anime libraries)">
+      {ani.loggedIn ? (
+        <div className="row-line">
+          <span>Logged in as <strong>{ani.viewer?.name ?? "…"}</strong></span>
+          <button className="glass-button" onClick={() => { ani.invalidatePicks(); void ani.refreshList(); model.toast("Anime picks will be rebuilt", "success"); }}><Icon name="refresh" size={15} /> Rebuild anime picks now</button>
+          <button className="glass-button danger" onClick={() => ui.openSheet({ kind: "confirm", title: "Log out of AniList?", text: "Anime picks stop until you log in again. Nothing on your AniList changes.", confirmLabel: "Log out", danger: true, run: () => ani.logOut() })}>Log out of AniList</button>
+        </div>
+      ) : <AniListLogin />}
+      <Toggle label="Hide Chinese animation" checked={s.anilistHideChinese} onChange={(v) => changed("anilistHideChinese", v)} />
+      <Toggle label="Include unreleased anime" checked={s.anilistIncludeUnreleased} onChange={(v) => changed("anilistIncludeUnreleased", v)} />
+      <Field label="Titles in">
+        <Segmented value={s.anilistTitleLanguage} options={[{ value: "", label: "AniList setting" }, { value: "english", label: "English" }, { value: "romaji", label: "Romaji" }, { value: "native", label: "Native" }]} onChange={(v: string) => set("anilistTitleLanguage", v)} />
+      </Field>
+      <p className="muted small">For You on the libraries named Anime and Anime Movies runs on your AniList account, the same way as AniReco and the iPhone app: picks are learned from your AniList list and what fans recommend, My List for anime is your AniList Planning list, Not for me is a private, hidden "Not for me" list on AniList (the one AniReco uses), and Already seen marks a show Completed. Anything already on your server is never picked. These settings are shared with the iPhone app.</p>
     </Group>
   );
 }

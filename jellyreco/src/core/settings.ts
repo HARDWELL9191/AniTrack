@@ -88,6 +88,14 @@ export interface Settings {
   includeWatchingAsLiked: boolean; // TMDB rating floor (0 = any)
   /** Your TMDB API key (v3) or read access token (v4): For You's outside source. */
   tmdbKey: string;
+
+  // For You on the Anime / Anime Movies libraries: AniList (shared with the iPhone)
+  /** Your AniList API client's id (its redirect URL is jellyreco://auth, the iPhone's). */
+  anilistClientId: string;
+  anilistHideChinese: boolean;
+  anilistIncludeUnreleased: boolean;
+  /** "english", "romaji", "native", or "" = the title language set on your AniList account. */
+  anilistTitleLanguage: string;
 }
 
 export type HomeSection = "resume" | "nextUp" | "forYouRow" | "watchLater" | "latest" | "favorites" | "libraries" | "liveTv" | "none";
@@ -170,6 +178,11 @@ export const DEFAULT_SETTINGS: Settings = {
   forYouMinRating: 0,
   includeWatchingAsLiked: true,
   tmdbKey: "",
+
+  anilistClientId: "",
+  anilistHideChinese: true,
+  anilistIncludeUnreleased: false,
+  anilistTitleLanguage: "",
 };
 
 const KEY = "settings-v1";
@@ -194,6 +207,11 @@ export function sharedPart(s: Settings): Record<string, unknown> {
     useOnDeviceAI: s.useOnDeviceAI,
     recoSource: s.forYouLibrary,
     includeWatchingAsLiked: s.includeWatchingAsLiked,
+    // Never an empty client ID over the one the iPhone has.
+    ...(s.anilistClientId.trim() ? { anilistClientId: s.anilistClientId.trim() } : {}),
+    anilistHideChinese: s.anilistHideChinese,
+    anilistIncludeUnreleased: s.anilistIncludeUnreleased,
+    anilistTitleLanguage: s.anilistTitleLanguage,
     jumpBackward: s.seekShort,
     jumpForward: s.seekShort,
     defaultSpeed: s.defaultSpeed,
@@ -211,6 +229,10 @@ export function applyShared(s: Settings, phone: Record<string, unknown> | null):
   if (typeof phone.useOnDeviceAI === "boolean") out.useOnDeviceAI = phone.useOnDeviceAI;
   if (typeof phone.recoSource === "string") out.forYouLibrary = phone.recoSource;
   if (typeof phone.includeWatchingAsLiked === "boolean") out.includeWatchingAsLiked = phone.includeWatchingAsLiked;
+  if (typeof phone.anilistClientId === "string" && phone.anilistClientId.trim()) out.anilistClientId = phone.anilistClientId.trim();
+  if (typeof phone.anilistHideChinese === "boolean") out.anilistHideChinese = phone.anilistHideChinese;
+  if (typeof phone.anilistIncludeUnreleased === "boolean") out.anilistIncludeUnreleased = phone.anilistIncludeUnreleased;
+  if (phone.anilistTitleLanguage === "" || phone.anilistTitleLanguage === "english" || phone.anilistTitleLanguage === "romaji" || phone.anilistTitleLanguage === "native") out.anilistTitleLanguage = phone.anilistTitleLanguage;
   if (typeof phone.jumpForward === "number" && phone.jumpForward > 0) out.seekShort = phone.jumpForward;
   if (typeof phone.defaultSpeed === "number" && phone.defaultSpeed > 0) out.defaultSpeed = phone.defaultSpeed;
   const seg = (k: "Intro" | "Recap" | "Outro", v: unknown) => {

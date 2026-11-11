@@ -1,6 +1,7 @@
 // The app's state: servers and the signed-in user, settings, libraries, and small helpers every
 // screen shares. Screens subscribe through useModel() and re-render on notify().
 
+import { AniListService } from "./anilistService";
 import { ApiError, deviceIdFor, Jellyfin, ReadOnlyJellyfin } from "./api";
 import { Discovery, type DiscoveryContext } from "./discovery";
 import type { PlayerController } from "./player";
@@ -58,6 +59,24 @@ export class AppModel {
     includeWatchingAsLiked: this.settings.includeWatchingAsLiked,
   } : null));
   discovery = new Discovery(() => this.notify());
+  /** For You on the Anime / Anime Movies libraries: your AniList account (as in AniReco and on the iPhone). */
+  anilist: AniListService = new AniListService({
+    notify: () => this.notify(),
+    toast: (text, tone) => this.toast(text, tone),
+    accountKey: () => (this.server && this.user ? `${this.server.id}|${this.user.Id}` : null),
+    token: (key) => this.anilistTokens[key] ?? null,
+    saveToken: async (key, token) => {
+      if (token) this.anilistTokens = { ...this.anilistTokens, [key]: token };
+      else { const next = { ...this.anilistTokens }; delete next[key]; this.anilistTokens = next; }
+      await this.persist();
+    },
+    settings: () => ({ hideChinese: this.settings.anilistHideChinese, includeUnreleased: this.settings.anilistIncludeUnreleased, titleLanguage: this.settings.anilistTitleLanguage, useAI: this.settings.useOnDeviceAI && !this.powerSaver }),
+    owned: () => this.reco.owned,
+    ensureLibrary: () => this.reco.ensure(),
+    listRefreshed: () => void this.migrateAnimeLists(),
+  });
+  /** AniList logins by "<server id>|<user id>", kept with the sign-ins (DPAPI / desktop keyring). */
+  private anilistTokens: Record<string, string> = {};
   private tmdbClient: { key: string; client: Tmdb } | null = null;
   /** Battery saver on: the AI part pauses (set by main.tsx). */
   powerSaver = false;
@@ -123,7 +142,7 @@ export class AppModel {
   // MARK: Persistence
 
   private async persist() {
-    await this.store.save(JSON.stringify({ servers: this.servers, current: this.server?.id ?? null }));
+    await this.store.save(JSON.stringify({ servers: this.servers, current: this.server?.id ?? null, anilist: this.anilistTokens }));
   }
 
   async bootstrap() {
@@ -131,8 +150,9 @@ export class AppModel {
     try {
       const raw = await this.store.load();
       if (raw) {
-        const data = JSON.parse(raw) as { servers: SavedServer[]; current: string | null };
+        const data = JSON.parse(raw) as { servers: SavedServer[]; current: string | null; anilist?: Record<string, string> };
         this.servers = data.servers ?? [];
+        this.anilistTokens = data.anilist && typeof data.anilist === "object" ? data.anilist : {};
         const current = this.servers.find((s) => s.id === data.current);
         const account = current?.accounts.find((a) => a.userId === current.lastUserId) ?? current?.accounts[0];
         if (current && account) await this.resume(current, account);
@@ -159,6 +179,7 @@ export class AppModel {
         this.api = api;
         this.server = server;
         this.user = { Id: account.userId, Name: account.name, HasPassword: true, HasConfiguredPassword: true, PrimaryImageTag: account.imageTag };
+        this.anilist.syncAccount();
         this.errorMessage = `Can't reach ${server.name} right now. ${(e as Error).message}`;
       }
     }
@@ -174,6 +195,7 @@ export class AppModel {
     this.dismissed = new Set();
     this.reco.reset();
     this.discovery.reset();
+    this.anilist.syncAccount();
     const storage = new AccountStorage(api);
     this.storage = storage;
     await this.persist();
@@ -192,6 +214,7 @@ export class AppModel {
       if (!storage.windowsSettings || JSON.stringify(sharedPart(next)) !== before) this.scheduleSettingsSync();
       this.reco.rebuild();
       this.notify();
+      void this.migrateAnimeLists();
     }).catch((e) => this.fail(e, "Couldn't load My List"));
     void api.reportCapabilities().catch(() => {});
     await this.loadViews();
@@ -260,6 +283,7 @@ export class AppModel {
     this.storage = null;
     this.reco.reset();
     this.discovery.reset();
+    this.anilist.syncAccount();
     await this.player?.shutdown();
     await this.persist();
     this.notify();
@@ -313,6 +337,11 @@ export class AppModel {
       reco: this.reco, tmdb: this.tmdb, storage: this.storage, sources: sourcesOf(this.views),
       serverId: this.server.id, userId: this.user.Id, useAI: this.settings.useOnDeviceAI && !this.powerSaver,
     };
+  }
+
+  /** Anime on My List / Not for me (server) move to AniList once both are loaded. */
+  async migrateAnimeLists() {
+    if (await this.anilist.migrateServerLists(this.storage)) this.tasteChanged();
   }
 
   /** After My List / Not for me / watched changes: taste again (cheap) and screens refresh. */

@@ -2,6 +2,7 @@
 
 import { createContext, type ReactNode, useContext, useSyncExternalStore } from "react";
 import type { AppModel, Tab } from "../core/model";
+import type { Media } from "../core/anilist";
 import type { ExternalTitle } from "../core/titles";
 import type { Item } from "../core/types";
 
@@ -42,6 +43,7 @@ export type Sheet =
   | { kind: "versions"; item: Item; onPick: (mediaSourceId: string) => void }
   | { kind: "why"; item: Item; because: string[]; highlights: string[] }
   | { kind: "tmdb"; item: ExternalTitle }
+  | { kind: "anilistRate"; media: Media }
   | { kind: "confirm"; title: string; text: string; danger?: boolean; confirmLabel?: string; run: () => void | Promise<void> }
   | { kind: "prompt"; title: string; label: string; initial?: string; confirmLabel?: string; run: (value: string) => void | Promise<void> };
 
