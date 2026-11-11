@@ -54,6 +54,11 @@ targets:
         NSLocalNetworkUsageDescription: JellyReco connects to your Jellyfin server on your home network.
         NSFaceIDUsageDescription: Unlock JellyReco with Face ID.
         UIFileSharingEnabled: false
+        # AniList login (For You on the Anime libraries) comes back to jellyreco://auth.
+        CFBundleURLTypes:
+          - CFBundleURLName: com.tim.jellyreco.auth
+            CFBundleURLSchemes:
+              - jellyreco
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.tim.jellyreco

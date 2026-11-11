@@ -78,6 +78,8 @@ final class DiscoveryEngine {
     func keyChanged() {
         reset()
         guard hasKey, let id = model?.reco.currentSourceId else { return }
+        // Anime / Anime Movies run on AniList: nothing to build on TMDB for them.
+        if AniListLibrary(libraryName: model?.reco.source(id)?.name) != nil { return }
         Task { await build(id, genre: nil) }
     }
 
@@ -496,7 +498,12 @@ final class DiscoveryEngine {
 
     /// "More like this" for an outside title: TMDB's also-liked list, minus anything you have.
     func moreLike(_ title: ExternalTitle) async -> [ExternalTitle] {
-        guard let model, let tmdb = client() else { return [] }
+        guard let model else { return [] }
+        // AniList titles: AniList's own fan recommendations (as in AniReco).
+        if let id = title.anilistId {
+            return await model.anilist.moreLike(id).map { model.anilist.title(for: $0) }
+        }
+        guard let tmdb = client() else { return [] }
         await loadIdMap()
         let recs = (try? await tmdb.recommendations(tmdbId: title.sourceId, tv: !title.isMovie)) ?? []
         let owned = ownedIndex(exact: true)
@@ -505,7 +512,7 @@ final class DiscoveryEngine {
     }
 
     func details(_ title: ExternalTitle) async -> ExternalTitle {
-        guard let tmdb = client() else { return title }
+        guard !title.isAniList, let tmdb = client() else { return title }   // AniList titles come complete
         return await tmdb.details(title)
     }
 
@@ -517,6 +524,7 @@ final class DiscoveryEngine {
 
     func ageRating(_ title: ExternalTitle) async -> String? {
         if let r = title.ageRating { return r }
+        if title.isAniList { return nil }   // AniList covers: Kitsu (ExternalAgeBubble)
         if ages == nil {
             // One read of the saved ratings for the whole grid (every cover used to read and decode
             // the file itself, and a late read could drop ratings found meanwhile).

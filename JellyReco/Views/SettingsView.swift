@@ -770,8 +770,9 @@ struct ForYouSettingsView: View {
                 .disabled((draft.isEmpty && s.tmdbKey.isEmpty) || checking)
                 if let keyStatus { Text(keyStatus).font(.footnote).foregroundStyle(.secondary) }
             } header: { Text("TMDB") } footer: {
-                Text("For You looks for new titles on TMDB (free key from themoviedb.org → Settings → API). Your library itself keeps using Jellyfin's own metadata.")
+                Text("For You looks for new titles on TMDB (free key from themoviedb.org → Settings → API). Your library itself keeps using Jellyfin's own metadata. The Anime and Anime Movies libraries use AniList instead (below).")
             }
+            AniListSettingsSection()
             Section {
                 Toggle("On-device AI ranking", isOn: $s.useOnDeviceAI)
                     .onChange(of: s.useOnDeviceAI) { _, _ in model.reco.listChanged() }
@@ -780,7 +781,13 @@ struct ForYouSettingsView: View {
                 Button("Rebuild picks now") {
                     Task {
                         await model.reco.build(force: true)
-                        await model.discovery.build(model.reco.currentSourceId, genre: nil)
+                        let current = model.reco.currentSourceId
+                        if let anime = AniListLibrary(libraryName: model.reco.source(current)?.name) {
+                            model.anilist.invalidatePicks()
+                            await model.anilist.generate(anime, nil, force: true)
+                        } else {
+                            await model.discovery.build(current, genre: nil)
+                        }
                     }
                 }
                 .disabled(model.reco.isBuilding)

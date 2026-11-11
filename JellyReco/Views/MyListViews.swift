@@ -1,8 +1,9 @@
 import SwiftUI
 
 /// My List: everything you want to watch, saved on your Jellyfin server (your account's
-/// JellyReco storage). Titles on your server play from here; For You picks that aren't on the
-/// server yet open their TMDB page, and switch to "On your server" once they're added.
+/// JellyReco storage), plus your AniList Planning list (anime, as in AniReco). Titles on your
+/// server play from here; For You picks that aren't on the server yet open their details, and
+/// switch to "On your server" once they're added.
 struct MyListView: View {
     @Environment(AppModel.self) private var model
     @State private var serverItems: [String: BaseItem] = [:]
@@ -10,10 +11,11 @@ struct MyListView: View {
     @State private var filter = 0
 
     private var entries: [MyListEntry] {
+        let all = model.myListEntries
         switch filter {
-        case 1: return model.myList.filter { $0.serverId != nil || isNowOnServer($0) }
-        case 2: return model.myList.filter { $0.external != nil && !isNowOnServer($0) }
-        default: return model.myList
+        case 1: return all.filter { $0.serverId != nil || isNowOnServer($0) }
+        case 2: return all.filter { $0.external != nil && !isNowOnServer($0) }
+        default: return all
         }
     }
 
@@ -32,13 +34,17 @@ struct MyListView: View {
             .padding(.vertical)
         }
         .overlay {
-            if model.myList.isEmpty {
+            if model.myListEntries.isEmpty {
                 ContentUnavailableView("My List is empty", systemImage: "bookmark",
-                                       description: Text("Add titles with \"Add to My List\" on For You picks, on item pages, or by long-pressing any poster. It's saved on your Jellyfin server."))
+                                       description: Text("Add titles with \"Add to My List\" on For You picks, on item pages, or by long-pressing any poster. It's saved on your Jellyfin server (anime: on your AniList Planning list)."))
             }
         }
         .navigationTitle("My List")
-        .refreshable { await model.loadAccountStorage(); await loadServerItems(reload: true) }
+        .refreshable {
+            await model.loadAccountStorage()
+            await model.anilist.refreshList()
+            await loadServerItems(reload: true)
+        }
         .task(id: model.myList.map(\.id) + ["library:\(model.reco.libraryRevision)"]) {
             if model.reco.libraryItems.isEmpty { await model.reco.ensureBuilt() }
             // Only when the library changed (it used to re-index every title on each list change).
@@ -58,11 +64,12 @@ struct MyListView: View {
             (1, "On your server", "server.rack"),
             (2, "Not on server yet", "icloud.and.arrow.down"),
         ]
+        let all = model.myListEntries
         func count(_ f: Int) -> Int {
             switch f {
-            case 1: return model.myList.filter { $0.serverId != nil || isNowOnServer($0) }.count
-            case 2: return model.myList.filter { $0.external != nil && !isNowOnServer($0) }.count
-            default: return model.myList.count
+            case 1: return all.filter { $0.serverId != nil || isNowOnServer($0) }.count
+            case 2: return all.filter { $0.external != nil && !isNowOnServer($0) }.count
+            default: return all.count
             }
         }
         let current = options.first { $0.0 == filter } ?? options[0]
@@ -141,10 +148,24 @@ struct MyListView: View {
     @State private var byTMDB: [String: BaseItem] = [:]
     @State private var byIMDb: [String: BaseItem] = [:]
     @State private var byTitle: [String: [BaseItem]] = [:]
+    @State private var byAniList: [Int: BaseItem] = [:]
     @State private var indexedRevision = -1
 
     /// The server copy of a For You pick, if it has been added since (TMDB/IMDb id, then title).
     private func ownedItem(for ext: ExternalTitle) -> BaseItem? {
+        if ext.isAniList {
+            // AniList ids aren't TMDB ids: by the AniList id Jellyfin stored, then by any of its titles.
+            if let hit = byAniList[ext.sourceId] { return hit }
+            for name in [ext.title, ext.originalTitle].compactMap({ $0 }) {
+                guard let sameName = byTitle["\(ext.isMovie ? "m" : "s"):\(TitleKey.make(name))"] else { continue }
+                let sameYear = sameName.first { item in
+                    guard let a = ext.year, let b = item.productionYear else { return true }
+                    return abs(a - b) <= 1
+                }
+                if let hit = sameYear ?? (ext.isMovie ? nil : sameName.first) { return hit }
+            }
+            return nil
+        }
         if let hit = byTMDB["\(ext.isMovie ? "m" : "s"):\(ext.sourceId)"] { return hit }
         if let imdb = ext.imdbId, let hit = byIMDb[imdb] { return hit }
         guard let sameName = byTitle["\(ext.isMovie ? "m" : "s"):\(TitleKey.make(ext.title))"] else { return nil }
@@ -158,16 +179,19 @@ struct MyListView: View {
     }
 
     private func indexLibrary() {
-        var t: [String: BaseItem] = [:], i: [String: BaseItem] = [:], n: [String: [BaseItem]] = [:]
+        var t: [String: BaseItem] = [:], i: [String: BaseItem] = [:], n: [String: [BaseItem]] = [:], a: [Int: BaseItem] = [:]
         for item in model.reco.libraryItems {
             let kind = item.kind == .series ? "s" : "m"
             for (key, value) in item.providerIds ?? [:] {
                 if key.caseInsensitiveCompare("Tmdb") == .orderedSame { t["\(kind):\(value)"] = item }
                 if key.caseInsensitiveCompare("Imdb") == .orderedSame { i[value] = item }
+                if key.caseInsensitiveCompare("AniList") == .orderedSame, let id = Int(value) { a[id] = item }
             }
-            n["\(kind):\(TitleKey.make(item.displayName))", default: []].append(item)
+            for name in Set([item.displayName, item.originalTitle].compactMap { $0 }) {
+                n["\(kind):\(TitleKey.make(name))", default: []].append(item)
+            }
         }
-        byTMDB = t; byIMDb = i; byTitle = n
+        byTMDB = t; byIMDb = i; byTitle = n; byAniList = a
     }
 
     private func isNowOnServer(_ e: MyListEntry) -> Bool {
@@ -192,15 +216,18 @@ struct MyListView: View {
     }
 }
 
-/// Not for me / Already seen: For You picks you turned down (saved on your server).
-/// Undo puts a title back in the running for For You.
+/// Not for me / Already seen: For You picks you turned down (saved on your server; anime on
+/// AniList's private "Not for me" list). Undo puts a title back in the running for For You.
 struct NotForMeView: View {
     @Environment(AppModel.self) private var model
     @State private var tab = 0
     @State private var detail: ExternalTitle?
     @State private var confirmClear = false
 
-    private var list: [ExternalTitle] { tab == 0 ? model.externalNotForMe : model.externalSeen }
+    private var notForMe: [ExternalTitle] {
+        model.externalNotForMe + model.anilist.notForMeTitles.map { model.anilist.title(for: $0) }
+    }
+    private var list: [ExternalTitle] { tab == 0 ? notForMe : model.externalSeen }
 
     var body: some View {
         // The same look as My List: the dropdown on the right, then a grid of covers.
@@ -237,7 +264,8 @@ struct NotForMeView: View {
         }
         .navigationTitle("Not for me")
         .toolbar {
-            if !list.isEmpty {
+            // "Clear all" clears what's saved on the server; AniList titles are undone one by one.
+            if tab == 0 ? !model.externalNotForMe.isEmpty : !model.externalSeen.isEmpty {
                 Button("Clear all") { confirmClear = true }
             }
         }
@@ -246,7 +274,9 @@ struct NotForMeView: View {
                 Task { await model.clearExternal(tab == 0 ? .notforme : .seenelsewhere) }
             }
         } message: {
-            Text("These titles can be suggested on For You again.")
+            Text(tab == 0 && !model.anilist.notForMeTitles.isEmpty
+                 ? "These titles can be suggested on For You again. Anime on your AniList \"Not for me\" list stay: long-press one to undo it."
+                 : "These titles can be suggested on For You again.")
         }
         .sheet(item: $detail) { ExternalDetailSheet(title: $0) }
     }
@@ -257,7 +287,7 @@ struct NotForMeView: View {
             Spacer()
             Menu {
                 Button { tab = 0 } label: {
-                    Label("Not for me (\(model.externalNotForMe.count))", systemImage: tab == 0 ? "checkmark" : "hand.thumbsdown")
+                    Label("Not for me (\(notForMe.count))", systemImage: tab == 0 ? "checkmark" : "hand.thumbsdown")
                 }
                 Button { tab = 1 } label: {
                     Label("Already seen (\(model.externalSeen.count))", systemImage: tab == 1 ? "checkmark" : "eye")
@@ -265,7 +295,7 @@ struct NotForMeView: View {
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: tab == 0 ? "hand.thumbsdown" : "eye").frame(height: 0)
-                    Text(tab == 0 ? "Not for me (\(model.externalNotForMe.count))" : "Already seen (\(model.externalSeen.count))")
+                    Text(tab == 0 ? "Not for me (\(notForMe.count))" : "Already seen (\(model.externalSeen.count))")
                     Image(systemName: "chevron.down").font(.caption.weight(.semibold)).frame(height: 0)
                 }
                 .menuButtonHeight()

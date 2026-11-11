@@ -1,9 +1,12 @@
 import Foundation
 
-/// A title from TMDB recommended because of what you watched on your server.
+/// A title from TMDB recommended because of what you watched on your server, or (for the
+/// Anime / Anime Movies libraries) an AniList anime picked from your AniList list.
 /// Never something your server already has (checked by TMDB/IMDb/TVDB id and by title).
 struct ExternalTitle: Codable, Hashable, Identifiable {
-    enum Source: String, Codable { case tmdbMovie, tmdbTV }
+    /// `anilist`: `sourceId` is the AniList media id. These live on your AniList account (Planning,
+    /// "Not for me"), never in the My List copy saved on your server.
+    enum Source: String, Codable { case tmdbMovie, tmdbTV, anilist }
 
     var id: String { "\(source.rawValue):\(sourceId)" }
     let source: Source
@@ -31,13 +34,20 @@ struct ExternalTitle: Codable, Hashable, Identifiable {
     /// TMDB certification ("PG-13", "TV-MA", "12"…) and the country it's from ("US").
     var ageRating: String?
     var ageRatingCountry: String?
+    /// AniList's format ("TV", "MOVIE", "OVA"…); nil for TMDB titles.
+    var format: String?
 
-    var isMovie: Bool { source == .tmdbMovie }
-    var isAnime: Bool { originalLanguage == "ja" && genres.contains("Animation") }
+    var isAniList: Bool { source == .anilist }
+    var anilistId: Int? { isAniList ? sourceId : nil }
+    var isMovie: Bool { isAniList ? format == "MOVIE" : source == .tmdbMovie }
+    var isAnime: Bool { isAniList || (originalLanguage == "ja" && genres.contains("Animation")) }
 
     var webURL: URL? {
-        URL(string: "https://www.themoviedb.org/\(isMovie ? "movie" : "tv")/\(sourceId)")
+        if isAniList { return URL(string: "https://anilist.co/anime/\(sourceId)") }
+        return URL(string: "https://www.themoviedb.org/\(isMovie ? "movie" : "tv")/\(sourceId)")
     }
+    /// "TMDB" or "AniList": where the score and the web page come from.
+    var siteName: String { isAniList ? "AniList" : "TMDB" }
 
     /// The age bubble, as in AniReco: PG, 13+, 17+ or 18+.
     var ageLabel: String? { ageRating.flatMap(TMDBCertification.bucket) }
@@ -55,6 +65,7 @@ struct ExternalTitle: Codable, Hashable, Identifiable {
         var parts: [String] = [isAnime ? (isMovie ? "Anime movie" : "Anime") : (isMovie ? "Movie" : "TV show")]
         if let y = year { parts.append("\(y)") }
         if let s = seasons, !isMovie { parts.append(s == 1 ? "1 season" : "\(s) seasons") }
+        if isAniList, !isMovie, let e = episodes, e > 0 { parts.append(e == 1 ? "1 episode" : "\(e) episodes") }
         if let r = runtime, isMovie, r > 0 { parts.append(Fmt.runtime(Double(r * 60))) }
         return parts.joined(separator: " · ")
     }
@@ -92,6 +103,7 @@ extension ExternalTitle {
     private enum Keys: String, CodingKey {
         case source, sourceId, title, originalTitle, originalLanguage, year, overview, genres, tags, posterURL, backdropURL
         case score, voteCount, popularity, episodes, seasons, runtime, imdbId, tvdbId, status, isAdult, ageRating, ageRatingCountry
+        case format
     }
 
     init(from decoder: Decoder) throws {
@@ -119,6 +131,7 @@ extension ExternalTitle {
                   status: opt(String.self, .status),
                   isAdult: opt(Bool.self, .isAdult) ?? false,
                   ageRating: opt(String.self, .ageRating),
-                  ageRatingCountry: opt(String.self, .ageRatingCountry))
+                  ageRatingCountry: opt(String.self, .ageRatingCountry),
+                  format: opt(String.self, .format))
     }
 }

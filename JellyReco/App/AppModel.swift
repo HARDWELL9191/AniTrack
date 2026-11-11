@@ -32,6 +32,8 @@ final class AppModel {
     let store = ServerStore()
     let reco = RecoEngine()
     let discovery = DiscoveryEngine()
+    /// For You on the Anime / Anime Movies libraries: your AniList account (as in AniReco).
+    let anilist = AniListService()
 
     var phase: AppPhase = .launching
     var selectedTab: AppTab = .home
@@ -69,6 +71,7 @@ final class AppModel {
     init() {
         reco.attach(model: self)
         discovery.attach(model: self)
+        anilist.attach(model: self)
         // Installed here (not after the server answers) so a saved key always starts For You.
         settings.onTMDBKeyChange = { [weak self] in
             guard let self else { return }
@@ -118,6 +121,7 @@ final class AppModel {
             guard client === self.client else { return }   // the account changed meanwhile
             user = me
             if let sid = store.currentServerId { store.updateUser(me, on: sid) }
+            anilist.syncAccount()   // this Jellyfin account's own AniList login
             async let views = client.userViews()
             async let info = try? client.get("/System/Info", as: SystemInfo.self)
             let fetchedViews = try? await views
@@ -268,6 +272,8 @@ final class AppModel {
         settings.dismissedPicks = []
         reco.reset()
         discovery.reset()
+        anilistMigration?.cancel(); anilistMigration = nil
+        anilist.syncAccount()
         contentVersion &+= 1
     }
 
@@ -397,6 +403,7 @@ final class AppModel {
             }
             storageLoaded = true
             scheduleFlush()   // anything changed before the first load can be saved now
+            migrateAnimeListsToAniList()
         }
         settings.onChange = { [weak self] in self?.scheduleSettingsSync() }
     }
@@ -579,7 +586,10 @@ final class AppModel {
     }
 
     func isOnMyList(_ item: BaseItem) -> Bool { myList.contains { $0.serverId == listId(item) } }
-    func isOnMyList(_ t: ExternalTitle) -> Bool { myList.contains { $0.external?.id == t.id } }
+    func isOnMyList(_ t: ExternalTitle) -> Bool {
+        if let id = t.anilistId { return anilist.isPlanned(id) }   // My List for anime = AniList Planning
+        return myList.contains { $0.external?.id == t.id }
+    }
 
     func toggleMyList(_ item: BaseItem) async {
         let id = listId(item)
@@ -594,6 +604,15 @@ final class AppModel {
     }
 
     func toggleMyList(_ t: ExternalTitle) async {
+        // AniList picks go on (and off) your AniList Planning list, never into the server's copy.
+        if let id = t.anilistId {
+            if anilist.isPlanned(id) {
+                await anilist.removeFromPlanning(id)
+            } else if let media = await anilist.media(id: id) {
+                await anilist.planToWatch(media)
+            }
+            return
+        }
         if let i = myList.firstIndex(where: { $0.external?.id == t.id }) {
             myList.remove(at: i)
         } else {
@@ -612,7 +631,24 @@ final class AppModel {
         saveMyList()
     }
 
+    /// My List as shown: the server's copy plus your AniList Planning list (anime), newest first.
+    var myListEntries: [MyListEntry] {
+        let planned = anilist.planning.map { e -> MyListEntry in
+            var entry = MyListEntry(external: anilist.title(for: e.media))
+            entry.addedAt = Date(timeIntervalSince1970: TimeInterval(e.createdAt ?? e.updatedAt ?? 0))
+            return entry
+        }
+        guard !planned.isEmpty else { return myList }
+        return (myList + planned).enumerated()
+            .sorted { $0.element.addedAt == $1.element.addedAt ? $0.offset < $1.offset : $0.element.addedAt > $1.element.addedAt }
+            .map(\.element)
+    }
+
     func removeFromMyList(_ entry: MyListEntry) async {
+        if let id = entry.external?.anilistId {   // off your AniList Planning list
+            await anilist.removeFromPlanning(id)
+            return
+        }
         myList.removeAll { $0.id == entry.id }
         reco.listChanged()
         saveMyList()
@@ -622,6 +658,10 @@ final class AppModel {
     private func saveMyList() { markDirty("mylist") }
 
     func markSeenElsewhere(_ t: ExternalTitle) async {
+        if let id = t.anilistId {   // Completed on AniList, then "How did you like it?"
+            if let media = await anilist.media(id: id) { await anilist.markCompleted(media) }
+            return
+        }
         externalSeen.removeAll { $0.id == t.id }
         externalSeen.insert(t, at: 0)
         if myList.contains(where: { $0.external?.id == t.id }) {
@@ -632,6 +672,14 @@ final class AppModel {
     }
 
     func markExternalNotForMe(_ t: ExternalTitle, _ on: Bool = true) async {
+        if let id = t.anilistId {   // AniList's private "Not for me" list (shared with AniReco)
+            if !on {
+                await anilist.undoNotForMe(id)
+            } else if let media = await anilist.media(id: id) {
+                anilist.dismiss(media)
+            }
+            return
+        }
         externalNotForMe.removeAll { $0.id == t.id }
         if on {
             externalNotForMe.insert(t, at: 0)
@@ -657,6 +705,59 @@ final class AppModel {
     }
 
     private func saveExternal(_ list: ExternalList) { markDirty(list.rawValue) }
+
+    // MARK: Anime My List / Not for me → AniList (once)
+
+    @ObservationIgnored private var anilistMigration: Task<Void, Never>?
+
+    /// Anime that were on My List / Not for me (saved on the server) before For You moved anime to
+    /// AniList: added to your AniList Planning / "Not for me" list once, then taken off the server's
+    /// copy. A title AniList doesn't know stays where it was. Runs when both lists are loaded.
+    func migrateAnimeListsToAniList() {
+        guard anilistMigration == nil, storageLoaded, anilist.isLoggedIn, anilist.listLoadedOnce,
+              let viewerId = anilist.viewer?.id, let sid = store.currentServerId, let uid = client?.userId else { return }
+        let doneKey = "anilist-moved-lists|\(sid)|\(uid)|\(viewerId)"
+        guard !UserDefaults.standard.bool(forKey: doneKey) else { return }
+        let toPlan = myList.compactMap(\.external).filter { $0.isAnime && !$0.isAniList }
+        let toDismiss = externalNotForMe.filter { $0.isAnime && !$0.isAniList }
+        guard !toPlan.isEmpty || !toDismiss.isEmpty else {
+            UserDefaults.standard.set(true, forKey: doneKey)
+            return
+        }
+        let account = client
+        anilistMigration = Task {
+            defer { anilistMigration = nil }
+            var incomplete = false
+            func stillHere() -> Bool { !Task.isCancelled && client === account && anilist.viewer?.id == viewerId }
+            for (index, t) in toPlan.enumerated() {
+                guard stillHere() else { return }
+                if index > 0 { try? await Task.sleep(nanoseconds: AniListService.writeSpacing) }
+                do {
+                    guard let media = try await anilist.find(t) else { continue }   // AniList doesn't know it: stays
+                    var ok = true
+                    if anilist.entry(for: media.id) == nil { ok = await anilist.planToWatch(media) }
+                    guard ok, stillHere() else { incomplete = true; continue }
+                    myList.removeAll { $0.external?.id == t.id }
+                    saveMyList()
+                } catch {
+                    incomplete = true   // offline / rate limited: tried again next time
+                }
+            }
+            for (index, t) in toDismiss.enumerated() {
+                guard stillHere() else { return }
+                if index > 0 || !toPlan.isEmpty { try? await Task.sleep(nanoseconds: 700_000_000) }
+                do {
+                    guard let media = try await anilist.find(t) else { continue }
+                    if anilist.entry(for: media.id) == nil { anilist.dismiss(media) }
+                    externalNotForMe.removeAll { $0.id == t.id }
+                    saveExternal(.notforme)
+                } catch {
+                    incomplete = true
+                }
+            }
+            if !incomplete && stillHere() { UserDefaults.standard.set(true, forKey: doneKey) }
+        }
+    }
 
     // MARK: Not for me — Jellyfin's own thumbs-down, saved on the server
 
