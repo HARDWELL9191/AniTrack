@@ -26,6 +26,11 @@ struct RootView: View {
         // video keeps playing in the background or in picture in picture).
         .onChange(of: scenePhase) { _, phase in
             LockWindowController.shared.scenePhase = phase
+            // Back in the app with no libraries loaded (the server wasn't reachable before, e.g.
+            // VPN off): try again, so the library lists fill in without restarting the app.
+            if phase == .active, model.phase == .ready, model.client != nil, model.libraries.isEmpty {
+                Task { await model.refreshSession() }
+            }
             if phase == .background, model.settings.requireFaceID, model.phase == .ready, model.playback == nil {
                 model.isLocked = true
                 // Straight away, so the app-switcher snapshot already shows the lock.

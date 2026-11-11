@@ -39,6 +39,9 @@ struct ForYouView: View {
             .refreshable {
                 index = 0
                 handled = 0
+                // No libraries yet (the server wasn't reachable when the app opened, e.g. VPN off):
+                // fetch them now, so the library menu fills in without restarting the app.
+                if model.libraries.isEmpty { await model.refreshSession() }
                 await discovery.build(sourceId, genre: nil)
             }
             // Per account too: after switching accounts the library id (or "All") can stay the same.
