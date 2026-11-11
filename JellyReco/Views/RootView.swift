@@ -43,6 +43,15 @@ struct RootView: View {
         .fullScreenCover(item: $model.playback) { request in
             PlayerScreen(request: request)
         }
+        // "How did you like it?" after "Already seen" on an AniList pick.
+        .sheet(item: Binding(get: { model.anilist.ratePrompt }, set: { model.anilist.ratePrompt = $0 })) { media in
+            AniListRatePrompt(media: media).presentationDetents([.height(360)])
+        }
+        // AniList login coming back through the jellyreco://auth link (when not caught by the login sheet).
+        .onOpenURL { url in
+            guard url.scheme == AniListAuth.callbackScheme else { return }
+            Task { await model.anilist.handleAuthCallback(url) }
+        }
         .sheet(item: $model.moreLikeItem) { item in
             MoreLikeThisSheet(item: item).presentationDetents([.medium, .large])
         }

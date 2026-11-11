@@ -2,6 +2,8 @@ import SwiftUI
 
 /// For You: new titles to get, from TMDB, picked from what you watched on your server.
 /// First dropdown: which library teaches it (default Anime; or All). Second: a genre.
+/// The libraries named Anime and Anime Movies run on your AniList account instead, as in
+/// AniReco (picks from your AniList list, My List = AniList Planning, Not for me on AniList).
 /// Never shows anything already on your server.
 struct ForYouView: View {
     @Environment(AppModel.self) private var model
@@ -11,10 +13,18 @@ struct ForYouView: View {
     @State private var index = 0
     @State private var handled = 0
     @State private var detail: ExternalTitle?
+    /// AniList category (Anime / Anime Movies libraries).
+    @State private var aniCategory: AnimeCategory?
 
     private var discovery: DiscoveryEngine { model.discovery }
+    private var anilist: AniListService { model.anilist }
     private var sourceId: String { model.reco.currentSourceId }
-    private var list: [ExternalPick] { discovery.visiblePicks(for: sourceId, genre: genre) }
+    /// Set when the chosen library is Anime or Anime Movies: For You runs on AniList.
+    private var aniLibrary: AniListLibrary? { AniListLibrary(libraryName: model.reco.source(sourceId)?.name) }
+    private var list: [ExternalPick] {
+        if let aniLibrary { return anilist.externalPicks(aniLibrary, aniCategory) }
+        return discovery.visiblePicks(for: sourceId, genre: genre)
+    }
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -31,7 +41,7 @@ struct ForYouView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     NavigationLink(value: ScreenLink.myList) {
-                        Image(systemName: model.myList.isEmpty ? "bookmark" : "bookmark.fill")
+                        Image(systemName: model.myList.isEmpty && model.anilist.planning.isEmpty ? "bookmark" : "bookmark.fill")
                     }
                     .accessibilityLabel("My List")
                 }
@@ -39,16 +49,32 @@ struct ForYouView: View {
             .refreshable {
                 index = 0
                 handled = 0
+                if let aniLibrary {
+                    if model.libraries.isEmpty { await model.refreshSession() }
+                    await anilist.refreshList()
+                    await anilist.generate(aniLibrary, aniCategory, force: true)
+                    return
+                }
                 // No libraries yet (the server wasn't reachable when the app opened, e.g. VPN off):
                 // fetch them now, so the library menu fills in without restarting the app.
                 if model.libraries.isEmpty { await model.refreshSession() }
                 await discovery.build(sourceId, genre: nil)
             }
             // Per account too: after switching accounts the library id (or "All") can stay the same.
-            .task(id: "\(model.store.currentServerId ?? "")|\(model.client?.userId ?? "")|\(sourceId)") {
+            .task(id: "\(model.store.currentServerId ?? "")|\(model.client?.userId ?? "")|\(sourceId)|\(aniCategory?.id ?? "")|\(anilist.viewer?.id ?? 0)") {
+                if let aniLibrary {
+                    anilist.syncAccount()
+                    guard anilist.isLoggedIn else { return }
+                    async let categories: Void = anilist.loadCategories()
+                    await anilist.generate(aniLibrary, aniCategory)
+                    await categories
+                    return
+                }
                 await discovery.ensureBuilt(sourceId)
             }
-            .onChange(of: sourceId) { _, _ in index = 0; handled = 0; genre = nil }
+            .onChange(of: sourceId) { _, _ in index = 0; handled = 0; genre = nil; aniCategory = nil }
+            .onChange(of: aniCategory) { _, _ in index = 0; handled = 0 }
+            .onChange(of: index) { _, new in preloadAniList(at: new) }
             .onChange(of: genre) { _, new in
                 index = 0
                 handled = 0
@@ -88,29 +114,63 @@ struct ForYouView: View {
             .menuStyle(.button)
             .buttonStyle(.glass)
 
-            Menu {
-                Button { genre = nil } label: {
-                    if genre == nil { Label("Any category", systemImage: "checkmark") } else { Text("Any category") }
-                }
-                if !genres.isEmpty {
-                    Divider()
-                    Section("Genres") {
-                        ForEach(genres, id: \.self) { g in
-                            Button { genre = g } label: {
-                                if genre == g { Label(g, systemImage: "checkmark") } else { Text(g) }
-                            }
-                        }
-                    }
-                }
-            } label: {
-                DropdownLabel(text: genre ?? "Any category", symbol: "line.3.horizontal.decrease")
+            if aniLibrary != nil {
+                aniCategoryMenu
+            } else {
+                genreMenu(genres)
             }
-            .menuStyle(.button)
-            .buttonStyle(.glass)
-            .disabled(genres.isEmpty && genre == nil)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 4)
+    }
+
+    /// AniReco's categories: the popular ones first, then every AniList genre and tag.
+    private var aniCategoryMenu: some View {
+        let all = anilist.categories.isEmpty ? AnimeCategory.featured : anilist.categories
+        let featured = all.filter { AnimeCategory.featured.contains($0) }
+        let genres = all.filter { $0.kind == .genre && !featured.contains($0) }
+        let tags = all.filter { $0.kind == .tag && !featured.contains($0) }
+        func row(_ c: AnimeCategory) -> some View {
+            Button { aniCategory = c } label: {
+                if aniCategory == c { Label(c.name, systemImage: "checkmark") } else { Text(c.name) }
+            }
+        }
+        return Menu {
+            Button { aniCategory = nil } label: {
+                if aniCategory == nil { Label("Any category", systemImage: "checkmark") } else { Text("Any category") }
+            }
+            Divider()
+            Section("Popular") { ForEach(featured) { row($0) } }
+            if !genres.isEmpty { Menu("More genres") { ForEach(genres) { row($0) } } }
+            if !tags.isEmpty { Menu("Tags") { ForEach(tags) { row($0) } } }
+        } label: {
+            DropdownLabel(text: aniCategory?.name ?? "Any category", symbol: "line.3.horizontal.decrease")
+        }
+        .menuStyle(.button)
+        .buttonStyle(.glass)
+    }
+
+    private func genreMenu(_ genres: [String]) -> some View {
+        Menu {
+            Button { genre = nil } label: {
+                if genre == nil { Label("Any category", systemImage: "checkmark") } else { Text("Any category") }
+            }
+            if !genres.isEmpty {
+                Divider()
+                Section("Genres") {
+                    ForEach(genres, id: \.self) { g in
+                        Button { genre = g } label: {
+                            if genre == g { Label(g, systemImage: "checkmark") } else { Text(g) }
+                        }
+                    }
+                }
+            }
+        } label: {
+            DropdownLabel(text: genre ?? "Any category", symbol: "line.3.horizontal.decrease")
+        }
+        .menuStyle(.button)
+        .buttonStyle(.glass)
+        .disabled(genres.isEmpty && genre == nil)
     }
 
     private var tryAgainButton: some View {
@@ -135,6 +195,120 @@ struct ForYouView: View {
 
     @ViewBuilder
     private var content: some View {
+        if let aniLibrary {
+            aniContent(aniLibrary)
+        } else {
+            tmdbContent
+        }
+    }
+
+    /// Near the end of the AniList feed: dig one round deeper (AniReco's endless feed).
+    private func preloadAniList(at position: Int) {
+        guard let aniLibrary, let feed = anilist.feed(aniLibrary, aniCategory), !feed.exhausted,
+              position >= list.count - 5 else { return }
+        Task { await anilist.loadMore(aniLibrary, aniCategory) }
+    }
+
+    @ViewBuilder
+    private func aniContent(_ library: AniListLibrary) -> some View {
+        let picks = list
+        if !anilist.isLoggedIn {
+            AniListConnectCard(library: library)
+                .padding(.horizontal)
+        } else if picks.isEmpty && (anilist.isBuilding(library, aniCategory) || anilist.isLoggingIn || !anilist.listLoadedOnce) {
+            VStack(spacing: 14) {
+                ProgressView()
+                Text(aniCategory.map { "Finding \($0.name) picks for you…" } ?? "Reading your AniList…").font(.headline)
+                Text(model.settings.useOnDeviceAI
+                     ? "Comparing your favorites with what fans recommend, with on-device AI. This only runs when your list changes."
+                     : "Comparing your favorites with what fans recommend.")
+                    .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            }
+            .padding(40)
+        } else if picks.isEmpty, let error = anilist.error(library, aniCategory) {
+            ContentUnavailableView {
+                Label("Couldn't build picks", systemImage: "exclamationmark.triangle")
+            } description: {
+                Text(error)
+            } actions: {
+                aniTryAgain(library)
+            }
+        } else if picks.isEmpty {
+            ContentUnavailableView {
+                Label("No picks yet", systemImage: "wand.and.stars")
+            } description: {
+                Text(aniCategory == nil ? "Rate a few shows on your AniList, then try again."
+                                        : "Nothing new in \(aniCategory!.name) right now. Try another category.")
+            } actions: {
+                aniTryAgain(library)
+            }
+        } else {
+            pickList(picks, loadingMore: anilist.isLoadingMore(library, aniCategory))
+            Text(aniFooter(library))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
+        }
+    }
+
+    private func aniTryAgain(_ library: AniListLibrary) -> some View {
+        Button("Try again", systemImage: "arrow.clockwise") {
+            Task {
+                if !anilist.listLoadedOnce || anilist.entries.isEmpty { await anilist.reloadAll() }
+                await anilist.generate(library, aniCategory, force: true)
+            }
+        }
+        .buttonStyle(.glass)
+    }
+
+    private func aniFooter(_ library: AniListLibrary) -> String {
+        let feed = anilist.feed(library, aniCategory)
+        let when = feed.map { $0.generatedAt.formatted(.relative(presentation: .named)) } ?? "just now"
+        let ai = feed?.usedOnDeviceAI == true ? " and on-device AI" : ""
+        return "Built \(when) from your AniList list\(anilist.viewer.map { " (\($0.name))" } ?? ""), what fans recommend\(ai). Nothing here is on your server or your AniList list yet."
+    }
+
+    /// The pick card and the "More picks" row (TMDB and AniList picks alike).
+    @ViewBuilder
+    private func pickList(_ picks: [ExternalPick], loadingMore: Bool) -> some View {
+        let safe = min(index, picks.count - 1)
+        let pick = picks[safe]
+        ExternalPickCard(pick: pick,
+                         position: safe + 1 + handled,
+                         total: picks.count + handled,
+                         noun: noun,
+                         onNext: { withAnimation(.snappy) { index = safe + 1 >= picks.count ? 0 : safe + 1 } },
+                         onHandled: { handled += 1; preloadAniList(at: safe) },
+                         onDetails: { detail = pick.title })
+            .id(pick.id)
+            .transition(.asymmetric(insertion: .move(edge: .trailing).combined(with: .opacity),
+                                    removal: .move(edge: .leading).combined(with: .opacity)))
+            .padding(.horizontal)
+
+        if picks.count > 1 {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("More picks").font(.title3.bold()).padding(.horizontal)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(alignment: .top, spacing: 12) {
+                        ForEach(Array(picks.enumerated()), id: \.element.id) { offset, p in
+                            Button { withAnimation(.snappy) { index = offset } } label: {
+                                ExternalPosterCard(title: p.title, match: p.match, width: 96, highlighted: offset == safe)
+                            }
+                            .buttonStyle(PressStyle())
+                            .onAppear { if offset >= picks.count - 3 { preloadAniList(at: offset) } }
+                        }
+                        if loadingMore { ProgressView().frame(width: 96, height: 144) }
+                    }
+                    .padding(.horizontal)
+                }
+                .scrollClipDisabled()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var tmdbContent: some View {
         let picks = list
         if !discovery.hasKey {
             TMDBKeyCard()
@@ -166,37 +340,7 @@ struct ForYouView: View {
                 tryAgainButton
             }
         } else {
-            let safe = min(index, picks.count - 1)
-            let pick = picks[safe]
-            ExternalPickCard(pick: pick,
-                             position: safe + 1 + handled,
-                             total: picks.count + handled,
-                             noun: noun,
-                             onNext: { withAnimation(.snappy) { index = safe + 1 >= picks.count ? 0 : safe + 1 } },
-                             onHandled: { handled += 1 },
-                             onDetails: { detail = pick.title })
-                .id(pick.id)
-                .transition(.asymmetric(insertion: .move(edge: .trailing).combined(with: .opacity),
-                                        removal: .move(edge: .leading).combined(with: .opacity)))
-                .padding(.horizontal)
-
-            if picks.count > 1 {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("More picks").font(.title3.bold()).padding(.horizontal)
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        LazyHStack(alignment: .top, spacing: 12) {
-                            ForEach(Array(picks.enumerated()), id: \.element.id) { offset, p in
-                                Button { withAnimation(.snappy) { index = offset } } label: {
-                                    ExternalPosterCard(title: p.title, match: p.match, width: 96, highlighted: offset == safe)
-                                }
-                                .buttonStyle(PressStyle())
-                            }
-                        }
-                        .padding(.horizontal)
-                    }
-                    .scrollClipDisabled()
-                }
-            }
+            pickList(picks, loadingMore: false)
             Text(footer)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
@@ -206,6 +350,7 @@ struct ForYouView: View {
     }
 
     private var noun: String {
+        if let aniLibrary { return aniLibrary.noun }
         switch discovery.kind(of: sourceId) {
         case .animeShows: return "anime"
         case .animeMovies: return "anime movie"
@@ -231,6 +376,15 @@ struct ExternalAgeBubble: View {
     @State private var looked: (id: String, rating: String)?
 
     var body: some View {
+        if title.isAniList {
+            AniListAgeBubble(id: title.sourceId)
+        } else {
+            tmdbBubble
+        }
+    }
+
+    @ViewBuilder
+    private var tmdbBubble: some View {
         let rating = title.ageRating ?? (looked?.id == title.id ? looked?.rating : nil)
         let label = rating.flatMap(TMDBCertification.bucket)
         ZStack {
@@ -241,6 +395,21 @@ struct ExternalAgeBubble: View {
             guard title.ageRating == nil, looked?.id != title.id else { return }
             if let r = await model.discovery.ageRating(title) { looked = (title.id, r) }
         }
+    }
+}
+
+/// Kitsu's age rating on an AniList cover (as in AniReco), looked up in batches as covers appear.
+struct AniListAgeBubble: View {
+    @Environment(AppModel.self) private var model
+    let id: Int
+
+    var body: some View {
+        let label = model.anilist.ages.rating(for: id)?.label
+        ZStack {
+            if let label { GlassLabel(text: label).transition(.opacity) }
+        }
+        .animation(.easeOut(duration: 0.2), value: label)
+        .onAppear { model.anilist.ages.request(id: id, mal: nil) }
     }
 }
 
@@ -304,7 +473,7 @@ struct ExternalPickCard: View {
                     Text("\(pick.match)% match").font(.headline).foregroundStyle(Theme.pink)
                     Text(t.metaLine).font(.caption).foregroundStyle(.secondary)
                     if let score = t.score, score > 0 {
-                        Label(String(format: "%.1f TMDB", score), systemImage: "star.fill")
+                        Label(String(format: "%.1f %@", score, t.siteName), systemImage: "star.fill")
                             .font(.caption.weight(.semibold)).foregroundStyle(.yellow)
                     }
                 }
@@ -423,7 +592,8 @@ struct ExternalPickCard: View {
         do {
             explanation = try await PickExplainer.shared.explain(
                 DiscoveryEngine.pseudoItem(pick.title).withOverview(pick.title.overview),
-                because: pick.because, liked: model.reco.topLiked(in: model.reco.currentSourceId),
+                because: pick.because,
+                liked: pick.title.isAniList ? model.anilist.topLiked() : model.reco.topLiked(in: model.reco.currentSourceId),
                 highlights: pick.highlights, noun: noun)
         } catch {
             explainError = "Apple Intelligence couldn't write this one (\(error.localizedDescription))."
@@ -466,11 +636,14 @@ struct ExternalDetailSheet: View {
                                 if let o = title.originalTitle, o != title.title { SelectableText(text: o, style: .caption1, color: .secondaryLabel) }
                                 Text(title.metaLine).font(.caption).foregroundStyle(.secondary)
                                 if let s = title.score, s > 0 {
-                                    Label(String(format: "%.1f · %d votes", s, title.voteCount ?? 0), systemImage: "star.fill")
+                                    Label(title.isAniList ? String(format: "%.1f AniList", s)
+                                                          : String(format: "%.1f · %d votes", s, title.voteCount ?? 0),
+                                          systemImage: "star.fill")
                                         .font(.caption.weight(.semibold)).foregroundStyle(.yellow)
                                 }
-                                // "PG-13 · United States" (TMDB certification), like AniReco's details.
-                                if let age = title.ageExplanation {
+                                // "PG-13 · United States" (TMDB certification), like AniReco's details;
+                                // AniList titles: Kitsu's rating, as in AniReco.
+                                if let age = title.isAniList ? model.anilist.ages.rating(for: title.sourceId)?.explanation : title.ageExplanation {
                                     Label(age, systemImage: "checkmark.shield")
                                         .font(.caption.weight(.semibold))
                                         .foregroundStyle(.secondary)
@@ -482,7 +655,8 @@ struct ExternalDetailSheet: View {
                     }
                     .padding(.bottom, 40)
 
-                    Label("Not on your server", systemImage: "icloud.and.arrow.down")
+                    Label(title.isAniList ? "Not on your server or your AniList list" : "Not on your server",
+                          systemImage: "icloud.and.arrow.down")
                         .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                         .padding(.horizontal)
 
@@ -510,7 +684,7 @@ struct ExternalDetailSheet: View {
                         FlowLayout { ForEach(title.tags.prefix(12), id: \.self) { Chip(text: $0, tint: .gray) } }.padding(.horizontal)
                     }
                     HStack(spacing: 10) {
-                        if let url = title.webURL { Button("TMDB", systemImage: "safari") { openURL(url) }.buttonStyle(.glass) }
+                        if let url = title.webURL { Button(title.siteName, systemImage: "safari") { openURL(url) }.buttonStyle(.glass) }
                         if let url = title.imdbURL { Button("IMDb", systemImage: "safari") { openURL(url) }.buttonStyle(.glass) }
                     }
                     .padding(.horizontal)
@@ -541,7 +715,7 @@ struct ExternalMoreLikeSheet: View {
             Group {
                 if let items, items.isEmpty {
                     ContentUnavailableView("Nothing new", systemImage: "square.stack.3d.up.slash",
-                                           description: Text("Everything like \(title.title) is already on your server or hidden."))
+                                           description: Text("Everything like \(title.title) is already on your server\(title.isAniList ? ", on your AniList list" : "") or hidden."))
                 } else if let items {
                     ScrollView {
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 12)], spacing: 16) {

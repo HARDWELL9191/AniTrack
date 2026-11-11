@@ -259,6 +259,14 @@ final class AppSettings {
     var recoSource: String { didSet { save(recoSource, "recoSource") } }
     var dismissedPicks: Set<String> { didSet { save(Array(dismissedPicks), "dismissedPicks") } }
     var includeWatchingAsLiked: Bool { didSet { save(includeWatchingAsLiked, "includeWatchingAsLiked") } }
+
+    // For You on the Anime / Anime Movies libraries: AniList, as in AniReco.
+    /// Your AniList API client's id (its redirect URL must be jellyreco://auth).
+    var anilistClientId: String { didSet { save(anilistClientId, "anilistClientId") } }
+    var anilistHideChinese: Bool { didSet { save(anilistHideChinese, "anilistHideChinese") } }
+    var anilistIncludeUnreleased: Bool { didSet { save(anilistIncludeUnreleased, "anilistIncludeUnreleased") } }
+    /// "english", "romaji", "native", or "" = the title language set on your AniList account.
+    var anilistTitleLanguage: String { didSet { save(anilistTitleLanguage, "anilistTitleLanguage") } }
     /// TMDB API key or read access token (For You looks for new titles there). Synced with your
     /// account's private JellyReco storage on your server, like every other setting.
     var tmdbKey: String {
@@ -382,6 +390,10 @@ final class AppSettings {
         recoSource = s("recoSource", "")
         dismissedPicks = set("dismissedPicks")
         includeWatchingAsLiked = b("includeWatchingAsLiked", true)
+        anilistClientId = s("anilistClientId", "")
+        anilistHideChinese = b("anilistHideChinese", true)
+        anilistIncludeUnreleased = b("anilistIncludeUnreleased", false)
+        anilistTitleLanguage = s("anilistTitleLanguage", "")
         tmdbKey = Keychain.get("tmdb-key") ?? s("tmdbKey", "")
 
         requireFaceID = b("requireFaceID", false)
@@ -414,6 +426,7 @@ final class AppSettings {
         "subtitleBold", "subtitlePosition", "overrideASSStyles", "stereoDownmix", "transcodeFallback",
         "segmentActions", "defaultAspect", "subtitleASSMode", "subtitleOutlineSize",
         "useOnDeviceAI", "recoSource", "includeWatchingAsLiked",
+        "anilistClientId", "anilistHideChinese", "anilistIncludeUnreleased", "anilistTitleLanguage",
     ]
 
     /// Current synced settings as JSON.
@@ -482,6 +495,8 @@ final class AppSettings {
         subtitleASSMode = fresh.subtitleASSMode; subtitleOutlineSize = fresh.subtitleOutlineSize
         transcodeFallback = fresh.transcodeFallback
         useOnDeviceAI = fresh.useOnDeviceAI; recoSource = fresh.recoSource; includeWatchingAsLiked = fresh.includeWatchingAsLiked
+        anilistClientId = fresh.anilistClientId; anilistHideChinese = fresh.anilistHideChinese
+        anilistIncludeUnreleased = fresh.anilistIncludeUnreleased; anilistTitleLanguage = fresh.anilistTitleLanguage
     }
 
     func layout(for libraryId: String) -> LibraryLayout {

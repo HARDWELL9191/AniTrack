@@ -35,7 +35,9 @@ struct UITestHost: View {
     var body: some View {
         ZStack {
             Color.clear
-            if mode == "subrender" {
+            if mode == "anilist-reco" {
+                AniListRecoTestHost()
+            } else if mode == "subrender" {
                 SubtitleRenderHost(settings: model.settings)
             } else if mode == "fonttest" {
                 FontFallbackHost(settings: model.settings)
