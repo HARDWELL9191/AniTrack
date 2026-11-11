@@ -306,8 +306,11 @@ final class JellyfinClient: @unchecked Sendable {
 
     // MARK: Browsing
 
-    func userViews() async throws -> [BaseItem] {
-        let r: QueryResult<BaseItem> = try await get("/UserViews", ["userId": try requireUser()])
+    /// The account's libraries; includeHidden also returns the ones hidden from My Media.
+    func userViews(includeHidden: Bool = false) async throws -> [BaseItem] {
+        var params: [String: Any?] = ["userId": try requireUser()]
+        if includeHidden { params["includeHidden"] = true }
+        let r: QueryResult<BaseItem> = try await get("/UserViews", params)
         return r.items ?? []
     }
 

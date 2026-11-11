@@ -161,10 +161,11 @@ final class RecoEngine {
         let collectionType: String?
     }
 
-    /// The user's own libraries by name (never one called "placeholder"), plus All.
+    /// The user's own libraries by name (never one called "placeholder"), plus All. Every library,
+    /// also those hidden from My Media on Home (that only hides them from the home screen).
     var sources: [Source] {
         guard let model else { return [] }
-        let libs = model.libraries
+        let libs = (model.allLibraries.isEmpty ? model.libraries : model.allLibraries)
             .filter { ["movies", "tvshows", "mixed", "homevideos", ""].contains($0.collectionType ?? "") }
             .filter { !RecoSource.isExcluded($0.name) }
             .map { Source(id: $0.id, name: $0.displayName, collectionType: $0.collectionType) }
@@ -207,7 +208,8 @@ final class RecoEngine {
         // The library list arrives with the account (e.g. right after switching): wait for it
         // instead of reading no libraries at all.
         var waited = 0
-        while waited < 240, model?.reader != nil, model?.libraries.isEmpty == true {   // up to 60 s
+        while waited < 240, model?.reader != nil, model?.libraries.isEmpty == true,
+              model?.allLibraries.isEmpty == true {   // up to 60 s
             if Task.isCancelled { return }
             try? await Task.sleep(nanoseconds: 250_000_000)
             waited += 1
