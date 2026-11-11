@@ -1,0 +1,384 @@
+run 43028806240
+total 0
+drwxr-xr-x   5 runner  staff  160 Nov 11 13:30 .
+drwxr-xr-x  23 runner  staff  736 Nov 11 13:30 ..
+lrwxr-xr-x   1 runner  staff   44 Nov 11 13:30 Arial.ttf -> /System/Library/Fonts/Supplemental/Arial.ttf
+lrwxr-xr-x   1 runner  staff   35 Nov 11 13:30 Helvetica.ttc -> /System/Library/Fonts/Helvetica.ttc
+lrwxr-xr-x   1 runner  staff   39 Nov 11 13:30 HelveticaNeue.ttc -> /System/Library/Fonts/HelveticaNeue.ttc
+Subtitle render test (no fonts given)
+    [cplayer] client removed during hook handling
+    [mkv] Discarding potentially broken or useless index.
+PASS samples/render/render_ass_colored.mkv: 3469 subtitle pixels (codec ass)
+    [mkv] Track 2 was compressed with zlib but mpv has not been compiled
+    [mkv] with support for zlib compression. Skipping track.
+    [mkv] Discarding potentially broken or useless index.
+FAIL samples/render/render_pgs_zlib.mkv: 0 subtitle pixels (codec hdmv_pgs_subtitle)
+    [cplayer] client removed during hook handling
+    [mkv] Discarding potentially broken or useless index.
+PASS samples/render/render_pgs.mkv: 26432 subtitle pixels (codec hdmv_pgs_subtitle)
+    [mkv] Discarding potentially broken or useless index.
+PASS samples/render/render_srt.mkv: 3634 subtitle pixels (codec subrip)
+    [mkv] Discarding potentially broken or useless index.
+PASS samples/render/render_vobsub.mkv: 26432 subtitle pixels (codec dvd_subtitle)
+    [cplayer] client removed during hook handling
+PASS samples/render/render_dvb.ts: 26432 subtitle pixels (codec dvb_subtitle)
+1 failure(s)
+Subtitle render test (with the app's fonts)
+    [cplayer] client removed during hook handling
+    [mkv] Discarding potentially broken or useless index.
+PASS samples/render/render_ass_colored.mkv: 3469 subtitle pixels (codec ass)
+    [mkv] Track 2 was compressed with zlib but mpv has not been compiled
+    [mkv] with support for zlib compression. Skipping track.
+    [mkv] Discarding potentially broken or useless index.
+FAIL samples/render/render_pgs_zlib.mkv: 0 subtitle pixels (codec hdmv_pgs_subtitle)
+    [mkv] Discarding potentially broken or useless index.
+PASS samples/render/render_pgs.mkv: 26432 subtitle pixels (codec hdmv_pgs_subtitle)
+    [cplayer] client removed during hook handling
+    [mkv] Discarding potentially broken or useless index.
+PASS samples/render/render_srt.mkv: 3634 subtitle pixels (codec subrip)
+    [cplayer] client removed during hook handling
+    [mkv] Discarding potentially broken or useless index.
+PASS samples/render/render_vobsub.mkv: 26432 subtitle pixels (codec dvd_subtitle)
+    [cplayer] client removed during hook handling
+PASS samples/render/render_dvb.ts: 26432 subtitle pixels (codec dvb_subtitle)
+1 failure(s)
+sup2mks: 902 bytes of PGS -> 1160 bytes of Matroska
+=== external subtitle: /Users/runner/work/AniTrack/AniTrack/jfsubs/wrapped.mks
+    (http check: 000)
+    [cplayer]    libavformat     63.1.102
+    [cplayer] Failed sending hook command auto_profiles/on_before_start_file. Removing hook.
+    [cplayer] Failed sending hook command auto_profiles/on_load. Removing hook.
+    [bdmv/bluray] Opening samples/render/render_pgs_zlib.mkv
+    [file] Opening samples/render/render_pgs_zlib.mkv
+    [demux] Trying demuxers for level=normal.
+    [mkv] with support for zlib compression. Skipping track.
+    [demux] Detected file format: Matroska
+    [cplayer] Opening done: samples/render/render_pgs_zlib.mkv
+    [find_files] Loading external files in samples/render/
+    [cplayer] Failed sending hook command auto_profiles/on_preloaded. Removing hook.
+    [cplayer] ○ Subs   --sid=1  (hdmv_pgs_subtitle)
+    [vd] Opening decoder h264
+    [vd] DR failed - disabling.
+    sub-add /Users/runner/work/AniTrack/AniTrack/jfsubs/wrapped.mks -> success
+    [bdmv/bluray] Opening /Users/runner/work/AniTrack/AniTrack/jfsubs/wrapped.mks
+    [file] Opening /Users/runner/work/AniTrack/AniTrack/jfsubs/wrapped.mks
+    [demux] Trying demuxers for level=normal.
+    [demux] Detected file format: Matroska
+    [vd] Decoder format: 1280x720 yuv420p auto/auto/auto/auto/auto CL=mpeg2/4/h264 crop=1280x720+0+0 A=none
+    [sub/lavc] Using subtitle decoder pgssub
+    [cplayer]  ○ Subs   --sid=1  (hdmv_pgs_subtitle)
+    [cplayer]  ● Subs   --sid=2  'wrapped.mks' (hdmv_pgs_subtitle) [external]
+PASS samples/render/render_pgs_zlib.mkv: 26432 subtitle pixels (codec hdmv_pgs_subtitle)
+0 failure(s)
+=== external subtitle: http://127.0.0.1:8765/wrapped.mks
+    (http check: 200)
+    [cplayer]    libavformat     63.1.102
+    [cplayer] Failed sending hook command auto_profiles/on_load. Removing hook.
+    [bdmv/bluray] Opening samples/render/render_pgs_zlib.mkv
+    [file] Opening samples/render/render_pgs_zlib.mkv
+    [demux] Trying demuxers for level=normal.
+    [mkv] with support for zlib compression. Skipping track.
+    [demux] Detected file format: Matroska
+    [cplayer] Opening done: samples/render/render_pgs_zlib.mkv
+    [find_files] Loading external files in samples/render/
+    [cplayer] Failed sending hook command auto_profiles/on_preloaded. Removing hook.
+    [cplayer] ○ Subs   --sid=1  (hdmv_pgs_subtitle)
+    [vd] Opening decoder h264
+    [vd] DR failed - disabling.
+    sub-add http://127.0.0.1:8765/wrapped.mks -> success
+    [stream_callback] Opening http://127.0.0.1:8765/wrapped.mks
+    [ffmpeg] Opening http://127.0.0.1:8765/wrapped.mks
+    [vd] Decoder format: 1280x720 yuv420p auto/auto/auto/auto/auto CL=mpeg2/4/h264 crop=1280x720+0+0 A=none
+    [demux] Trying demuxers for level=normal.
+    [demux] Detected file format: Matroska
+    [demux] Stream is not seekable.
+    [sub/lavc] Using subtitle decoder pgssub
+    [cplayer]  ○ Subs   --sid=1  (hdmv_pgs_subtitle)
+    [cplayer]  ● Subs   --sid=2  'wrapped.mks' (hdmv_pgs_subtitle) [external]
+PASS samples/render/render_pgs_zlib.mkv: 26432 subtitle pixels (codec hdmv_pgs_subtitle)
+0 failure(s)
+=== external subtitle: /Users/runner/work/AniTrack/AniTrack/samples/subs.srt
+    (http check: 000)
+    [cplayer]    libavformat     63.1.102
+    [cplayer] Failed sending hook command auto_profiles/on_before_start_file. Removing hook.
+    [cplayer] Failed sending hook command auto_profiles/on_load. Removing hook.
+    [bdmv/bluray] Opening samples/render/render_pgs_zlib.mkv
+    [file] Opening samples/render/render_pgs_zlib.mkv
+    [demux] Trying demuxers for level=normal.
+    [mkv] with support for zlib compression. Skipping track.
+    [demux] Detected file format: Matroska
+    [cplayer] Opening done: samples/render/render_pgs_zlib.mkv
+    [find_files] Loading external files in samples/render/
+    [cplayer] Failed sending hook command auto_profiles/on_preloaded. Removing hook.
+    [cplayer] ○ Subs   --sid=1  (hdmv_pgs_subtitle)
+    [vd] Opening decoder h264
+    [vd] DR failed - disabling.
+    sub-add /Users/runner/work/AniTrack/AniTrack/samples/subs.srt -> success
+    [bdmv/bluray] Opening /Users/runner/work/AniTrack/AniTrack/samples/subs.srt
+    [file] Opening /Users/runner/work/AniTrack/AniTrack/samples/subs.srt
+    [demux] Trying demuxers for level=normal.
+    [vd] Decoder format: 1280x720 yuv420p auto/auto/auto/auto/auto CL=mpeg2/4/h264 crop=1280x720+0+0 A=none
+    [lavf] Found 'srt' at score=100 size=53.
+    [lavf] avformat_find_stream_info() finished after 53 bytes.
+    [lavf] demuxer read all data; closing stream
+    [demux] Detected file format: srt (libavformat)
+    [lavf] select track 0
+    [lavf] refresh track 0 (sub)
+    [lavf] refresh seek to -10.000000
+    [lavf] queuing seek to 0.000000 (cascade)
+    [lavf] execute seek (to 0.000000 flags 0)
+    [lavf] seek done
+    [lavf] EOF reached.
+    [cplayer]  ○ Subs   --sid=1  (hdmv_pgs_subtitle)
+    [cplayer]  ● Subs   --sid=2  'subs.srt' (subrip [Advanced Sub Station Alpha]) [external]
+PASS samples/render/render_pgs_zlib.mkv: 3634 subtitle pixels (codec subrip)
+0 failure(s)
+=== external subtitle: /Users/runner/work/AniTrack/AniTrack/samples/subs.ass
+    (http check: 000)
+    [cplayer]    libavformat     63.1.102
+    [cplayer] Failed sending hook command auto_profiles/on_before_start_file. Removing hook.
+    [cplayer] Failed sending hook command auto_profiles/on_load. Removing hook.
+    [bdmv/bluray] Opening samples/render/render_pgs_zlib.mkv
+    [file] Opening samples/render/render_pgs_zlib.mkv
+    [demux] Trying demuxers for level=normal.
+    [mkv] with support for zlib compression. Skipping track.
+    [demux] Detected file format: Matroska
+    [cplayer] Opening done: samples/render/render_pgs_zlib.mkv
+    [find_files] Loading external files in samples/render/
+    [cplayer] Failed sending hook command auto_profiles/on_preloaded. Removing hook.
+    [cplayer] ○ Subs   --sid=1  (hdmv_pgs_subtitle)
+    [vd] Opening decoder h264
+    [vd] DR failed - disabling.
+    sub-add /Users/runner/work/AniTrack/AniTrack/samples/subs.ass -> success
+    [bdmv/bluray] Opening /Users/runner/work/AniTrack/AniTrack/samples/subs.ass
+    [file] Opening /Users/runner/work/AniTrack/AniTrack/samples/subs.ass
+    [demux] Trying demuxers for level=normal.
+    [vd] Decoder format: 1280x720 yuv420p auto/auto/auto/auto/auto CL=mpeg2/4/h264 crop=1280x720+0+0 A=none
+    [lavf] Found 'ass' at score=100 size=652.
+    [lavf] avformat_find_stream_info() finished after 652 bytes.
+    [lavf] demuxer read all data; closing stream
+    [demux] Detected file format: ass (libavformat)
+    [lavf] select track 0
+    [lavf] refresh track 0 (sub)
+    [lavf] refresh seek to -10.000000
+    [lavf] queuing seek to 0.000000 (cascade)
+    [lavf] execute seek (to 0.000000 flags 0)
+    [lavf] seek done
+    [lavf] EOF reached.
+    [cplayer]  ○ Subs   --sid=1  (hdmv_pgs_subtitle)
+    [cplayer]  ● Subs   --sid=2  'subs.ass' (ass) [external]
+PASS samples/render/render_pgs_zlib.mkv: 2385 subtitle pixels (codec ass)
+0 failure(s)
+=== external subtitle: /Users/runner/work/AniTrack/AniTrack/samples/subs.vtt
+    (http check: 000)
+    [cplayer]    libavformat     63.1.102
+    [cplayer] Failed sending hook command auto_profiles/on_load. Removing hook.
+    [bdmv/bluray] Opening samples/render/render_pgs_zlib.mkv
+    [file] Opening samples/render/render_pgs_zlib.mkv
+    [demux] Trying demuxers for level=normal.
+    [mkv] with support for zlib compression. Skipping track.
+    [demux] Detected file format: Matroska
+    [cplayer] Opening done: samples/render/render_pgs_zlib.mkv
+    [find_files] Loading external files in samples/render/
+    [cplayer] Failed sending hook command auto_profiles/on_preloaded. Removing hook.
+    [cplayer] ○ Subs   --sid=1  (hdmv_pgs_subtitle)
+    [vd] Opening decoder h264
+    [vd] DR failed - disabling.
+    sub-add /Users/runner/work/AniTrack/AniTrack/samples/subs.vtt -> success
+    [bdmv/bluray] Opening /Users/runner/work/AniTrack/AniTrack/samples/subs.vtt
+    [file] Opening /Users/runner/work/AniTrack/AniTrack/samples/subs.vtt
+    [demux] Trying demuxers for level=normal.
+    [vd] Decoder format: 1280x720 yuv420p auto/auto/auto/auto/auto CL=mpeg2/4/h264 crop=1280x720+0+0 A=none
+    [lavf] Found 'webvtt' at score=100 size=53.
+    [lavf] avformat_find_stream_info() finished after 53 bytes.
+    [lavf] demuxer read all data; closing stream
+    [demux] Detected file format: webvtt (libavformat)
+    [lavf] select track 0
+    [lavf] refresh track 0 (sub)
+    [lavf] refresh seek to -10.000000
+    [lavf] queuing seek to 0.000000 (cascade)
+    [lavf] execute seek (to 0.000000 flags 0)
+    [lavf] seek done
+    [lavf] EOF reached.
+    [cplayer]  ○ Subs   --sid=1  (hdmv_pgs_subtitle)
+    [cplayer]  ● Subs   --sid=2  'subs.vtt' (webvtt [Advanced Sub Station Alpha]) [external]
+PASS samples/render/render_pgs_zlib.mkv: 3634 subtitle pixels (codec webvtt)
+0 failure(s)
+Subtitle render test (with the app's fonts, demuxer=lavf)
+    [cplayer] client removed during hook handling
+PASS samples/render/render_ass_colored.mkv: 3469 subtitle pixels (codec ass)
+    [ffmpeg/demuxer] matroska,webm: Unsupported encoding type
+FAIL samples/render/render_pgs_zlib.mkv: 0 subtitle pixels (codec hdmv_pgs_subtitle)
+PASS samples/render/render_pgs.mkv: 26432 subtitle pixels (codec hdmv_pgs_subtitle)
+PASS samples/render/render_srt.mkv: 3634 subtitle pixels (codec subrip)
+PASS samples/render/render_vobsub.mkv: 26432 subtitle pixels (codec dvd_subtitle)
+PASS samples/render/render_dvb.ts: 26432 subtitle pixels (codec dvb_subtitle)
+1 failure(s)
+--- formats
+  video #1 av1            ok
+  audio #1 opus           ok
+  sub   #1 subrip         ok
+PASS samples/av1_opus_srt.mkv (1 video, 1 audio, 1 subtitle tracks)
+
+  video #1 h264           ok
+  audio #1 ac3            ok
+  audio #2 aac            ok
+PASS samples/h264_ac3_aac_two_audio.mkv (1 video, 2 audio, 0 subtitle tracks)
+
+  video #1 h264           ok
+  audio #1 dts            ok
+  sub   #1 subrip         ok
+PASS samples/h264_dts_srt.mkv (1 video, 1 audio, 1 subtitle tracks)
+
+  video #1 hevc           ok
+  audio #1 truehd         ok
+  sub   #1 ass            ok
+PASS samples/hevc10_truehd_ass.mkv (1 video, 1 audio, 1 subtitle tracks)
+
+  video #1 vp9            ok
+  audio #1 flac           ok
+  sub   #1 webvtt-webm    ok
+PASS samples/vp9_flac_webvtt.mkv (1 video, 1 audio, 1 subtitle tracks)
+
+  video #1 hevc           ok
+  audio #1 eac3           ok
+  sub   #1 mov_text       ok
+PASS samples/hevc_eac3_movtext.mp4 (1 video, 1 audio, 1 subtitle tracks)
+
+  video #1 mpeg4          ok
+  audio #1 mp3            ok
+PASS samples/mpeg4_mp3.avi (1 video, 1 audio, 0 subtitle tracks)
+
+  video #1 wmv2           ok
+  audio #1 wmav2          ok
+PASS samples/wmv2_wma.wmv (1 video, 1 audio, 0 subtitle tracks)
+
+  video #1 mpeg2video     ok
+  audio #1 ac3            ok
+PASS samples/mpeg2_ac3.ts (1 video, 1 audio, 0 subtitle tracks)
+
+  video #1 vp8            ok
+  audio #1 vorbis         ok
+PASS samples/vp8_vorbis.webm (1 video, 1 audio, 0 subtitle tracks)
+
+  video #1 h264           ok
+  audio #1 alac           ok
+PASS samples/h264_alac.mov (1 video, 1 audio, 0 subtitle tracks)
+
+  video #1 hevc           ok
+  audio #1 dts            ok
+PASS samples/hevc_dts_m2ts.m2ts (1 video, 1 audio, 0 subtitle tracks)
+
+0 of 12 files failed
+--- link/build
+Libmpv.xcframework
+
+libmpv/Libmpv.xcframework:
+build-record.json
+Info.plist
+ios-arm64
+ios-arm64_x86_64-maccatalyst
+ios-arm64_x86_64-simulator
+macos-arm64_x86_64
+RECIPE_LICENSE
+SOURCE_NOTICES.txt
+tvos-arm64
+tvos-arm64_x86_64-simulator
+xros-arm64
+xros-arm64-simulator
+
+libmpv/Libmpv.xcframework/ios-arm64:
+Libmpv.framework
+
+libmpv/Libmpv.xcframework/ios-arm64/Libmpv.framework:
+Headers
+Info.plist
+Libmpv
+Modules
+
+libmpv/Libmpv.xcframework/ios-arm64/Libmpv.framework/Headers:
+client.h
+mpvui_hls.h
+render_gl.h
+render.h
+stream_cb.h
+
+libmpv/Libmpv.xcframework/ios-arm64/Libmpv.framework/Modules:
+module.modulemap
+
+libmpv/Libmpv.xcframework/ios-arm64_x86_64-maccatalyst:
+Libmpv.framework
+
+libmpv/Libmpv.xcframework/ios-arm64_x86_64-maccatalyst/Libmpv.framework:
+Headers
+--- samples
+made hevc10_truehd_ass.mkv
+Svt[info]: -------------------------------------------
+Svt[info]: SVT [version]:	SVT-AV1 Encoder Lib v2.3.0
+Svt[info]: SVT [build]  :	GCC 15.2.0	 64 bit
+Svt[info]: -------------------------------------------
+Svt[warn]: Preset M12 is mapped to M11.
+Svt[info]: Level of Parallelism: 3
+Svt[info]: Number of PPCS 42
+Svt[info]: [asm level on system : up to avx512]
+Svt[info]: [asm level selected : up to avx512]
+Svt[info]: -------------------------------------------
+Svt[info]: SVT [config]: main profile	tier (auto)	level (auto)
+Svt[info]: SVT [config]: width / height / fps numerator / fps denominator 		: 640 / 360 / 24 / 1
+Svt[info]: SVT [config]: bit-depth / color format 					: 8 / YUV420
+Svt[info]: SVT [config]: preset / tune / pred struct 					: 11 / PSNR / random access
+Svt[info]: SVT [config]: gop size / mini-gop size / key-frame type 			: 161 / 16 / key frame
+Svt[info]: SVT [config]: BRC mode / rate factor 					: CRF / 35 
+Svt[info]: SVT [config]: AQ mode / variance boost 					: 2 / 0
+Svt[info]: -------------------------------------------
+made av1_opus_srt.mkv
+made h264_dts_srt.mkv
+made hevc_eac3_movtext.mp4
+made vp9_flac_webvtt.mkv
+made h264_ac3_aac_two_audio.mkv
+made mpeg4_mp3.avi
+made wmv2_wma.wmv
+made mpeg2_ac3.ts
+made vp8_vorbis.webm
+made h264_alac.mov
+made hevc_dts_m2ts.m2ts
+total 10708
+drwxr-xr-x 2 runner runner    4096 Nov 11 13:24 .
+drwxr-xr-x 9 runner runner    4096 Nov 11 13:24 ..
+-rw-r--r-- 1 runner runner  581172 Nov 11 13:24 av1_opus_srt.mkv
+-rw-r--r-- 1 runner runner 1692501 Nov 11 13:24 h264_ac3_aac_two_audio.mkv
+-rw-r--r-- 1 runner runner 1415132 Nov 11 13:24 h264_alac.mov
+-rw-r--r-- 1 runner runner 1967082 Nov 11 13:24 h264_dts_srt.mkv
+-rw-r--r-- 1 runner runner  563130 Nov 11 13:24 hevc10_truehd_ass.mkv
+-rw-r--r-- 1 runner runner 1603584 Nov 11 13:24 hevc_dts_m2ts.m2ts
+-rw-r--r-- 1 runner runner  571425 Nov 11 13:24 hevc_eac3_movtext.mp4
+-rw-r--r-- 1 runner runner  725680 Nov 11 13:24 mpeg2_ac3.ts
+-rw-r--r-- 1 runner runner  382622 Nov 11 13:24 mpeg4_mp3.avi
+-rw-r--r-- 1 runner runner     652 Nov 11 13:24 subs.ass
+-rw-r--r-- 1 runner runner      53 Nov 11 13:24 subs.srt
+-rw-r--r-- 1 runner runner      53 Nov 11 13:24 subs.vtt
+-rw-r--r-- 1 runner runner  206837 Nov 11 13:24 vp8_vorbis.webm
+-rw-r--r-- 1 runner runner  780931 Nov 11 13:24 vp9_flac_webvtt.mkv
+-rw-r--r-- 1 runner runner  426529 Nov 11 13:24 wmv2_wma.wmv
+made render_pgs.mkv
+made render_dvb.ts
+made render_vobsub.mkv
+made render_srt.mkv
+made render_pgs_zlib.mkv
+|    + Content compression
+|+ EBML void: size 1136
+|+ Cluster
+made render_ass_colored.mkv
+total 332
+drwxr-xr-x 2 runner runner   4096 Nov 11 13:24 .
+drwxr-xr-x 3 runner runner   4096 Nov 11 13:24 ..
+-rw-r--r-- 1 runner runner    610 Nov 11 13:24 colored.ass
+-rw-r--r-- 1 runner runner   6849 Nov 11 13:24 render_ass_colored.mkv
+-rw-r--r-- 1 runner runner 269404 Nov 11 13:24 render_dvb.ts
+-rw-r--r-- 1 runner runner   6849 Nov 11 13:24 render_pgs.mkv
+-rw-r--r-- 1 runner runner  11829 Nov 11 13:24 render_pgs_zlib.mkv
+-rw-r--r-- 1 runner runner   6287 Nov 11 13:24 render_srt.mkv
+-rw-r--r-- 1 runner runner   7256 Nov 11 13:24 render_vobsub.mkv
+-rw-r--r-- 1 runner runner    652 Nov 11 13:24 subs.ass
+-rw-r--r-- 1 runner runner     53 Nov 11 13:24 subs.srt
+-rw-r--r-- 1 runner runner    902 Nov 11 13:24 subs.sup
