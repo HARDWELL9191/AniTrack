@@ -39,10 +39,6 @@ final class AppModel {
     private(set) var user: UserDto?
     private(set) var serverInfo: SystemInfo?
     private(set) var libraries: [BaseItem] = []
-    /// Every library of the account, including the ones hidden from My Media in Settings → Home
-    /// (Jellyfin's MyMediaExcludes leaves those out of /UserViews). For You picks from and learns
-    /// from these: hiding a library from the home screen mustn't take it out of For You.
-    private(set) var allLibraries: [BaseItem] = []
     var errorMessage: String?
     var playback: PlaybackRequest?
     /// "More like this" opened from any card's long-press menu (one sheet for the whole app).
@@ -123,14 +119,11 @@ final class AppModel {
             user = me
             if let sid = store.currentServerId { store.updateUser(me, on: sid) }
             async let views = client.userViews()
-            async let everyView = client.userViews(includeHidden: true)
             async let info = try? client.get("/System/Info", as: SystemInfo.self)
             let fetchedViews = try? await views
-            let fetchedAllViews = try? await everyView
             let fetchedInfo = await info
             guard client === self.client else { return }
             libraries = fetchedViews ?? libraries
-            allLibraries = fetchedAllViews ?? fetchedViews ?? allLibraries
             serverInfo = fetchedInfo
             await loadAccountStorage()
             // Match % on every poster from the start: the saved library snapshot is read at once and
@@ -267,7 +260,6 @@ final class AppModel {
         playback = nil
         user = nil
         libraries = []
-        allLibraries = []
         userDataOverrides = [:]
         storageLoaded = false
         dirty = [:]
