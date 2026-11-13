@@ -139,6 +139,9 @@ export class PlayerController {
   sync: { pause(): Promise<unknown>; unpause(): Promise<unknown>; seek(s: number): Promise<unknown>; buffering(): void; ready(): void } | null = null;
   onDataChanged: (() => void) | null = null;
   onError: ((msg: string) => void) | null = null;
+  /** A video is playing (keep the screen on) or not (paused, stopped, music). */
+  onKeepAwake: ((on: boolean) => void) | null = null;
+  private awake = false;
 
   private getApi: () => Jellyfin | null;
   private getSettings: () => Settings;
@@ -159,6 +162,11 @@ export class PlayerController {
   }
   private patch(p: Partial<PlayerState>) {
     this.state = { ...this.state, ...p };
+    // The screen stays on while a video plays, like mpv does on its own window (Windows); on
+    // Linux the app has to ask the desktop itself (keep_awake.rs).
+    const st = this.state;
+    const awake = st.active && !st.paused && !st.ended && !st.isAudio && !st.error;
+    if (awake !== this.awake) { this.awake = awake; this.onKeepAwake?.(awake); }
     this.emit();
   }
 

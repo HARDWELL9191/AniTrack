@@ -3,6 +3,7 @@
 
 pub mod ai;
 pub mod mpv;
+mod keep_awake;
 mod secure;
 
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -394,7 +395,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             mpv_info, mpv_start, mpv_command, mpv_set, mpv_get, mpv_destroy, ai_status, ai_cached, ai_vectors, accounts_load,
-            accounts_save, power_saver, device_name, platform, launch_file, set_app_icon, write_text_file, read_file_base64, anilist_login
+            accounts_save, power_saver, device_name, platform, launch_file, set_app_icon, write_text_file, read_file_base64, anilist_login, keep_awake::keep_awake
         ])
         .run(tauri::generate_context!())
         .expect("error while running JellyReco");

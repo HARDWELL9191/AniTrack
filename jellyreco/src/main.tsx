@@ -75,6 +75,11 @@ const player = new PlayerController(() => model.api, () => model.settings);
 model.player = player;
 player.onError = (msg) => model.toast(msg, "error");
 player.onDataChanged = () => model.dataChanged();
+// Linux: ask the desktop to keep the screen on while a video plays (Windows: mpv does it).
+player.onKeepAwake = (on) => {
+  if (!native) return;
+  void import("@tauri-apps/api/core").then(({ invoke }) => invoke<string[]>("keep_awake", { on })).catch((e) => console.warn("keep_awake:", e));
+};
 (window as unknown as { jellyreco: AppModel }).jellyreco = model;
 
 // The server's WebSocket follows the signed-in account.
