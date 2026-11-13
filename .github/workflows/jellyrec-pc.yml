@@ -154,7 +154,15 @@ jobs:
 
       - name: AI check (real model; this runner has no NPU or GPU, so it runs on the CPU)
         working-directory: jellyreco/src-tauri
+        env:
+          # Each step of picking the backend on stderr: if a machine ever fails, the log shows where.
+          JELLYRECO_AI_TRACE: "1"
         run: |
+          # Which processor this runner has (GitHub mixes CPU models; an AI crash would be tied to one).
+          $cpu = Get-CimInstance Win32_Processor | Select-Object -First 1
+          Add-Type -Namespace JR -Name Cpu -MemberDefinition '[DllImport("kernel32.dll")] public static extern bool IsProcessorFeaturePresent(uint feature);'
+          $flags = (@{avx=39; avx2=40; avx512f=41}.GetEnumerator() | Sort-Object Value | ForEach-Object { "$($_.Key)=$([JR.Cpu]::IsProcessorFeaturePresent($_.Value))" }) -join ' '
+          "::notice::AI check on $($cpu.Name.Trim()) ($flags)"
           cargo build --release --example embed_check --target ${{ matrix.target }}
           python -I ../tools/ai_check.py target/${{ matrix.target }}/release/examples/embed_check.exe resources/ai "$env:RUNNER_TEMP/ai-check"
           if ($LASTEXITCODE -ne 0) { throw "AI check failed" }

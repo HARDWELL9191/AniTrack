@@ -158,12 +158,14 @@ impl Engine {
 
     fn load(&self) -> Result<(Loaded, Status), String> {
         let dir = &self.paths.resources;
+        trace("loading ONNX Runtime");
         let dylib = dir.join(if cfg!(windows) { "onnxruntime.dll" } else { "libonnxruntime.so" });
         let env = ort::init_from(&dylib)
             .map_err(|e| format!("ONNX Runtime not found ({e})"))?
             .with_name("JellyReco")
             .build()
             .map_err(|e| e.to_string())?;
+        trace("ONNX Runtime loaded");
         let model = dir.join("model.onnx");
         let vocab = std::fs::read_to_string(dir.join("vocab.txt")).map_err(|e| format!("vocab.txt: {e}"))?;
         let tokenizer = WordPiece::from_vocab(&vocab)?;
@@ -196,10 +198,14 @@ impl Engine {
             .iter()
             .map(|n| dir.join("openvino").join(n))
             .find(|p| p.exists());
+        trace(&format!("intel cpu: {}, OpenVINO plugin present: {}", intel_cpu(), openvino_plugin.is_some()));
         if let Some(plugin) = openvino_plugin.filter(|_| intel_cpu()) {
+            trace("registering the OpenVINO plugin");
             match env.register_ep_library("openvino", &plugin) {
                 Ok(()) => {
+                    trace("OpenVINO plugin registered");
                     for (backend, npu_only) in [("npu", true), ("npu+cpu", false)] {
+                        trace(&format!("OpenVINO session ({backend})"));
                         match self.openvino_npu_session(&env, &model, npu_only) {
                             Ok(session) => {
                                 let detail = if npu_only { "Intel NPU (OpenVINO)" } else { "Intel NPU with CPU help (OpenVINO)" };
@@ -223,6 +229,7 @@ impl Engine {
             .map(|n| dir.join(n))
             .find(|p| p.exists());
         if let Some(plugin) = webgpu_plugin {
+            trace("WebGPU session");
             match self.gpu_session(&env, &model, &plugin) {
                 Ok((session, name)) => {
                     let api = if cfg!(windows) { "WebGPU over DirectX 12" } else { "WebGPU over Vulkan" };
@@ -231,9 +238,11 @@ impl Engine {
                 Err(e) => notes.push(format!("GPU: {}", short_reason(&e))),
             }
         }
+        trace(&format!("CPU session (notes so far: {notes:?})"));
         let session = base_builder(&env)?
             .commit_from_file(&model)
             .map_err(|e| e.to_string())?;
+        trace("CPU session ready");
         let detail = if notes.is_empty() { "CPU".to_string() } else { format!("CPU ({})", notes.join("; ")) };
         Ok((finish(session, tokenizer, env)?, Status { backend: "cpu".into(), detail }))
     }
@@ -457,6 +466,13 @@ fn gpu_name(d: &ort::device::Device<'_>) -> String {
         INTEL => "Intel".into(),
         QUALCOMM => "Qualcomm Adreno".into(),
         _ => d.hardware_device().vendor().unwrap_or("GPU").to_string(),
+    }
+}
+
+/// JELLYRECO_AI_TRACE=1: each step of picking the AI backend on stderr (finding where a machine fails).
+fn trace(step: &str) {
+    if std::env::var_os("JELLYRECO_AI_TRACE").is_some() {
+        eprintln!("[ai] {step}");
     }
 }
 
