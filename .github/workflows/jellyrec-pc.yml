@@ -255,6 +255,19 @@ jobs:
           mkdir -p out
           cp "$app" out/JellyReco-x86_64.AppImage
           chmod +x out/JellyReco-x86_64.AppImage
+          # Updates without any setup (Gear Lever, AppImageUpdate, AppImageLauncher): where newer builds
+          # are, written into the AppImage (prereleases included: "latest-pre"), and a .zsync next to it
+          # (also lets them download only what changed).
+          upd="gh-releases-zsync|${GITHUB_REPOSITORY%%/*}|${GITHUB_REPOSITORY#*/}|latest-pre|JellyReco-x86_64.AppImage.zsync"
+          python3 tools/appimage_update_info.py out/JellyReco-x86_64.AppImage "$upd"
+          readelf --string-dump=.upd_info --wide out/JellyReco-x86_64.AppImage | grep -qF "$upd" \
+            || { echo "::error::Update information isn't in the AppImage"; exit 1; }
+          command -v zsyncmake > /dev/null || sudo apt-get install -y -qq zsync > /dev/null
+          (cd out && zsyncmake -u JellyReco-x86_64.AppImage -o JellyReco-x86_64.AppImage.zsync JellyReco-x86_64.AppImage)
+          zsha=$(sed -n 's/^SHA-1: *//p' out/JellyReco-x86_64.AppImage.zsync | head -1)
+          [ "$zsha" = "$(sha1sum out/JellyReco-x86_64.AppImage | cut -d' ' -f1)" ] \
+            || { echo "::error::The .zsync doesn't match the AppImage"; exit 1; }
+          echo "::notice::AppImage update information: $upd (zsync SHA-1 $zsha)"
           ls -la out
           # What's inside: the libmpv the app plays with must be in the AppImage itself.
           (cd "$RUNNER_TEMP" && "$GITHUB_WORKSPACE/jellyreco/out/JellyReco-x86_64.AppImage" --appimage-extract > /dev/null)
@@ -319,7 +332,9 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: JellyReco-Linux-x86_64
-          path: jellyreco/out/JellyReco-x86_64.AppImage
+          path: |
+            jellyreco/out/JellyReco-x86_64.AppImage
+            jellyreco/out/JellyReco-x86_64.AppImage.zsync
           if-no-files-found: error
 
       - uses: actions/upload-artifact@v7
@@ -361,8 +376,11 @@ jobs:
           Windows on Arm (Snapdragon): JellyReco-Setup-arm64.exe · Windows x64 (Intel / AMD): JellyReco-Setup-x64.exe · Linux x86_64: JellyReco-x86_64.AppImage"
           gh release delete jellyreco-pc-latest --yes --cleanup-tag -R "$GITHUB_REPOSITORY" 2>/dev/null || true
           gh release delete jellyrec-pc-latest --yes --cleanup-tag -R "$GITHUB_REPOSITORY" 2>/dev/null || true   # the old, misnamed one
-          for f in JellyReco-Setup-arm64.exe JellyReco-Setup-x64.exe JellyReco-x86_64.AppImage; do
+          for f in JellyReco-Setup-arm64.exe JellyReco-Setup-x64.exe JellyReco-x86_64.AppImage JellyReco-x86_64.AppImage.zsync; do
             [ -s "out/$f" ] || { echo "::error::$f is missing"; exit 1; }
           done
-          gh release create jellyreco-pc-latest out/JellyReco-Setup-arm64.exe out/JellyReco-Setup-x64.exe out/JellyReco-x86_64.AppImage -R "$GITHUB_REPOSITORY" \
+          # The .zsync must describe exactly the AppImage that's published (Gear Lever compares its SHA-1).
+          [ "$(sed -n 's/^SHA-1: *//p' out/JellyReco-x86_64.AppImage.zsync | head -1)" = "$(sha1sum out/JellyReco-x86_64.AppImage | cut -d' ' -f1)" ] \
+            || { echo "::error::The .zsync doesn't match the AppImage"; exit 1; }
+          gh release create jellyreco-pc-latest out/JellyReco-Setup-arm64.exe out/JellyReco-Setup-x64.exe out/JellyReco-x86_64.AppImage out/JellyReco-x86_64.AppImage.zsync -R "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" --title "JellyReco PC 1.0.${{ github.run_number }} (latest build)" --notes "$NOTES" --prerelease
