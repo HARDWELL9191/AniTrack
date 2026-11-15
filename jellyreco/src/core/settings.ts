@@ -62,6 +62,8 @@ export interface Settings {
   autoNext: AutoNext;
   upNextSeconds: number; // countdown before the next episode
   segmentActions: Record<SegmentType, SegmentAction>;
+  /** Intro / recap / credits times from the open skip databases when the server has none. */
+  skipDatabase: boolean;
   rememberAudio: boolean;
   rememberSubs: boolean;
   preferredAudioLang: string; // ISO 639-2, overrides the server setting when set
@@ -157,6 +159,7 @@ export const DEFAULT_SETTINGS: Settings = {
   autoNext: "smart",
   upNextSeconds: 10,
   segmentActions: { Intro: "ask", Outro: "ask", Recap: "ask", Preview: "ask", Commercial: "skip", Unknown: "none" },
+  skipDatabase: true,
   rememberAudio: true,
   rememberSubs: true,
   preferredAudioLang: "",
@@ -218,6 +221,7 @@ export function sharedPart(s: Settings): Record<string, unknown> {
     autoSkipIntro: s.segmentActions.Intro === "skip",
     autoSkipRecap: s.segmentActions.Recap === "skip",
     autoSkipOutro: s.segmentActions.Outro === "skip",
+    onlineSkipDatabase: s.skipDatabase,
   };
 }
 
@@ -240,6 +244,7 @@ export function applyShared(s: Settings, phone: Record<string, unknown> | null):
     else if (v === false && out.segmentActions[k] === "skip") out.segmentActions[k] = "ask";
   };
   seg("Intro", phone.autoSkipIntro); seg("Recap", phone.autoSkipRecap); seg("Outro", phone.autoSkipOutro);
+  if (typeof phone.onlineSkipDatabase === "boolean") out.skipDatabase = phone.onlineSkipDatabase;
   return out;
 }
 

@@ -12,6 +12,7 @@ import { AppModel, type TokenStore } from "./core/model";
 import { PlayerController } from "./core/player";
 import { startSocket, stopSocket } from "./core/socket";
 import { setTmdbFetch } from "./core/tmdb";
+import { setSkipDbFetch } from "./core/skipdb";
 import { setAniListFetch } from "./core/anilist";
 import { App } from "./ui/app";
 import { Provider, ui } from "./ui/state";
@@ -33,6 +34,7 @@ if (native) {
   setFetch((url, init) => tauriFetch(url, init) as never);
   setTmdbFetch((url, init) => tauriFetch(url, init) as never);
   setAniListFetch((url, init) => tauriFetch(url, init) as never);
+  setSkipDbFetch((url, init) => tauriFetch(url, init) as never);
 
   const toVectors = (raw: Record<string, number[]>) => new Map(Object.entries(raw).map(([k, v]) => [Number(k), Float32Array.from(v)]));
   setEmbedder({

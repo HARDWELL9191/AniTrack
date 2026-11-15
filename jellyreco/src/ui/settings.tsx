@@ -277,7 +277,8 @@ function PlaybackSettings() {
             </Select>
           </div>
         ))}
-        <p className="muted small">Intro and credits times come from your server's media segments (e.g. the Intro Skipper plugin or chapter names).</p>
+        <Toggle label="Online intro database" checked={s.skipDatabase} onChange={(v) => set("skipDatabase", v)} />
+        <p className="muted small">Intro and credits times come from your server's media segments (e.g. the Intro Skipper plugin or chapter names). With the online intro database on, an episode or movie the server has no times for gets them from the community databases TheIntroDB and IntroDB (as in Infuse), so intros can be skipped even when nothing is marked in your files. Only the title's TVDB / TMDB / IMDb ID, the season and episode number and the runtime are sent.</p>
       </Group>
       <Group title="Starting">
         <div className="toggle-row"><span>Continue where you left off</span><Segmented value={s.resumeBehavior} options={[{ value: "resume", label: "Always" }, { value: "start", label: "Start over" }]} onChange={(v) => set("resumeBehavior", v)} /></div>

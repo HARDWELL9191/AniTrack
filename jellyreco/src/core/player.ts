@@ -8,6 +8,7 @@ import { type Engine, type EngineEvent, getEngine } from "./engine";
 import type { Settings } from "./settings";
 import type { Chapter, Item, MediaSegment, MediaSource, MediaStream, TrickplayInfo } from "./types";
 import { secondsToTicks, ticksToSeconds } from "./types";
+import { mergeSegments, SKIP_DB_TYPES, skipDbSegments, skipLookup } from "./skipdb";
 
 export interface MpvTrack {
   id: number;
@@ -127,6 +128,7 @@ export class PlayerController {
   private progressTimer: ReturnType<typeof setInterval> | null = null;
   private countdownTimer: ReturnType<typeof setInterval> | null = null;
   private skippedSegments = new Set<string>();
+  private seriesCache = new Map<string, Item>();   // series by ID, for their provider IDs
   private reportedStart = false;
   private loadToken = 0;
   private pendingStart: { audio?: number; sub?: number } = {};
@@ -405,7 +407,31 @@ export class PlayerController {
     if (method !== "DirectPlay") this.onError?.(method === "Transcode" ? "This file is being transcoded by the server (it couldn't be direct played)." : "This file is being remuxed by the server (it couldn't be direct played).");
 
     // Segments (intro/credits) and next episode, in the background.
-    void api.segments(item.Id).then((r) => { if (token === this.loadToken) this.patch({ segments: r.Items ?? [] }); }).catch(() => {});
+    void this.loadSegments(api, item, token);
+  }
+
+  /** The server's media segments; what it has none of comes from the open skip databases. */
+  private async loadSegments(api: Jellyfin, item: Item, token: number) {
+    const server = await api.segments(item.Id).then((r) => r.Items ?? []).catch(() => [] as MediaSegment[]);
+    if (token !== this.loadToken) return;
+    this.patch({ segments: server });
+    const s = this.getSettings();
+    if (!s.skipDatabase || (item.Type !== "Episode" && item.Type !== "Movie")) return;
+    const have = new Set(server.map((x) => x.Type));
+    const wanted = SKIP_DB_TYPES.filter((t) => !have.has(t) && (s.segmentActions[t] ?? "none") !== "none");
+    if (!wanted.length) return;
+    try {
+      let series = item.SeriesId ? this.seriesCache.get(item.SeriesId) ?? null : null;
+      if (item.Type === "Episode" && item.SeriesId && !series) {
+        series = await api.item(item.SeriesId);
+        if (this.seriesCache.size >= 50) this.seriesCache.clear();
+        this.seriesCache.set(item.SeriesId, series);
+      }
+      const lookup = skipLookup(item, series);
+      if (!lookup) return;
+      const found = await skipDbSegments(lookup, wanted);
+      if (token === this.loadToken && found.length) this.patch({ segments: mergeSegments(server, found) });
+    } catch { /* no times from the databases: the server's stay */ }
   }
 
   private lastTimeEmit = 0;

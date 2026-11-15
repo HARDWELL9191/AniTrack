@@ -55,6 +55,10 @@ jobs:
       # iPhone): the recommender against live AniList with a made-up list (no account needed).
       - name: AniList picks (Anime / Anime Movies libraries)
         run: node tools/anilist_check.ts
+      # Skip intro / recap / credits from the open databases (TheIntroDB, IntroDB) when the server has
+      # no media segments: addresses, answers and merging, plus one live lookup in each (reported only).
+      - name: Skip databases (TheIntroDB, IntroDB)
+        run: node tools/skipdb_check.ts
 
   windows:
     # Each installer is built and checked natively on its own architecture: Windows 11 on Arm

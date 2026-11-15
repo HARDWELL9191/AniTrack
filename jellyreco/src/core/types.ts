@@ -192,6 +192,8 @@ export interface Item {
   ChildCount?: number | null;
   SeriesName?: string | null;
   SeriesId?: string | null;
+  /** A series' episode order on the server (aired, dvd, absolute, …). */
+  DisplayOrder?: string | null;
   SeasonId?: string | null;
   SpecialFeatureCount?: number | null;
   Status?: string | null;
