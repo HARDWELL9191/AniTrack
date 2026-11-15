@@ -1510,16 +1510,24 @@ final class PlaybackController {
             skippedSegments.contains(seg.id) || settings.segmentAction(seg.type) == "none" ? nil : seg
         }
         if shown != activeSegment { activeSegment = shown }   // every tick otherwise redraws the controls
-        // Credits with another episode queued: offer it now (Netflix-style).
-        if let current, current.type == "Outro", upNext != nil, settings.autoPlayNext, upNextCountdown == nil, !askStillWatching, !countdownDismissed {
+        // Credits that run to the end, with another episode queued: offer it now (Netflix-style).
+        // An ending with more of the episode after it (anime: a scene or the preview after the
+        // ending song) only gets its skip button; the next episode is offered when the file ends.
+        if let current, current.type == "Outro", runsToEnd(current), upNext != nil, settings.autoPlayNext, upNextCountdown == nil, !askStillWatching, !countdownDismissed {
             beginCountdown()
         }
+    }
+
+    /// Whether a segment ends where the file does (within 5 s), so nothing of the episode follows it.
+    private func runsToEnd(_ segment: MediaSegment) -> Bool {
+        let duration = durationSeconds
+        return duration <= 0 || duration - Fmt.seconds(segment.endTicks) <= 5
     }
 
     func skip(_ segment: MediaSegment, auto: Bool = false) {
         skippedSegments.insert(segment.id)
         activeSegment = nil
-        if segment.type == "Outro", upNext != nil {
+        if segment.type == "Outro", upNext != nil, runsToEnd(segment) {
             // Credits skipped automatically count as autoplay, so "Are you still watching?" still comes.
             if auto, settings.stillWatchingAfter > 0, autoplayStreak >= settings.stillWatchingAfter {
                 askStillWatching = true
@@ -1536,7 +1544,7 @@ final class PlaybackController {
         switch segment.type {
         case "Intro": return "Skip intro"
         case "Recap": return "Skip recap"
-        case "Outro": return upNext != nil ? "Next episode" : "Skip credits"
+        case "Outro": return upNext != nil && runsToEnd(segment) ? "Next episode" : "Skip credits"
         case "Preview": return "Skip preview"
         default: return "Skip"
         }
