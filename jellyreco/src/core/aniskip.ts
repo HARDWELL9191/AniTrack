@@ -81,7 +81,7 @@ function remember(index: AnimeIndex) {
   memory = { index, byTvdb, byTmdb };
 }
 /** For the checks: use this index as it is. */
-export function setAnimeIndex(index: AnimeIndex | null) { if (index) remember(index); else memory = null; }
+export function setAnimeIndex(index: AnimeIndex | null) { if (index) remember(index); else { memory = null; lastTry = 0; } }
 
 function validIndex(v: unknown): v is AnimeIndex {
   const o = v as AnimeIndex | null;

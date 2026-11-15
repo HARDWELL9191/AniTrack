@@ -611,7 +611,9 @@ export class PlayerController {
     }
     // Up next: during the credits (Outro segment) or the last seconds.
     if (st.upNext && !this.upNextDismissed && st.upNextCountdown === null && st.item?.Type === "Episode" && s.autoNext !== "off") {
-      const outro = st.segments.find((x) => x.Type === "Outro");
+      // Credits that run to the end. An ending with more of the episode after it (anime: a scene or
+      // the preview after the ending song) only gets its skip button.
+      const outro = st.segments.find((x) => x.Type === "Outro" && st.duration - ticksToSeconds(x.EndTicks) <= 5);
       const remaining = st.duration - pos;
       const credits = outro ? pos >= ticksToSeconds(outro.StartTicks) : false;
       if ((s.autoNext === "smart" && (credits || (remaining > 0 && remaining <= Math.max(s.upNextSeconds + 5, 20)))) || (s.autoNext === "always" && remaining > 0 && remaining <= s.upNextSeconds + 1)) {
@@ -624,7 +626,7 @@ export class PlayerController {
     const end = ticksToSeconds(seg.EndTicks);
     this.skippedSegments.add(seg.Id);
     // Credits running to the end: go straight to the next episode.
-    if (seg.Type === "Outro" && this.state.duration - end < 3 && this.state.upNext) return this.next();
+    if (seg.Type === "Outro" && this.state.duration - end <= 5 && this.state.upNext) return this.next();
     await this.seek(Math.min(end, this.state.duration - 0.5));
   }
 

@@ -10,6 +10,10 @@ import * as S from "../src/core/skipdb.ts";
 import * as A from "../src/core/aniskip.ts";
 import assert from "node:assert/strict";
 
+// Nothing here goes to the network until the live part at the end.
+A.setAniSkipFetch(async () => { throw new Error("offline"); });
+A.setAniSkipStorage({ get: () => null, set: () => {} });
+
 const ep = { Id: "e1", Type: "Episode", ParentIndexNumber: 1, IndexNumber: 1, RunTimeTicks: 3500 * 1e7, ProviderIds: { Tvdb: "349232", Imdb: "tt0959621" } } as any;
 const series = { Id: "s", Type: "Series", ProviderIds: { Tvdb: "81189", Tmdb: "1396", IMDB: "tt0903747" }, DisplayOrder: "aired" } as any;
 const l = S.skipLookup(ep, series)!;
