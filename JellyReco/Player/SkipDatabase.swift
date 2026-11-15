@@ -4,7 +4,7 @@ import Foundation
 /// movies the server has no media segments for (the same two databases Infuse uses):
 ///   - TheIntroDB (api.theintrodb.org, API v4): asked first. Intro, recap, credits, preview.
 ///   - IntroDB (api.introdb.app): fills intro, recap or credits TheIntroDB doesn't have.
-/// Anime is different: it is looked up in AniSkip only (see AniSkip.swift), never in those two.
+/// Anime is looked up in AniSkip first (see AniSkip.swift); those two fill what AniSkip doesn't have.
 /// All are read without an account or a key. Only the title's TVDB / TMDB / IMDb / MyAnimeList
 /// ID, the season and episode number and the runtime are sent; nothing about the server, the
 /// user or the file. The same logic as the desktop app's skipdb.ts.
@@ -271,22 +271,24 @@ enum SkipDatabase {
         } else {
             all = []
             var complete = true
-            // Anime: AniSkip only. Everything else: TheIntroDB, then IntroDB.
+            // Anime: AniSkip first. Then, for anime and everything else, TheIntroDB and IntroDB,
+            // each only for the types still missing.
             let anime = await AniSkip.segments(l.anime, durationMs: l.durationMs) { type, start, end in
                 segment(source: "aniskip", type: type, startMs: start, endMs: end, l)
             }
             if anime.anime {
-                if anime.complete { await cache.set(l.itemId, anime.segments) }
-                return anime.segments.filter { wanted.contains($0.type) }
+                all = anime.segments
+                complete = anime.complete
             }
-            if let first = theIntroDBURL(l) {
+            let fromAniSkip = Set(all.map(\.type))
+            if types.contains(where: { !fromAniSkip.contains($0) }), let first = theIntroDBURL(l) {
                 switch await ask(first) {
-                case .body(let json): all = parseTheIntroDB(json, l)
+                case .body(let json): all += parseTheIntroDB(json, l).filter { !fromAniSkip.contains($0.type) }
                 case .nothing: break
                 case .unreachable: complete = false
                 }
             }
-            // IntroDB only for what TheIntroDB doesn't have.
+            // IntroDB only for what the ones before it don't have.
             let have = Set(all.map(\.type))
             if ["Intro", "Recap", "Outro"].contains(where: { !have.contains($0) }), let second = introDBURL(l) {
                 switch await ask(second) {
