@@ -132,6 +132,10 @@ private struct PlayerContent: View {
     let close: () -> Void
 
     @State private var showControls = true
+    /// The segment whose skip button has had its time on screen (or was put away with the controls):
+    /// from then on it only shows while the controls do, as on Netflix.
+    @State private var skipButtonRested: String?
+    @State private var skipButtonTask: Task<Void, Never>?
     @State private var hideTask: Task<Void, Never>?
     @State private var panel: PlayerPanel?
     @State private var locked = false
@@ -227,6 +231,8 @@ private struct PlayerContent: View {
         .onAppear { scheduleHide(); controller.controlsVisible = uiVisible }
         // Battery: the controller ticks quickly only while something is on screen (or due).
         .onChange(of: uiVisible) { _, visible in controller.controlsVisible = visible }
+        .onChange(of: controller.activeSegment?.id, initial: true) { _, id in armSkipButton(id) }
+        .onDisappear { skipButtonTask?.cancel() }
         .onChange(of: player.isPaused) { _, paused in if paused { hideTask?.cancel() } else { scheduleHide() } }
         .onChange(of: menuOpen) { _, open in if open { hideTask?.cancel() } else { scheduleHide() } }
     }
@@ -518,7 +524,8 @@ private struct PlayerContent: View {
     private var cornerCards: some View {
         VStack(alignment: .trailing, spacing: 12) {
             Spacer()
-            if let segment = controller.activeSegment, controller.upNextCountdown == nil {
+            if let segment = controller.activeSegment, controller.upNextCountdown == nil,
+               showControls || skipButtonRested != segment.id {
                 Button { controller.skip(segment) } label: {
                     Text(controller.skipLabel(segment)).font(.headline).padding(.horizontal, 18).padding(.vertical, 12)
                 }
@@ -537,6 +544,20 @@ private struct PlayerContent: View {
         .padding(.bottom, showControls ? 150 : 36)
         .animation(.snappy, value: controller.activeSegment)
         .animation(.snappy, value: controller.upNextCountdown)
+        .animation(.easeInOut(duration: 0.3), value: skipButtonRested)
+    }
+
+    /// A skip button stays up for 8 seconds when its segment starts, then goes away by itself;
+    /// while the segment lasts it comes back with the controls (tap the screen) and leaves with them.
+    private func armSkipButton(_ id: String?) {
+        skipButtonTask?.cancel()
+        skipButtonRested = nil
+        guard let id else { return }
+        skipButtonTask = Task {
+            try? await Task.sleep(nanoseconds: 8_000_000_000)
+            guard !Task.isCancelled, controller.activeSegment?.id == id else { return }
+            skipButtonRested = id
+        }
     }
 
     private var lockedOverlay: some View {
@@ -562,6 +583,8 @@ private struct PlayerContent: View {
 
     private func toggleControls() {
         withAnimation(.easeInOut(duration: 0.25)) { showControls.toggle() }
+        // Putting the controls away puts the skip button away with them, also before its time is up.
+        if !showControls, let id = controller.activeSegment?.id { skipButtonRested = id }
         if showControls { scheduleHide() } else if panel != nil { panel = nil }
     }
 
