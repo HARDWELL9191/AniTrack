@@ -4,9 +4,10 @@ import Foundation
 /// movies the server has no media segments for (the same two databases Infuse uses):
 ///   - TheIntroDB (api.theintrodb.org, API v4): asked first. Intro, recap, credits, preview.
 ///   - IntroDB (api.introdb.app): fills intro, recap or credits TheIntroDB doesn't have.
-/// Both are read without an account or a key. Only the title's TVDB / TMDB / IMDb ID, the season
-/// and episode number and the runtime are sent; nothing about the server, the user or the file.
-/// The same logic as the desktop app's skipdb.ts.
+/// Anime is different: it is looked up in AniSkip only (see AniSkip.swift), never in those two.
+/// All are read without an account or a key. Only the title's TVDB / TMDB / IMDb / MyAnimeList
+/// ID, the season and episode number and the runtime are sent; nothing about the server, the
+/// user or the file. The same logic as the desktop app's skipdb.ts.
 enum SkipDatabase {
     /// The segment types a database can fill in (ads are never in them).
     static let types = ["Intro", "Recap", "Outro", "Preview"]
@@ -23,6 +24,7 @@ enum SkipDatabase {
         var tvdbEpisode: Int?     // the episode's own TVDB ID: the same episode in every episode order
         var mapping: String?      // the series' episode order on the server, when it isn't the default one
         var durationMs: Double    // 0 = unknown
+        var anime = AniSkip.Query()   // what tells whether it's anime, and where AniSkip has it
     }
 
     // MARK: Lookup
@@ -49,16 +51,37 @@ enum SkipDatabase {
     /// Jellyfin's display orders that are TVDB episode orders TheIntroDB can convert from.
     private static let orders: Set<String> = ["dvd", "absolute", "alternate", "regional", "altdvd", "alttwo"]
 
+    /// The anime side of a lookup: the title's own IDs (a movie's, or an episode's series').
+    private static func animeQuery(owner: BaseItem, animeLibrary: Bool, genres: [[String]?]) -> AniSkip.Query {
+        let ids = owner.providerIds
+        var q = AniSkip.Query()
+        q.tvdb = positiveInt(provider(ids, "tvdb"))
+        q.tmdb = positiveInt(provider(ids, "tmdb"))
+        q.imdb = imdbId(provider(ids, "imdb"))
+        q.mal = positiveInt(provider(ids, "myanimelist") ?? provider(ids, "mal"))
+        q.anilist = positiveInt(provider(ids, "anilist"))
+        q.anidb = positiveInt(provider(ids, "anidb"))
+        let genre = genres.contains { list in
+            (list ?? []).contains { $0.trimmingCharacters(in: .whitespaces).lowercased() == "anime" }
+        }
+        q.hint = animeLibrary || genre || q.mal != nil || q.anilist != nil || q.anidb != nil
+        return q
+    }
+
     /// The lookup for an episode (with its series) or a movie; nil when it can't be looked up.
-    static func lookup(item: BaseItem, series: BaseItem?) -> Lookup? {
+    /// `animeLibrary`: the title is in a library named Anime or Anime Movies.
+    static func lookup(item: BaseItem, series: BaseItem?, animeLibrary: Bool = false) -> Lookup? {
         let durationMs = max(0, (Double(item.runTimeTicks ?? 0) / 10_000).rounded())
         if item.kind == .movie {
+            var anime = animeQuery(owner: item, animeLibrary: animeLibrary, genres: [item.genres])
+            anime.movie = true
             let l = Lookup(itemId: item.id, movie: true,
                            tvdb: positiveInt(provider(item.providerIds, "tvdb")),
                            tmdb: positiveInt(provider(item.providerIds, "tmdb")),
                            imdb: imdbId(provider(item.providerIds, "imdb")),
-                           season: nil, episode: nil, tvdbEpisode: nil, mapping: nil, durationMs: durationMs)
-            return l.tvdb != nil || l.tmdb != nil || l.imdb != nil ? l : nil
+                           season: nil, episode: nil, tvdbEpisode: nil, mapping: nil, durationMs: durationMs,
+                           anime: anime)
+            return l.tvdb != nil || l.tmdb != nil || l.imdb != nil || anime.hint ? l : nil
         }
         guard item.kind == .episode, let series,
               let season = item.parentIndexNumber, let episode = item.indexNumber,
@@ -66,14 +89,19 @@ enum SkipDatabase {
         // One file holding several episodes: the times of its first episode don't fit the file.
         if let end = item.indexNumberEnd, end != episode { return nil }
         let order = (series.displayOrder ?? "").lowercased()
+        var anime = animeQuery(owner: series, animeLibrary: animeLibrary, genres: [series.genres, item.genres])
+        anime.season = season
+        anime.episode = episode
+        anime.tvdbNumbering = positiveInt(provider(item.providerIds, "tvdb")) != nil
         let l = Lookup(itemId: item.id, movie: false,
                        tvdb: positiveInt(provider(series.providerIds, "tvdb")),
                        tmdb: positiveInt(provider(series.providerIds, "tmdb")),
                        imdb: imdbId(provider(series.providerIds, "imdb")),
                        season: season, episode: episode,
                        tvdbEpisode: positiveInt(provider(item.providerIds, "tvdb")),
-                       mapping: orders.contains(order) ? order : nil, durationMs: durationMs)
-        return l.tvdb != nil || l.tmdb != nil || l.imdb != nil ? l : nil
+                       mapping: orders.contains(order) ? order : nil, durationMs: durationMs,
+                       anime: anime)
+        return l.tvdb != nil || l.tmdb != nil || l.imdb != nil || anime.hint ? l : nil
     }
 
     private static func url(_ base: String, _ query: [(String, String)]) -> URL? {
@@ -243,6 +271,14 @@ enum SkipDatabase {
         } else {
             all = []
             var complete = true
+            // Anime: AniSkip only. Everything else: TheIntroDB, then IntroDB.
+            let anime = await AniSkip.segments(l.anime, durationMs: l.durationMs) { type, start, end in
+                segment(source: "aniskip", type: type, startMs: start, endMs: end, l)
+            }
+            if anime.anime {
+                if anime.complete { await cache.set(l.itemId, anime.segments) }
+                return anime.segments.filter { wanted.contains($0.type) }
+            }
             if let first = theIntroDBURL(l) {
                 switch await ask(first) {
                 case .body(let json): all = parseTheIntroDB(json, l)

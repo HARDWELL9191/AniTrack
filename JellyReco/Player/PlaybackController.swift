@@ -70,8 +70,9 @@ final class PlaybackController {
     @ObservationIgnored private var triedMetal = false
     @ObservationIgnored private var triedTranscode = false
     @ObservationIgnored private var skippedSegments: Set<String> = []
-    /// Series by ID, for their provider IDs (the open skip databases are asked by them).
-    @ObservationIgnored private var skipSeries: [String: BaseItem] = [:]
+    /// By series (or movie) ID: the series, for its provider IDs (the open skip databases are asked
+    /// by them), and whether it's in an Anime / Anime Movies library.
+    @ObservationIgnored private var skipSeries: [String: (series: BaseItem, animeLibrary: Bool)] = [:]
     @ObservationIgnored private var autoplayStreak = 0
     @ObservationIgnored private var playedIds: [String] = []
     @ObservationIgnored private var countdownTask: Task<Void, Never>?
@@ -338,17 +339,22 @@ final class PlaybackController {
                 let have = Set(found.map(\.type))
                 let wanted = SkipDatabase.types.filter { !have.contains($0) && settings.segmentAction($0) != "none" }
                 guard !wanted.isEmpty else { return }
-                var series: BaseItem?
-                if full.kind == .episode, let seriesId = full.seriesId {
-                    series = self.skipSeries[seriesId]
-                    if series == nil, let fetched = try? await client.item(seriesId) {
-                        guard self.loadGeneration == generation else { return }
-                        if self.skipSeries.count >= 50 { self.skipSeries.removeAll() }
-                        self.skipSeries[seriesId] = fetched
-                        series = fetched
-                    }
+                // The series (for its provider IDs) and whether it sits in an Anime / Anime Movies library.
+                guard let ownerId = full.kind == .episode ? full.seriesId : full.id else { return }
+                var known = self.skipSeries[ownerId]
+                if known == nil {
+                    var fetched: BaseItem? = full
+                    if full.kind == .episode { fetched = try? await client.item(ownerId) }
+                    let ancestors = await client.ancestors(ownerId)
+                    guard self.loadGeneration == generation, let series = fetched else { return }
+                    let animeLibrary = ancestors.contains { AniListLibrary(libraryName: $0.name) != nil }
+                    if self.skipSeries.count >= 50 { self.skipSeries.removeAll() }
+                    self.skipSeries[ownerId] = (series, animeLibrary)
+                    known = (series, animeLibrary)
                 }
-                guard let lookup = SkipDatabase.lookup(item: full, series: series) else { return }
+                guard let owner = known,
+                      let lookup = SkipDatabase.lookup(item: full, series: full.kind == .episode ? owner.series : nil,
+                                                       animeLibrary: owner.animeLibrary) else { return }
                 let extra = await SkipDatabase.segments(for: lookup, wanted: wanted)
                 guard self.loadGeneration == generation, !extra.isEmpty else { return }
                 self.segments = SkipDatabase.merge(found, extra)

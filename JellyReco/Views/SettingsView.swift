@@ -516,7 +516,7 @@ struct PlaybackSettingsView: View {
                 }
                 Toggle("Online intro database", isOn: $s.onlineSkipDatabase)
             } header: { Text("Next episode & skipping") } footer: {
-                Text("Intro and credits times come from your server's media segments (e.g. the Intro Skipper plugin or chapter names). With the online intro database on, an episode or movie the server has no times for gets them from the community databases TheIntroDB and IntroDB (as in Infuse), so intros can be skipped even when nothing is marked in your files. Only the title's TVDB / TMDB / IMDb ID, the season and episode number and the runtime are sent.")
+                Text("Intro and credits times come from your server's media segments (e.g. the Intro Skipper plugin or chapter names). With the online intro database on, an episode or movie the server has no times for gets them from the community databases: AniSkip for anime (and only AniSkip), TheIntroDB and IntroDB for everything else (as in Infuse), so intros can be skipped even when nothing is marked in your files. Only the title's TVDB / TMDB / IMDb / MyAnimeList ID, the season and episode number and the runtime are sent.")
             }
             Section("Starting") {
                 Stepper("Rewind on resume: \(s.resumeOffset) s", value: $s.resumeOffset, in: 0...30)

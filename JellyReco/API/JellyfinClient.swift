@@ -684,6 +684,13 @@ final class JellyfinClient: @unchecked Sendable {
         _ = try? await send("DELETE", "/Videos/ActiveEncodings", query: ["deviceId": Self.deviceId, "playSessionId": playSessionId])
     }
 
+    /// The folders and library an item sits in (nearest first); none when they can't be had.
+    func ancestors(_ id: String) async -> [BaseItem] {
+        guard let user = try? requireUser() else { return [] }
+        let found: [BaseItem]? = try? await get("/Items/\(id)/Ancestors", ["userId": user])
+        return found ?? []
+    }
+
     func mediaSegments(itemId: String) async -> [MediaSegment] {
         let r: QueryResult<MediaSegment>? = try? await get("/MediaSegments/\(itemId)")
         return r?.items ?? []
