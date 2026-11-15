@@ -142,31 +142,37 @@ const net = async (url: string) => {
   calls.push(url);
   if (url.includes("/31240/27?")) return new Response(JSON.stringify({ found: false, results: [], statusCode: 404 }), { status: 404 });
   if (url.includes("aniskip")) return new Response(JSON.stringify(frieren));
-  return new Response(JSON.stringify({ season: 1, episode: 1, intro: [{ start_ms: 1000, end_ms: 9000 }] }));
+  return new Response(JSON.stringify(url.includes("theintrodb") ? { intro: [{ start_ms: 1000, end_ms: 9000 }] } : { intro: null, recap: null, outro: null }));
 };
 S.setSkipDbFetch(net); A.setAniSkipFetch(net);
 const all = ["Intro", "Recap", "Outro", "Preview"] as any;
 r = await S.skipDbSegments(S.skipLookup(item("a2", { ParentIndexNumber: 1, IndexNumber: 27, ProviderIds: { Tvdb: "1" } }), show({ Tvdb: "305089", Tmdb: "65942", Imdb: "tt5607616" }))!, all);
 assert.deepEqual(r.map((s) => s.Id), ["skipdb:aniskip:Intro:116748", "skipdb:aniskip:Outro:1417135"]);
-assert.deepEqual(calls.map((u) => u.split("?")[0]), ["https://api.aniskip.com/v2/skip-times/31240/27", "https://api.aniskip.com/v2/skip-times/39587/1"]);
-// Anime with no times in AniSkip: nothing, and still not a word to the other two databases.
+assert.deepEqual(calls.slice(0, 2).map((u) => u.split("?")[0]), ["https://api.aniskip.com/v2/skip-times/31240/27", "https://api.aniskip.com/v2/skip-times/39587/1"]);
+// AniSkip had the opening and the ending; the other two were still asked for the recap and preview.
+assert.deepEqual(calls.slice(2).map((u) => new URL(u).host), ["api.theintrodb.org", "api.introdb.app"]);
+// Anime AniSkip has nothing for (no entry for that season): the other two databases fill in.
 calls = [];
 r = await S.skipDbSegments(S.skipLookup(item("a3", { ParentIndexNumber: 9, IndexNumber: 1 }), show({ Tvdb: "267440", Imdb: "tt2560140" }))!, all);
-assert.equal(r.length, 0); assert.equal(calls.length, 0);
-// In the Anime library, or with the "Anime" genre, but unknown to the list: anime all the same.
-r = await S.skipDbSegments(S.skipLookup(item("a4", { ParentIndexNumber: 1, IndexNumber: 1 }), show({ Tvdb: "81189", Imdb: "tt0903747" }), true)!, all);
-assert.equal(r.length, 0); assert.equal(calls.length, 0);
-r = await S.skipDbSegments(S.skipLookup(item("a5", { ParentIndexNumber: 1, IndexNumber: 1 }), show({ Tvdb: "81189", Imdb: "tt0903747" }, { Genres: ["Drama", "Anime"] }))!, all);
-assert.equal(r.length, 0); assert.equal(calls.length, 0);
+assert.deepEqual(r.map((s) => s.Id), ["skipdb:tidb:Intro:1000"]);
+assert.deepEqual(calls.map((u) => new URL(u).host), ["api.theintrodb.org", "api.introdb.app"]);
+// AniSkip has only the ending: the opening comes from TheIntroDB, the ending stays AniSkip's.
+calls = [];
+A.setAniSkipFetch(async (url) => { calls.push(url); return new Response(JSON.stringify({ found: true, results: [frieren.results[1]] })); });
+S.setSkipDbFetch(async (url) => { calls.push(url); return new Response(JSON.stringify(url.includes("theintrodb") ? { intro: [{ start_ms: 1000, end_ms: 9000 }], credits: [{ start_ms: 1400000, end_ms: null }] } : { intro: { start_ms: 5000, end_ms: 50000 }, outro: { start_ms: 1300000, end_ms: 1400000 } })); });
+r = await S.skipDbSegments(S.skipLookup(item("a4", { ParentIndexNumber: 1, IndexNumber: 1 }), show({ Tvdb: "424536", Imdb: "tt22248376" }))!, all);
+assert.deepEqual(r.map((s) => s.Id).sort(), ["skipdb:aniskip:Outro:1417135", "skipdb:tidb:Intro:1000"]);
+S.setSkipDbFetch(net); A.setAniSkipFetch(net);
 // Not anime: the other two as before, AniSkip never asked.
+calls = [];
 r = await S.skipDbSegments(S.skipLookup(item("a6", { ParentIndexNumber: 1, IndexNumber: 1 }), show({ Tmdb: "1396", Imdb: "tt0903747" }))!, all);
 assert.deepEqual(r.map((s) => s.Id), ["skipdb:tidb:Intro:1000"]);
 assert.equal(calls.some((u) => u.includes("aniskip")), false); assert.equal(calls.length, 2);
 // An anime movie.
 calls = [];
 r = await S.skipDbSegments(S.skipLookup({ Id: "a7", Type: "Movie", RunTimeTicks: 1510.102 * 1e7, ProviderIds: { Tmdb: "128", Imdb: "tt0119698" } } as any, null)!, all);
-assert.deepEqual(calls.map((u) => u.split("?")[0]), ["https://api.aniskip.com/v2/skip-times/164/1"]);
-console.log("ok: anime goes to AniSkip only (ID list, seasons and cours, answers, lookup order)");
+assert.deepEqual(calls.slice(0, 1).map((u) => u.split("?")[0]), ["https://api.aniskip.com/v2/skip-times/164/1"]);
+console.log("ok: anime goes to AniSkip first, the other databases fill what it lacks (ID list, seasons and cours, answers, lookup order)");
 
 // Live: the real anime ID list, then Frieren S01E01 and Re:ZERO S02E14 through it to AniSkip.
 A.setAniSkipFetch((url, init) => fetch(url, init));

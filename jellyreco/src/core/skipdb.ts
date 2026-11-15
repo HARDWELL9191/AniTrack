@@ -2,7 +2,7 @@
 // movies the server has no media segments for (the same two databases Infuse uses):
 //   - TheIntroDB (api.theintrodb.org, API v4): asked first. Intro, recap, credits, preview.
 //   - IntroDB (api.introdb.app): fills intro, recap or credits TheIntroDB doesn't have.
-// Anime is different: it is looked up in AniSkip only (see aniskip.ts), never in those two.
+// Anime is looked up in AniSkip first (see aniskip.ts); those two fill what AniSkip doesn't have.
 // All are read without an account or a key. Only the title's TVDB / TMDB / IMDb / MyAnimeList ID,
 // the season and episode number and the runtime are sent; nothing about the server, the user or
 // the file. The same logic as the iPhone app's SkipDatabase.swift.
@@ -217,22 +217,21 @@ export async function skipDbSegments(l: SkipLookup, wanted: SegmentType[]): Prom
   if (!all) {
     let complete = true;
     all = [];
-    // Anime: AniSkip only. Everything else: TheIntroDB, then IntroDB.
+    // Anime: AniSkip first. Then, for anime and everything else, TheIntroDB and IntroDB, each only
+    // for the types still missing.
     const anime = await aniSkipSegments(l.anime, l.durationMs, (source, type, start, end) => skipSegment(source, type, start, end, l));
     if (anime.anime) {
-      if (anime.complete) {
-        if (cache.size >= 300) cache.delete(cache.keys().next().value!);
-        cache.set(l.itemId, anime.segments);
-      }
-      return anime.segments.filter((s) => wanted.includes(s.Type));
+      all = anime.segments;
+      complete = anime.complete;
     }
-    const first = theIntroDbUrl(l);
+    const fromAniSkip = new Set(all.map((s) => s.Type));
+    const first = SKIP_DB_TYPES.some((t) => !fromAniSkip.has(t)) ? theIntroDbUrl(l) : null;
     if (first) {
       const body = await ask(first);
       if (body === undefined) complete = false;
-      else all = parseTheIntroDb(body, l);
+      else all = [...all, ...parseTheIntroDb(body, l).filter((s) => !fromAniSkip.has(s.Type))];
     }
-    // IntroDB only for what TheIntroDB doesn't have.
+    // IntroDB only for what the ones before it don't have.
     const have = new Set(all.map((s) => s.Type));
     const second = (["Intro", "Recap", "Outro"] as SegmentType[]).some((t) => !have.has(t)) ? introDbUrl(l) : null;
     if (second) {
