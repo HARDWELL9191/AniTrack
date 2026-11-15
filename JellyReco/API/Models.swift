@@ -320,6 +320,8 @@ struct BaseItem: Codable, Hashable, Identifiable {
 
     var seriesId: String?
     var seriesName: String?
+    /// A series' episode order on the server (aired, dvd, absolute, …).
+    var displayOrder: String?
     var seasonId: String?
     var seasonName: String?
     var indexNumber: Int?

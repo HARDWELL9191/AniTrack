@@ -210,6 +210,8 @@ final class AppSettings {
         ("Intro", "Intro"), ("Recap", "Recap"), ("Outro", "Credits"), ("Preview", "Preview"), ("Commercial", "Ads"),
     ]
     func segmentAction(_ type: String) -> String { segmentActions[type] ?? "none" }
+    /// Intro / recap / credits times from the open skip databases when the server has none.
+    var onlineSkipDatabase: Bool { didSet { save(onlineSkipDatabase, "onlineSkipDatabase") } }
     /// Default picture: "fit", "fill" or "stretch".
     var defaultAspect: String { didSet { save(defaultAspect, "defaultAspect") } }
     var timestampStyle: TimestampStyle { didSet { save(timestampStyle.rawValue, "timestampStyle") } }
@@ -355,6 +357,7 @@ final class AppSettings {
             }
             segmentActions = actions
         }
+        onlineSkipDatabase = b("onlineSkipDatabase", true)
         defaultAspect = { let v = s("defaultAspect", "fit"); return ["fit", "fill", "stretch"].contains(v) ? v : "fit" }()
         timestampStyle = e("timestampStyle", TimestampStyle.remaining)
         showChaptersOnSlider = b("showChaptersOnSlider", true)
@@ -424,7 +427,7 @@ final class AppSettings {
         "doubleTap", "longPress", "pinchToFill", "preferredAudioLanguage", "preferredSubtitleLanguage",
         "subtitlesByDefault", "preferSignsAndSongs", "subtitleSize", "subtitleColor", "subtitleBackground",
         "subtitleBold", "subtitlePosition", "overrideASSStyles", "stereoDownmix", "transcodeFallback",
-        "segmentActions", "defaultAspect", "subtitleASSMode", "subtitleOutlineSize",
+        "segmentActions", "onlineSkipDatabase", "defaultAspect", "subtitleASSMode", "subtitleOutlineSize",
         "useOnDeviceAI", "recoSource", "includeWatchingAsLiked",
         "anilistClientId", "anilistHideChinese", "anilistIncludeUnreleased", "anilistTitleLanguage",
     ]
@@ -481,6 +484,7 @@ final class AppSettings {
         autoSkipIntro = fresh.autoSkipIntro; autoSkipRecap = fresh.autoSkipRecap; autoSkipOutro = fresh.autoSkipOutro
         showSkipButtons = fresh.showSkipButtons; timestampStyle = fresh.timestampStyle
         segmentActions = fresh.segmentActions; defaultAspect = fresh.defaultAspect
+        onlineSkipDatabase = fresh.onlineSkipDatabase
         showChaptersOnSlider = fresh.showChaptersOnSlider; trickplayPreviews = fresh.trickplayPreviews
         startInLandscape = fresh.startInLandscape; pipAutomatically = fresh.pipAutomatically
         backgroundAudio = fresh.backgroundAudio
@@ -518,7 +522,7 @@ final class AppSettings {
                     "gestureRightVertical", "gestureHorizontal", "doubleTap", "longPress", "pinchToFill",
                     "subtitleSize", "subtitleColor", "subtitleBackground", "subtitleBold", "subtitlePosition",
                     "overrideASSStyles", "stereoDownmix", "segmentActions", "defaultAspect", "subtitleASSMode",
-                    "subtitleOutlineSize"] {
+                    "subtitleOutlineSize", "onlineSkipDatabase"] {
             d.removeObject(forKey: key)
         }
         let fresh = AppSettings()
@@ -537,6 +541,7 @@ final class AppSettings {
         subtitlePosition = fresh.subtitlePosition; overrideASSStyles = fresh.overrideASSStyles
         stereoDownmix = fresh.stereoDownmix
         segmentActions = fresh.segmentActions; defaultAspect = fresh.defaultAspect
+        onlineSkipDatabase = fresh.onlineSkipDatabase
         subtitleASSMode = fresh.subtitleASSMode; subtitleOutlineSize = fresh.subtitleOutlineSize
     }
 }

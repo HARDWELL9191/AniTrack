@@ -70,6 +70,8 @@ final class PlaybackController {
     @ObservationIgnored private var triedMetal = false
     @ObservationIgnored private var triedTranscode = false
     @ObservationIgnored private var skippedSegments: Set<String> = []
+    /// Series by ID, for their provider IDs (the open skip databases are asked by them).
+    @ObservationIgnored private var skipSeries: [String: BaseItem] = [:]
     @ObservationIgnored private var autoplayStreak = 0
     @ObservationIgnored private var playedIds: [String] = []
     @ObservationIgnored private var countdownTask: Task<Void, Never>?
@@ -330,6 +332,26 @@ final class PlaybackController {
                 // A late answer for an episode that's no longer playing is dropped.
                 guard let self, self.loadGeneration == generation else { return }
                 self.segments = found
+                // What the server has no times for comes from the open skip databases.
+                let settings = self.settings
+                guard settings.onlineSkipDatabase, full.kind == .episode || full.kind == .movie else { return }
+                let have = Set(found.map(\.type))
+                let wanted = SkipDatabase.types.filter { !have.contains($0) && settings.segmentAction($0) != "none" }
+                guard !wanted.isEmpty else { return }
+                var series: BaseItem?
+                if full.kind == .episode, let seriesId = full.seriesId {
+                    series = self.skipSeries[seriesId]
+                    if series == nil, let fetched = try? await client.item(seriesId) {
+                        guard self.loadGeneration == generation else { return }
+                        if self.skipSeries.count >= 50 { self.skipSeries.removeAll() }
+                        self.skipSeries[seriesId] = fetched
+                        series = fetched
+                    }
+                }
+                guard let lookup = SkipDatabase.lookup(item: full, series: series) else { return }
+                let extra = await SkipDatabase.segments(for: lookup, wanted: wanted)
+                guard self.loadGeneration == generation, !extra.isEmpty else { return }
+                self.segments = SkipDatabase.merge(found, extra)
             }
 
             if full.kind == .episode { findNeighbours(of: full, generation: generation) }
