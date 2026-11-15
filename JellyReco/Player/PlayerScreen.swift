@@ -540,8 +540,12 @@ private struct PlayerContent: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-        .padding(.trailing, 24)
-        .padding(.bottom, showControls ? 150 : 36)
+        // With the controls up: right above the buttons' capsule (12 pt), its right edge in line
+        // with the capsule's. The capsule's top is 77 pt above the controls' bottom padding
+        // (seek bar 28 + 5 + capsule 44). Without them: in the corner, clear of the safe area.
+        .padding(.trailing, showControls ? (layout.landscape ? 38 : 16) : layout.safe.trailing + 24)
+        .padding(.bottom, showControls ? (layout.landscape ? 32 : layout.safe.bottom + 8) + 77 + 12 : layout.safe.bottom + 36)
+        .ignoresSafeArea()
         .animation(.snappy, value: controller.activeSegment)
         .animation(.snappy, value: controller.upNextCountdown)
         .animation(.easeInOut(duration: 0.3), value: skipButtonRested)
