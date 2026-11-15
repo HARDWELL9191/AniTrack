@@ -2,7 +2,7 @@
 // movies the server has no media segments for (the same two databases Infuse uses):
 //   - TheIntroDB (api.theintrodb.org, API v4): asked first. Intro, recap, credits, preview.
 //   - IntroDB (api.introdb.app): fills intro, recap or credits TheIntroDB doesn't have.
-// Anime is looked up in AniSkip first (see aniskip.ts); those two fill what AniSkip doesn't have.
+// For anime, AniSkip (see aniskip.ts) then fills the opening, ending or recap those two don't have.
 // All are read without an account or a key. Only the title's TVDB / TMDB / IMDb / MyAnimeList ID,
 // the season and episode number and the runtime are sent; nothing about the server, the user or
 // the file. The same logic as the iPhone app's SkipDatabase.swift.
@@ -217,27 +217,29 @@ export async function skipDbSegments(l: SkipLookup, wanted: SegmentType[]): Prom
   if (!all) {
     let complete = true;
     all = [];
-    // Anime: AniSkip first. Then, for anime and everything else, TheIntroDB and IntroDB, each only
-    // for the types still missing.
-    const anime = await aniSkipSegments(l.anime, l.durationMs, (source, type, start, end) => skipSegment(source, type, start, end, l));
-    if (anime.anime) {
-      all = anime.segments;
-      complete = anime.complete;
-    }
-    const fromAniSkip = new Set(all.map((s) => s.Type));
-    const first = SKIP_DB_TYPES.some((t) => !fromAniSkip.has(t)) ? theIntroDbUrl(l) : null;
+    // TheIntroDB first, for anime too.
+    const first = theIntroDbUrl(l);
     if (first) {
       const body = await ask(first);
       if (body === undefined) complete = false;
-      else all = [...all, ...parseTheIntroDb(body, l).filter((s) => !fromAniSkip.has(s.Type))];
+      else all = parseTheIntroDb(body, l);
     }
-    // IntroDB only for what the ones before it don't have.
+    // IntroDB only for what TheIntroDB doesn't have.
     const have = new Set(all.map((s) => s.Type));
     const second = (["Intro", "Recap", "Outro"] as SegmentType[]).some((t) => !have.has(t)) ? introDbUrl(l) : null;
     if (second) {
       const body = await ask(second);
       if (body === undefined) complete = false;
       else all = [...all, ...parseIntroDb(body, l).filter((s) => !have.has(s.Type))];
+    }
+    // Anime: AniSkip fills the opening, ending or recap those two don't have.
+    const before = new Set(all.map((s) => s.Type));
+    if ((["Intro", "Recap", "Outro"] as SegmentType[]).some((t) => !before.has(t))) {
+      const anime = await aniSkipSegments(l.anime, l.durationMs, (source, type, start, end) => skipSegment(source, type, start, end, l));
+      if (anime.anime) {
+        if (!anime.complete) complete = false;
+        all = [...all, ...anime.segments.filter((s) => !before.has(s.Type))];
+      }
     }
     // An answer is kept for the session; a database that couldn't be reached is asked again next time.
     if (complete) {
