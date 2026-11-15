@@ -9,6 +9,7 @@ import type { Settings } from "./settings";
 import type { Chapter, Item, MediaSegment, MediaSource, MediaStream, TrickplayInfo } from "./types";
 import { secondsToTicks, ticksToSeconds } from "./types";
 import { mergeSegments, SKIP_DB_TYPES, skipDbSegments, skipLookup } from "./skipdb";
+import { aniListLibrary } from "./anilist";
 
 export interface MpvTrack {
   id: number;
@@ -128,7 +129,7 @@ export class PlayerController {
   private progressTimer: ReturnType<typeof setInterval> | null = null;
   private countdownTimer: ReturnType<typeof setInterval> | null = null;
   private skippedSegments = new Set<string>();
-  private seriesCache = new Map<string, Item>();   // series by ID, for their provider IDs
+  private seriesCache = new Map<string, { series: Item; animeLibrary: boolean }>();   // by series (or movie) ID
   private reportedStart = false;
   private loadToken = 0;
   private pendingStart: { audio?: number; sub?: number } = {};
@@ -421,13 +422,20 @@ export class PlayerController {
     const wanted = SKIP_DB_TYPES.filter((t) => !have.has(t) && (s.segmentActions[t] ?? "none") !== "none");
     if (!wanted.length) return;
     try {
-      let series = item.SeriesId ? this.seriesCache.get(item.SeriesId) ?? null : null;
-      if (item.Type === "Episode" && item.SeriesId && !series) {
-        series = await api.item(item.SeriesId);
+      // The series (for its provider IDs) and whether it sits in an Anime / Anime Movies library.
+      const ownerId = item.Type === "Episode" ? item.SeriesId : item.Id;
+      if (!ownerId) return;
+      let owner = this.seriesCache.get(ownerId);
+      if (!owner) {
+        const [series, ancestors] = await Promise.all([
+          item.Type === "Episode" ? api.item(ownerId) : Promise.resolve(item),
+          api.ancestors(ownerId).catch(() => [] as Item[]),
+        ]);
+        owner = { series, animeLibrary: ancestors.some((a) => aniListLibrary(a.Name) !== null) };
         if (this.seriesCache.size >= 50) this.seriesCache.clear();
-        this.seriesCache.set(item.SeriesId, series);
+        this.seriesCache.set(ownerId, owner);
       }
-      const lookup = skipLookup(item, series);
+      const lookup = skipLookup(item, item.Type === "Episode" ? owner.series : null, owner.animeLibrary);
       if (!lookup) return;
       const found = await skipDbSegments(lookup, wanted);
       if (token === this.loadToken && found.length) this.patch({ segments: mergeSegments(server, found) });

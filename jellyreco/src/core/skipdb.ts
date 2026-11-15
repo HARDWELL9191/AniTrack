@@ -2,10 +2,12 @@
 // movies the server has no media segments for (the same two databases Infuse uses):
 //   - TheIntroDB (api.theintrodb.org, API v4): asked first. Intro, recap, credits, preview.
 //   - IntroDB (api.introdb.app): fills intro, recap or credits TheIntroDB doesn't have.
-// Both are read without an account or a key. Only the title's TVDB / TMDB / IMDb ID, the season
-// and episode number and the runtime are sent; nothing about the server, the user or the file.
-// The same logic as the iPhone app's SkipDatabase.swift.
+// Anime is different: it is looked up in AniSkip only (see aniskip.ts), never in those two.
+// All are read without an account or a key. Only the title's TVDB / TMDB / IMDb / MyAnimeList ID,
+// the season and episode number and the runtime are sent; nothing about the server, the user or
+// the file. The same logic as the iPhone app's SkipDatabase.swift.
 
+import { type AnimeQuery, aniSkipSegments } from "./aniskip.ts";
 import type { Item, MediaSegment, SegmentType } from "./types";
 
 type FetchFn = (url: string, init?: RequestInit) => Promise<Response>;
@@ -32,6 +34,7 @@ export interface SkipLookup {
   tvdbEpisode?: number;   // the episode's own TVDB ID: the same episode in every episode order
   mapping?: string;       // the series' episode order on the server, when it isn't the default one
   durationMs: number;     // 0 = unknown
+  anime: AnimeQuery;      // what tells whether it's anime, and where AniSkip has it
 }
 
 const positiveInt = (v: unknown): number | undefined => {
@@ -48,12 +51,27 @@ function provider(ids: Record<string, string | null | undefined> | null | undefi
 // Jellyfin's display orders that are TVDB episode orders TheIntroDB can convert from.
 const ORDERS: Record<string, string> = { dvd: "dvd", absolute: "absolute", alternate: "alternate", regional: "regional", altdvd: "altdvd", alttwo: "alttwo" };
 
-/** The lookup for an episode (with its series) or a movie; null when it can't be looked up. */
-export function skipLookup(item: Item, series: Item | null): SkipLookup | null {
+/** The anime side of a lookup: the title's own IDs (a movie's, or an episode's series'). */
+function animeQuery(owner: Item, extra: Partial<AnimeQuery>, animeLibrary: boolean, genres: (string[] | null | undefined)[]): AnimeQuery {
+  const ids = owner.ProviderIds;
+  const mal = positiveInt(provider(ids, "myanimelist") ?? provider(ids, "mal")), anilist = positiveInt(provider(ids, "anilist")), anidb = positiveInt(provider(ids, "anidb"));
+  const genre = genres.some((list) => (list ?? []).some((g) => g.trim().toLowerCase() === "anime"));
+  return {
+    movie: false, tvdb: positiveInt(provider(ids, "tvdb")), tmdb: positiveInt(provider(ids, "tmdb")), imdb: imdbId(provider(ids, "imdb")),
+    mal, anilist, anidb, hint: animeLibrary || genre || !!(mal || anilist || anidb), ...extra,
+  };
+}
+
+/**
+ * The lookup for an episode (with its series) or a movie; null when it can't be looked up.
+ * `animeLibrary`: the title is in a library named Anime or Anime Movies.
+ */
+export function skipLookup(item: Item, series: Item | null, animeLibrary = false): SkipLookup | null {
   const durationMs = Math.max(0, Math.round((item.RunTimeTicks ?? 0) / TICKS_PER_MS));
   if (item.Type === "Movie") {
-    const l: SkipLookup = { itemId: item.Id, movie: true, tvdb: positiveInt(provider(item.ProviderIds, "tvdb")), tmdb: positiveInt(provider(item.ProviderIds, "tmdb")), imdb: imdbId(provider(item.ProviderIds, "imdb")), durationMs };
-    return l.tvdb || l.tmdb || l.imdb ? l : null;
+    const anime = animeQuery(item, { movie: true }, animeLibrary, [item.Genres]);
+    const l: SkipLookup = { itemId: item.Id, movie: true, tvdb: positiveInt(provider(item.ProviderIds, "tvdb")), tmdb: positiveInt(provider(item.ProviderIds, "tmdb")), imdb: imdbId(provider(item.ProviderIds, "imdb")), durationMs, anime };
+    return l.tvdb || l.tmdb || l.imdb || anime.hint ? l : null;
   }
   if (item.Type !== "Episode" || !series) return null;
   const season = item.ParentIndexNumber, episode = item.IndexNumber;
@@ -65,8 +83,9 @@ export function skipLookup(item: Item, series: Item | null): SkipLookup | null {
     tvdb: positiveInt(provider(series.ProviderIds, "tvdb")), tmdb: positiveInt(provider(series.ProviderIds, "tmdb")), imdb: imdbId(provider(series.ProviderIds, "imdb")),
     tvdbEpisode: positiveInt(provider(item.ProviderIds, "tvdb")),
     mapping: ORDERS[(series.DisplayOrder ?? "").toLowerCase()],
+    anime: animeQuery(series, { season: season!, episode: episode!, tvdbNumbering: !!positiveInt(provider(item.ProviderIds, "tvdb")) }, animeLibrary, [series.Genres, item.Genres]),
   };
-  return l.tvdb || l.tmdb || l.imdb ? l : null;
+  return l.tvdb || l.tmdb || l.imdb || l.anime.hint ? l : null;
 }
 
 /** TheIntroDB's address for a lookup: one ID per request, as its API reads the numbers by that ID's own numbering. */
@@ -198,6 +217,15 @@ export async function skipDbSegments(l: SkipLookup, wanted: SegmentType[]): Prom
   if (!all) {
     let complete = true;
     all = [];
+    // Anime: AniSkip only. Everything else: TheIntroDB, then IntroDB.
+    const anime = await aniSkipSegments(l.anime, l.durationMs, (source, type, start, end) => skipSegment(source, type, start, end, l));
+    if (anime.anime) {
+      if (anime.complete) {
+        if (cache.size >= 300) cache.delete(cache.keys().next().value!);
+        cache.set(l.itemId, anime.segments);
+      }
+      return anime.segments.filter((s) => wanted.includes(s.Type));
+    }
     const first = theIntroDbUrl(l);
     if (first) {
       const body = await ask(first);
