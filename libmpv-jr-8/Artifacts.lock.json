@@ -1,0 +1,43 @@
+{
+  "buildRecordPath" : "Libmpv.xcframework/build-record.json",
+  "dependencies" : [
+
+  ],
+  "nativeInputFingerprint" : "90ad4a3431c8ac10594bcd39ddb02f526fedc6eb2fe22ba006d1fe4a90497827",
+  "products" : [
+    {
+      "archive" : "Libmpv.xcframework.zip",
+      "framework" : "Libmpv",
+      "module" : "Libmpv",
+      "sha256" : "562d42c314231f45dc14bbb4b99fc49f2aeea40382563476e19204654052c6f8",
+      "slices" : [
+        {
+          "architectures" : [
+            "arm64"
+          ],
+          "id" : "ios",
+          "machOPlatform" : 2,
+          "minimumOS" : "16.0",
+          "platform" : "ios",
+          "sdk" : "iphoneos",
+          "variant" : ""
+        },
+        {
+          "architectures" : [
+            "arm64",
+            "x86_64"
+          ],
+          "id" : "isimulator",
+          "machOPlatform" : 7,
+          "minimumOS" : "16.0",
+          "platform" : "ios",
+          "sdk" : "iphonesimulator",
+          "variant" : "simulator"
+        }
+      ],
+      "target" : "Libmpv-GPL",
+      "url" : "https://github.com/LePips/MPVUI/releases/download/artifacts-90ad4a3431c8ac10594bcd39ddb02f526fedc6eb2fe22ba006d1fe4a90497827/Libmpv.xcframework.zip"
+    }
+  ],
+  "releaseID" : "artifacts-90ad4a3431c8ac10594bcd39ddb02f526fedc6eb2fe22ba006d1fe4a90497827"
+}
