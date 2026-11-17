@@ -5,6 +5,7 @@
 | | Download |
 |---|---|
 | **iPhone** (iOS 26+) | AltStore source: `https://raw.githubusercontent.com/HARDWELL9191/AniTrack/altstore/source.json` · or the IPA from [JellyReco (latest build)](https://github.com/HARDWELL9191/AniTrack/releases/tag/jellyreco-latest) |
+| **Windows** (x64, Intel / AMD) | `JellyReco-Setup-x64.exe` from [JellyReco PC (latest build)](https://github.com/HARDWELL9191/AniTrack/releases/tag/jellyreco-pc-latest) |
 | **Windows** (ARM64, e.g. Snapdragon) | `JellyReco-Setup-arm64.exe` from [JellyReco PC (latest build)](https://github.com/HARDWELL9191/AniTrack/releases/tag/jellyreco-pc-latest) |
 | **Linux** (x86_64) | `JellyReco-x86_64.AppImage` from [JellyReco PC (latest build)](https://github.com/HARDWELL9191/AniTrack/releases/tag/jellyreco-pc-latest) |
 
