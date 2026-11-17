@@ -82,6 +82,11 @@ final class PlaybackController {
     /// "Cancel" on the Up Next card: no countdown again for this episode (the credits segment and
     /// the end of the file used to restart it every half second).
     @ObservationIgnored private var countdownDismissed = false
+    /// The Up Next card is up before the end of the file: it counts the time left in the episode and
+    /// the next one starts when this one ends (the countdown setting is for credits that run to the end).
+    @ObservationIgnored private var countdownUntilEnd = false
+    /// Seconds before the end the card shows when there are no credits that run to the end.
+    static let upNextLeadSeconds = 30.0
     @ObservationIgnored private var stopped = false
     /// Where this file was opened and whether it ever actually played: until it does, reports
     /// carry the start position, so a file that failed to open doesn't reset your resume point to 0.
@@ -237,6 +242,7 @@ final class PlaybackController {
         countdownTask?.cancel()
         upNextCountdown = nil
         countdownDismissed = false
+        countdownUntilEnd = false
         askStillWatching = false
         upNext = queue.first
         hasPlayed = false
@@ -685,6 +691,8 @@ final class PlaybackController {
     @ObservationIgnored private var audioNeedsReload = false
     @ObservationIgnored private var audioInterrupted = false
     @ObservationIgnored private var resumeAfterInterruption = false
+    /// When the player's audio output last restarted itself (route / output configuration change).
+    @ObservationIgnored private var lastRendererRestart = Date.distantPast
 
     /// Takes the audio session back and restarts mpv's audio output (no 15 s limit).
     private func restoreAudio(reason: String) {
@@ -715,12 +723,18 @@ final class PlaybackController {
             MainActor.assumeIsolated {
                 guard let self else { return }
                 Task { @MainActor in
-                    try? await Task.sleep(nanoseconds: 700_000_000)
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
                     guard !self.stopped else { return }
                     // During a call the session isn't ours: restarting the output then left it
                     // dead. While paused or interrupted, restart it when playback resumes instead.
                     if self.audioInterrupted || self.player.isPaused {
                         self.audioNeedsReload = true
+                        return
+                    }
+                    // The player's audio output already restarted itself for this change (iOS flushed
+                    // its renderer): another restart would only make it refill a second time.
+                    if Date().timeIntervalSince(self.lastRendererRestart) < 2 {
+                        self.diagnostics.append("[JellyReco] Audio route changed (the audio output restarted itself)")
                         return
                     }
                     self.lastAudioReload = .distantPast
@@ -729,6 +743,13 @@ final class PlaybackController {
             }
         }
         let center = NotificationCenter.default
+        // The notice the player's own audio output restarts on (in this libmpv build only this one:
+        // it doesn't watch output configuration changes). Its renderer isn't reachable from here,
+        // so any renderer's: this app plays one thing at a time.
+        interruptionObservers.append(center.addObserver(forName: .AVSampleBufferAudioRendererWasFlushedAutomatically,
+                                                        object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.lastRendererRestart = Date() }
+        })
         // Calls, Siri, alarms, other apps: Apple leaves interruptions to the app (MPVUI says so too).
         interruptionObservers.append(center.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] note in
             let info = note.userInfo ?? [:]
@@ -1516,6 +1537,61 @@ final class PlaybackController {
         if let current, current.type == "Outro", runsToEnd(current), upNext != nil, settings.autoPlayNext, upNextCountdown == nil, !askStillWatching, !countdownDismissed {
             beginCountdown()
         }
+        updateUpNextBeforeEnd()
+    }
+
+    /// Where the Up Next card comes up before the end of the file (nil: not before the end).
+    /// - Credits that run to the end: at their start (updateSegments), with the countdown setting.
+    /// - Credits with more of the episode after them (anime: a scene or the preview): once they're
+    ///   over or skipped, and at the earliest 30 s before the end, so a longer scene isn't cut short.
+    /// - No credits known (the databases don't have every episode): 30 s before the end.
+    private var upNextShowsAt: Double? {
+        let duration = durationSeconds
+        guard duration > 0 else { return nil }
+        let outros = segments.filter { $0.type == "Outro" && $0.endTicks > $0.startTicks }
+        if outros.contains(where: runsToEnd) { return nil }
+        // Credits only hold the card back while they can be skipped (their setting isn't "Never").
+        let skippable = settings.segmentAction("Outro") != "none"
+        let creditsEnd = skippable ? outros.map { Fmt.seconds($0.endTicks) }.max() ?? 0 : 0
+        return max(creditsEnd, duration - Self.upNextLeadSeconds)
+    }
+
+    /// Shows the Up Next card once playback reaches upNextShowsAt, and takes it away again when you
+    /// go back before that (a seek), without counting that as a cancel.
+    private func updateUpNextBeforeEnd() {
+        guard upNext != nil, settings.autoPlayNext, !askStillWatching, let at = upNextShowsAt else {
+            if countdownUntilEnd { clearUntilEndCountdown() }
+            return
+        }
+        let now = currentSeconds
+        if countdownUntilEnd {
+            if now < at - 1 { clearUntilEndCountdown() }
+            return
+        }
+        guard upNextCountdown == nil, !countdownDismissed, now >= at, now < durationSeconds - 0.5 else { return }
+        // "Are you still watching?" waits for the end of the file instead of stopping it early.
+        if settings.stillWatchingAfter > 0 && autoplayStreak >= settings.stillWatchingAfter { return }
+        countdownTask?.cancel()
+        countdownUntilEnd = true
+        upNextCountdown = secondsToEnd
+        countdownTask = Task { [weak self] in
+            while let self, self.countdownUntilEnd, !Task.isCancelled {
+                self.upNextCountdown = self.secondsToEnd
+                try? await Task.sleep(nanoseconds: 250_000_000)
+            }
+        }
+    }
+
+    /// Whole seconds of the episode left at the current speed (what the Up Next card counts down).
+    private var secondsToEnd: Int {
+        let left = (durationSeconds - currentSeconds) / max(0.25, player.playbackRate)
+        return max(0, Int(left.rounded(.up)))
+    }
+
+    private func clearUntilEndCountdown() {
+        countdownTask?.cancel()
+        countdownUntilEnd = false
+        upNextCountdown = nil
     }
 
     /// Whether a segment ends where the file does (within 5 s), so nothing of the episode follows it.
@@ -1554,6 +1630,12 @@ final class PlaybackController {
 
     private func handleEnded() async {
         guard upNext != nil else { return }
+        // The card has been counting down the end of the file: the next episode starts now.
+        if countdownUntilEnd, upNextCountdown != nil {
+            countdownUntilEnd = false
+            await playNext(auto: true)
+            return
+        }
         if settings.autoPlayNext && !askStillWatching && upNextCountdown == nil && !countdownDismissed { beginCountdown() }
     }
 
@@ -1564,6 +1646,7 @@ final class PlaybackController {
             return
         }
         countdownTask?.cancel()
+        countdownUntilEnd = false
         upNextCountdown = settings.nextUpCountdown
         countdownTask = Task { [weak self] in
             while let self, let left = self.upNextCountdown, left > 0 {
@@ -1579,6 +1662,7 @@ final class PlaybackController {
 
     func cancelCountdown() {
         countdownTask?.cancel()
+        countdownUntilEnd = false
         upNextCountdown = nil
         countdownDismissed = true   // stays on the credits until you pick the next episode yourself
     }
@@ -1591,6 +1675,7 @@ final class PlaybackController {
 
     func playNext(auto: Bool) async {
         countdownTask?.cancel()
+        countdownUntilEnd = false
         upNextCountdown = nil
         guard let next = queue.first else { return }
         autoplayStreak = auto ? autoplayStreak + 1 : 0
@@ -1631,6 +1716,7 @@ final class PlaybackController {
     func playPrevious() async {
         guard let previous = previousEpisode else { return }
         countdownTask?.cancel()
+        countdownUntilEnd = false
         upNextCountdown = nil
         endSession()
         queue.insert(item, at: 0)
@@ -1649,6 +1735,7 @@ final class PlaybackController {
         let after = await model.episodesAfter(episode)
         guard !stopped else { return }
         countdownTask?.cancel()
+        countdownUntilEnd = false
         upNextCountdown = nil
         endSession()
         queue = after

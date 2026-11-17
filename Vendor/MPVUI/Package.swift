@@ -78,8 +78,8 @@ let package = Package(
         // LIBMPV_BINARY_BEGIN (SwiftPM only accepts the zip if its sha256 matches the checksum)
         .binaryTarget(
             name: "Libmpv-GPL",
-            url: "https://raw.githubusercontent.com/HARDWELL9191/AniTrack/libmpv-binaries/libmpv-jr-6/Libmpv.xcframework.zip",
-            checksum: "de5fca736bad59a6e7d4a0cc1d27879d05811b555796b7548af30cfa082612d2"
+            url: "https://raw.githubusercontent.com/HARDWELL9191/AniTrack/libmpv-binaries/libmpv-jr-8/Libmpv.xcframework.zip",
+            checksum: "562d42c314231f45dc14bbb4b99fc49f2aeea40382563476e19204654052c6f8"
         ),
         // LIBMPV_BINARY_END
     ],

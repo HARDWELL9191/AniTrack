@@ -149,6 +149,10 @@ private struct PlayerContent: View {
     @State private var hudTask: Task<Void, Never>?
     @State private var pinch: CGFloat?          // live pinch scale (nil when not pinching)
     @State private var volume = SystemVolume()
+    /// The volume capsule on its own while the controls are hidden (volume buttons, Control Centre),
+    /// like Apple's player; it goes away 1.5 s after the last change.
+    @State private var volumePopup = false
+    @State private var volumePopupTask: Task<Void, Never>?
     @State private var menuOpen = false
 
     enum HUD: Equatable {
@@ -215,6 +219,17 @@ private struct PlayerContent: View {
                     .zIndex(6)
             }
             if let hud { HUDView(hud: hud).allowsHitTesting(false).transition(.opacity).zIndex(7) }
+            if volumePopup && !(showControls || panel != nil || menuOpen) {
+                // Exactly where the controls' volume capsule sits (left of the AirPlay button).
+                VolumeCapsule(volume: volume)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                    .padding(.trailing, (layout.landscape ? 38 : 16) + 44 + 12)
+                    .padding(.top, layout.landscape ? 24 : layout.safe.top + 8)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(!locked)
+                    .transition(.opacity)
+                    .zIndex(7)
+            }
             if controller.askStillWatching { StillWatchingCard(controller: controller, close: close).zIndex(8) }
             VolumeViewHost(volume: volume).frame(width: 1, height: 1).opacity(0.01).allowsHitTesting(false)
         }
@@ -223,6 +238,8 @@ private struct PlayerContent: View {
         .animation(.easeOut(duration: 0.2), value: hud)
         .animation(.snappy, value: panel)
         .animation(.snappy, value: showInfo)
+        .animation(.easeInOut(duration: 0.25), value: volumePopup)
+        .onChange(of: volume.shown) { _, _ in showVolumePopup() }
         // Measured on a view that fills the whole screen, so it sees the real safe area insets.
         .background {
             Color.clear.ignoresSafeArea()
@@ -232,9 +249,22 @@ private struct PlayerContent: View {
         // Battery: the controller ticks quickly only while something is on screen (or due).
         .onChange(of: uiVisible) { _, visible in controller.controlsVisible = visible }
         .onChange(of: controller.activeSegment?.id, initial: true) { _, id in armSkipButton(id) }
-        .onDisappear { skipButtonTask?.cancel() }
+        .onDisappear { skipButtonTask?.cancel(); volumePopupTask?.cancel() }
         .onChange(of: player.isPaused) { _, paused in if paused { hideTask?.cancel() } else { scheduleHide() } }
         .onChange(of: menuOpen) { _, open in if open { hideTask?.cancel() } else { scheduleHide() } }
+    }
+
+    /// A volume change shows the capsule by itself while the controls are hidden (with them up,
+    /// their own capsule moves). Every change keeps it up for another 1.5 s.
+    private func showVolumePopup() {
+        guard !(showControls || panel != nil || menuOpen) || volumePopup else { return }
+        volumePopup = true
+        volumePopupTask?.cancel()
+        volumePopupTask = Task {
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            guard !Task.isCancelled else { return }
+            volumePopup = false
+        }
     }
 
     // MARK: Apple-style controls
@@ -919,8 +949,8 @@ private struct VolumeViewHost: UIViewRepresentable {
     func updateUIView(_ uiView: MPVolumeView, context: Context) {}
 }
 
-/// Apple's volume control: a glass capsule with the speaker icon and a thin white track that
-/// thickens while you drag it, following the hardware buttons live.
+/// Apple's volume control: a glass capsule with the speaker icon and a white track (9 pt, as in
+/// Apple's TV app) that thickens while you drag it, following the hardware buttons live.
 private struct VolumeCapsule: View {
     let volume: SystemVolume
     @State private var dragging = false
@@ -942,7 +972,7 @@ private struct VolumeCapsule: View {
                 Capsule().fill(.white.opacity(0.42))
                 Capsule().fill(.white).frame(width: trackWidth * CGFloat(volume.shown))
             }
-            .frame(width: trackWidth, height: dragging ? 11 : 7.5)
+            .frame(width: trackWidth, height: dragging ? 12.5 : 9)
             .frame(height: 44)
             .contentShape(Rectangle())
             .gesture(
