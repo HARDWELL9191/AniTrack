@@ -1,0 +1,29 @@
+diff --git a/player/audio.c b/player/audio.c
+index 7abb038..e04f595 100644
+--- a/player/audio.c
++++ b/player/audio.c
+@@ -801,11 +801,23 @@ void reload_audio_output(struct MPContext *mpctx)
+         return;
+ 
+     bool pcm_fallback = ao_query_and_reset_events(mpctx->ao, AO_EVENT_PCM_FALLBACK);
++    // JellyReco: the output being retired may also hold seconds of decoded audio
++    // that was never heard (AVSampleBufferAudioRenderer reads far ahead). It is
++    // thrown away with the output while the decoder stays past it, so the new
++    // output would wait silently ("delaying audio start") until the picture
++    // reached the next decoded sample: e.g. ~10 s after AirPods connect, as iOS
++    // restarts the output on a route change. Refill from the audible position
++    // instead, like the compressed fallback below does.
++    bool refill = mpctx->audio_status == STATUS_PLAYING &&
++                  ao_get_delay(mpctx->ao) > 0.25;
++    if (refill)
++        MP_VERBOSE(mpctx, "audio output reload drops %.3f s of queued audio; refilling\n",
++                   ao_get_delay(mpctx->ao));
+     // Native compressed output may have already read several seconds ahead,
+     // including demux EOF. Refill the new PCM decoder from the audible position,
+     // not the demuxer's read head. Queue before retiring the old audio clock and
+     // preserve any user seek that is already pending.
+-    if (pcm_fallback && mpctx->demuxer && mpctx->demuxer->seekable)
++    if ((pcm_fallback || refill) && mpctx->demuxer && mpctx->demuxer->seekable)
+         issue_refresh_seek(mpctx, MPSEEK_EXACT);
+     ao_reset(mpctx->ao);
+     uninit_audio_out(mpctx);
