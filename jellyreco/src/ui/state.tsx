@@ -24,7 +24,9 @@ export type Route =
   | { kind: "studio"; name: string; id?: string }
   | { kind: "dashboard"; page: string; arg?: string }
   | { kind: "liveGuide" }
-  | { kind: "myList" }
+  | { kind: "animeLists" }
+  | { kind: "movieList" }
+  | { kind: "showList" }
   | { kind: "notForMe" };
 
 export type Sheet =
@@ -53,7 +55,7 @@ export interface MenuRequest { x: number; y: number; item: Item; context?: "resu
 
 class UIStore {
   version = 0;
-  stacks: Record<Tab, Route[]> = { home: [], forYou: [], search: [], favorites: [], library: [], myList: [], notForMe: [], settings: [], dashboard: [] };
+  stacks: Record<Tab, Route[]> = { home: [], forYou: [], search: [], favorites: [], library: [], animeLists: [], movieList: [], showList: [], notForMe: [], settings: [], dashboard: [] };
   sheets: Sheet[] = [];
   menu: MenuRequest | null = null;
   private listeners = new Set<() => void>();

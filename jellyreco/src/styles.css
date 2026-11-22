@@ -269,6 +269,11 @@ img { display: block; }
 .because svg { color: var(--pink); fill: var(--pink); }
 .pick-synopsis { color: var(--muted); margin: 4px 0; max-width: 900px; }
 .pick-actions { display: grid; grid-template-columns: repeat(3, minmax(150px, 1fr)); gap: 10px; width: 100%; max-width: 720px; margin-top: 6px; }
+.pick-actions.two { grid-template-columns: repeat(2, minmax(150px, 1fr)); max-width: 560px; }
+.pick-actions .span-2 { grid-column: span 2; }
+.pick-cover .card-badges { top: 10px; left: 10px; }
+/* The cover follows its column (narrower below 1100px wide). */
+.pick-cover > .cover { width: 100% !important; height: auto !important; aspect-ratio: 2 / 3; }
 .building { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 60px; text-align: center; }
 
 /* Details */
@@ -1261,3 +1266,17 @@ html.platform-linux.video-mode .player :is(button, [role="button"], .pd-button, 
 .rate-grid .rate-low { color: var(--low, #ff453a); }
 .anilist-login { display: grid; gap: 12px; width: 100%; }
 .anilist-login code { padding: 1px 6px; border-radius: 6px; background: var(--press); }
+
+/* Anime lists, Movie list, TV Show list (AniReco's rows) */
+.list-controls { margin-bottom: 14px; }
+.list-controls .search-field { max-width: 520px; margin: 0 auto; }
+.list-row { cursor: pointer; padding: 10px; }
+.list-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.list-row .row-title { font-size: 15px; }
+.list-row .row-badges { margin-top: 3px; gap: 12px; }
+.list-row .bubble-age { background: var(--press); color: var(--text); backdrop-filter: none; box-shadow: inset 0 0 0 1px var(--line); }
+.list-row-cloud { color: var(--muted); display: grid; place-items: center; }
+.list-row-more { opacity: 0; transition: opacity 0.12s; }
+.list-row:hover .list-row-more, .list-row:focus-within .list-row-more { opacity: 1; }
+.category-sheet { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; max-height: 60vh; overflow-y: auto; }
+.category-grid { display: flex; flex-wrap: wrap; gap: 8px; padding: 2px 4px 6px; }

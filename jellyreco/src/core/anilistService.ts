@@ -10,7 +10,8 @@
 import {
   type AgeRating, type AniListLibrary, AniListClient, AniListOwnedIndex, type AnimeCategory, type EntryLite, FEATURED, type ListEntry, type ListStatus,
   type Media, type Recommendation, type RecommendationResult, type TitleLanguage, type Viewer, allTitles, anilistTitle, availableEpisodes, categoryId,
-  fingerprint, isAuthError, isLaterSeason, isMovieMedia, isSeasonMedia, kitsuRatings, languageFromOption, ListFranchises, recommend, SeasonRoots, Seasons, seasonChain,
+  fingerprint, groupShows, isAuthError, isLaterSeason, isMovieMedia, isSeasonMedia, kitsuRatings, languageFromOption, ListFranchises, ListMatcher, recommend, SeasonRoots, Seasons, seasonChain,
+  type ShowRow,
 } from "./anilist";
 import { Queries } from "./anilistQueries";
 import type { ExternalPick } from "./discovery";
@@ -89,7 +90,20 @@ export class AniListService {
   private changed() { this.host.notify(); }
   get loggedIn() { return !!this.client.token; }
 
+  private grouped: ((statuses: ListStatus[]) => ShowRow[]) | null = null;
+  readonly matcher = new ListMatcher();
+
+  /** Your list as shows, not seasons (AniReco's Lists). */
+  shows(statuses: ListStatus[]): ShowRow[] {
+    if (!this.grouped) this.grouped = groupShows(this.entries, (id) => this.entry(id));
+    return this.grouped(statuses);
+  }
+  showCount(status: ListStatus) { return this.shows([status]).length; }
+  /** Match % against your AniList list, for any anime. */
+  match(m: Media) { return this.matcher.match(this.entries, m); }
+
   private setEntries(list: ListEntry[]) {
+    this.grouped = null;
     this.entries = list;
     this.byMedia = new Map();
     for (const e of list) if (!this.byMedia.has(e.mediaId)) this.byMedia.set(e.mediaId, e);

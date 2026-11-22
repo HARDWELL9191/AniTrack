@@ -439,7 +439,7 @@ function AniListSettings() {
       <Field label="Titles in">
         <Segmented value={s.anilistTitleLanguage} options={[{ value: "", label: "AniList setting" }, { value: "english", label: "English" }, { value: "romaji", label: "Romaji" }, { value: "native", label: "Native" }]} onChange={(v: string) => set("anilistTitleLanguage", v)} />
       </Field>
-      <p className="muted small">For You on the libraries named Anime and Anime Movies runs on your AniList account, the same way as AniReco and the iPhone app: picks are learned from your AniList list and what fans recommend, My List for anime is your AniList Planning list, Not for me is a private, hidden "Not for me" list on AniList (the one AniReco uses), and Already seen marks a show Completed. Anything already on your server is never picked. These settings are shared with the iPhone app.</p>
+      <p className="muted small">For You on the libraries named Anime and Anime Movies runs on your AniList account, the same way as AniReco and the iPhone app: picks are learned from your AniList list and what fans recommend, Plan to watch puts a show on your AniList Planning list, Not for me is a private, hidden "Not for me" list on AniList (the one AniReco uses), and Already watched marks a show Completed. Anime lists shows your AniList lists. Anything already on your server is never picked. These settings are shared with the iPhone app.</p>
     </Group>
   );
 }

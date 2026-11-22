@@ -60,6 +60,27 @@ export const isMovieMedia = (m: Media) => m.format === "MOVIE";
 export const coverURL = (m: Media) => m.coverImage?.extraLarge ?? m.coverImage?.large ?? null;
 export const visibleTags = (m: Media) => (m.tags ?? []).filter((t) => t.isMediaSpoiler !== true);
 export const availableEpisodes = (m: Media) => (m.nextAiringEpisode ? Math.max(0, m.nextAiringEpisode.episode - 1) : m.status === "FINISHED" ? m.episodes ?? null : null);
+export const thumbURL = (m: Media) => m.coverImage?.large ?? m.coverImage?.extraLarge ?? null;
+/** "TV", "Movie", "OVA"… (AniReco's labels). */
+export function formatLabel(m: Media): string {
+  const known: Record<string, string> = { TV: "TV", TV_SHORT: "TV Short", MOVIE: "Movie", SPECIAL: "Special", OVA: "OVA", ONA: "ONA", MUSIC: "Music" };
+  if (!m.format) return "—";
+  return known[m.format] ?? m.format.charAt(0) + m.format.slice(1).toLowerCase();
+}
+/** "Fall 2023" (or just the year). */
+export function seasonLabel(m: Media): string | null {
+  if (!m.season || !m.seasonYear) return m.seasonYear ? String(m.seasonYear) : null;
+  return `${m.season.charAt(0)}${m.season.slice(1).toLowerCase()} ${m.seasonYear}`;
+}
+/** AniReco's lists, in its order, with their labels and icons. */
+export const LIST_STATUSES: { status: ListStatus; label: string; icon: string }[] = [
+  { status: "CURRENT", label: "Watching", icon: "playFill" },
+  { status: "PLANNING", label: "Planning", icon: "bookmark" },
+  { status: "COMPLETED", label: "Completed", icon: "checkCircleFill" },
+  { status: "PAUSED", label: "Paused", icon: "pauseFill" },
+  { status: "DROPPED", label: "Dropped", icon: "xCircle" },
+  { status: "REPEATING", label: "Rewatching", icon: "repeat" },
+];
 export const allTitles = (m: Media) => [m.title.english, m.title.romaji, m.title.native, m.title.userPreferred].filter((x): x is string => !!x);
 
 export function plainDescription(m: Media): string {
@@ -523,6 +544,21 @@ class TasteProfile {
     for (const [k, x] of v) { vn += x * x; dot += x * (this.features.get(k) ?? 0); }
     return vn > 0 ? dot / (this.norm * Math.sqrt(vn)) : 0;
   }
+  /** Similarity without this show's own share (leave-one-out): a show on your list is matched
+   *  against the rest of your taste, never against itself. */
+  similarityExcluding(m: Media, w: number) {
+    if (w === 0) return this.similarity(m);
+    const v = TasteProfile.vector(m);
+    let vn = 0, dot = 0, normSq = this.norm * this.norm;
+    for (const [k, x] of v) {
+      vn += x * x;
+      const f = this.features.get(k) ?? 0, without = f - x * w;
+      normSq += without * without - f * f;
+      dot += x * without;
+    }
+    if (!(vn > 0) || !(normSq > 1e-9)) return 0;
+    return dot / (Math.sqrt(normSq) * Math.sqrt(vn));
+  }
   highlights(m: Media, limit = 3) {
     return [...TasteProfile.vector(m)].map(([k, x]) => [k, (this.features.get(k) ?? 0) * x] as const).filter(([, w]) => w > 0).sort((a, b) => b[1] - a[1]).slice(0, limit).map(([k]) => k.slice(2));
   }
@@ -783,4 +819,86 @@ export async function kitsuRatings(lookups: { id: number; mal?: number | null }[
   }
   if (toFetch.length) kv.set(KITSU_KEY, JSON.stringify(Object.fromEntries(saved)));
   return { found, failed };
+}
+
+
+/** "Match %" for any anime against your AniList list (AniReco's MatchEngine, the genre/tag
+ *  layer): calibrated on your own list, your score for shows you rated. */
+export class ListMatcher {
+  private profile = new TasteProfile();
+  private weights = new Map<number, number>();
+  private ratings = new Map<number, number>();
+  private scale = { lo: 0, hi: 1 };
+  private memo = new Map<number, number>();
+  private from: ListEntry[] | null = null;
+
+  private rebuild(entries: ListEntry[]) {
+    if (this.from === entries) return;
+    this.from = entries;
+    this.memo.clear();
+    const scored = entries.map((e) => e.score ?? 0).filter((x) => x > 0);
+    const mean = scored.length ? scored.reduce((a, b) => a + b, 0) / scored.length : 70;
+    const spread = scored.length ? Math.sqrt(scored.reduce((a, x) => a + (x - mean) ** 2, 0) / scored.length) : 0;
+    const profile = new TasteProfile();
+    const weights = new Map<number, number>();
+    for (const e of entries) { const w = entryWeight(e, mean, spread); weights.set(e.mediaId, w); if (w !== 0) profile.add(e.media, w); }
+    profile.finalize();
+    this.profile = profile;
+    this.weights = weights;
+    this.ratings = new Map(entries.filter((e) => (e.score ?? 0) > 0).map((e) => [e.mediaId, Math.min(1, (e.score ?? 0) / 100)]));
+    const loo = (e: ListEntry) => profile.similarityExcluding(e.media, weights.get(e.mediaId) ?? 0);
+    const liked = entries.filter((e) => (weights.get(e.mediaId) ?? 0) > 0.5).map(loo).sort((a, b) => a - b);
+    const all = entries.filter((e) => e.status !== "PLANNING").map(loo).sort((a, b) => a - b);
+    const hi = liked.length ? liked[Math.min(liked.length - 1, Math.floor(liked.length * 0.75))] : 0.6;
+    const lo = all.length ? Math.min(all[Math.floor((all.length - 1) * 0.1)], hi * 0.4) : 0;
+    this.scale = { lo, hi: Math.max(hi, lo + 0.05) };
+  }
+
+  match(entries: ListEntry[], m: Media): number | null {
+    this.rebuild(entries);
+    if (!(this.profile.norm > 0)) return null;
+    const hit = this.memo.get(m.id);
+    if (hit !== undefined) return hit;
+    const raw = this.profile.similarityExcluding(m, this.weights.get(m.id) ?? 0);
+    const z = Math.max(-1, Math.min(1, (raw - this.scale.lo) / (this.scale.hi - this.scale.lo)));
+    const rating = this.ratings.get(m.id);
+    const percent = rating !== undefined
+      ? Math.round(20 + 79 * (0.95 * rating + 0.05 * Math.max(0, Math.min(1, z))))
+      : z >= 0 ? Math.round(50 + 49 * Math.min(z, 1)) : Math.round(50 + 30 * z);
+    this.memo.set(m.id, percent);
+    return percent;
+  }
+}
+
+/** One row per show on your lists (AniReco's Lists): later seasons fold into the show's earliest
+ *  season on your list, whichever list each is in. */
+export interface ShowRow { entry: ListEntry; extraSeasons: number; foldedTitles: MediaTitle[] }
+
+export function groupShows(entries: ListEntry[], entry: (mediaId: number) => ListEntry | undefined) {
+  const extra = new Map<number, number>();
+  const titles = new Map<number, MediaTitle[]>();
+  const folded = new Set<number>();
+  for (const e of entries) {
+    if (!isLaterSeason(e.media)) continue;
+    let current = e.media;
+    const visited = new Set<number>([e.mediaId]);
+    let anchor: number | null = null;
+    for (;;) {
+      const previous = prequelId(current);
+      if (previous == null || visited.size >= 15 || visited.has(previous)) break;
+      const earlier = entry(previous);
+      if (!earlier) break;
+      visited.add(previous);
+      if (isSeasonMedia(earlier.media)) anchor = earlier.mediaId;   // the earliest wins
+      current = earlier.media;
+    }
+    if (anchor != null) {
+      folded.add(e.mediaId);
+      extra.set(anchor, (extra.get(anchor) ?? 0) + 1);
+      titles.set(anchor, [...(titles.get(anchor) ?? []), e.media.title]);
+    }
+  }
+  return (statuses: ListStatus[]): ShowRow[] => entries
+    .filter((e) => statuses.includes(e.status) && !folded.has(e.mediaId))
+    .map((e) => ({ entry: e, extraSeasons: extra.get(e.mediaId) ?? 0, foldedTitles: titles.get(e.mediaId) ?? [] }));
 }

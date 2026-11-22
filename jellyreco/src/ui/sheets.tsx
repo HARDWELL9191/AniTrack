@@ -111,9 +111,9 @@ function TmdbSheet({ item, close }: { item: ExternalTitle; close: () => void }) 
             <p>{t.overview}</p>
             {d?.networks.length ? <p className="muted small">{d.networks.join(", ")}</p> : null}
             <div className="row-line wrap">
-              <button className={`glass-button ${onList ? "" : "prominent"}`} onClick={() => void titleAction(model, t, "myList")}><Icon name="bookmark" size={15} /> {onList ? "On My List" : "Add to My List"}</button>
+              <button className={`glass-button ${onList ? "" : "prominent"}`} onClick={() => void titleAction(model, t, "myList")}><Icon name="bookmark" size={15} /> {anilist ? (onList ? "On Planning" : "Plan to watch") : onList ? "On My List" : "Add to My List"}</button>
               {anilist
-                ? <button className="glass-button" disabled={seen} onClick={() => void titleAction(model, t, "seen")}><Icon name="eye" size={15} /> {seen ? "Completed ✓" : "Already seen"}</button>
+                ? <button className="glass-button" disabled={seen} onClick={() => void titleAction(model, t, "seen")}><Icon name="eye" size={15} /> {seen ? "Completed ✓" : "Already watched"}</button>
                 : <button className="glass-button" onClick={() => void titleAction(model, t, seen ? "undoSeen" : "seen")}><Icon name="eye" size={15} /> {seen ? "Seen ✓" : "Already seen"}</button>}
               <button className="glass-button danger" onClick={() => void titleAction(model, t, out ? "undoNotForMe" : "notForMe")}><Icon name="thumbsDown" size={15} /> {out ? "Undo Not for me" : "Not for me"}</button>
               {d?.trailer && <button className="glass-button" onClick={() => void openUrl(d.trailer!)}><Icon name="film" size={15} /> Trailer</button>}

@@ -11,7 +11,7 @@ import { AccountStorage } from "./storage";
 import { Tmdb } from "./tmdb";
 import type { Item, User } from "./types";
 
-export type Tab = "home" | "forYou" | "search" | "favorites" | "library" | "myList" | "notForMe" | "settings" | "dashboard";
+export type Tab = "home" | "forYou" | "search" | "favorites" | "library" | "animeLists" | "movieList" | "showList" | "notForMe" | "settings" | "dashboard";
 
 export interface SavedServer {
   id: string; // Jellyfin server id (or the URL until we know it)

@@ -2,11 +2,11 @@
 // already on your server. First dropdown: the library it learns from (Anime by default, or All);
 // second: a category. My List / Not for me / Already seen are saved in your account (shared with
 // the iPhone). The libraries named Anime and Anime Movies run on your AniList account instead, as in
-// AniReco and on the iPhone: picks from your AniList list, My List = AniList Planning, Not for me on
-// AniList, Already seen = Completed.
+// AniReco and on the iPhone: picks from your AniList list, Plan to watch = AniList Planning, Not for
+// me on AniList, Already watched = Completed (the lists themselves are on Anime lists).
 
 import { type MouseEvent as RMouseEvent, useEffect, useState } from "react";
-import { type AniListLibrary, type AnimeCategory, ageLabel, aniListLibrary, categoryId, FEATURED } from "../core/anilist";
+import { type AniListLibrary, type AnimeCategory, ageLabel, aniListLibrary, categoryId, coverURL, FEATURED, formatLabel, LIST_STATUSES, type Media, plainDescription, type Recommendation, seasonLabel } from "../core/anilist";
 import { feedKey } from "../core/anilistService";
 import { type ExternalPick, kindOf } from "../core/discovery";
 import type { AppModel } from "../core/model";
@@ -15,7 +15,8 @@ import { AccountStorage, setNotForMe } from "../core/storage";
 import { type ExternalTitle, isAniList, isMovie, metaLine, resized, siteName, titleId } from "../core/titles";
 import { Tmdb } from "../core/tmdb";
 import type { Item } from "../core/types";
-import { Chip, Cover, Dropdown, Empty, Field, MatchBubble, PageHeader, Shelf } from "./components";
+import { Chip, Cover, Dropdown, type DropItem, Empty, Field, MatchBubble, PageHeader, Shelf } from "./components";
+import { AniCategoriesModal, aniCategoryItems, ScoreBadge } from "./lists";
 import { ageBucket } from "../core/age";
 import { relativeTime } from "./fmt";
 import { Icon } from "./icons";
@@ -170,21 +171,12 @@ export function ForYouPage({ refreshKey }: { refreshKey: number }) {
   };
 
   const genres = model.discovery.genres(sourceId);
-  // AniList categories (AniReco's): the popular ones first, then every genre and tag.
+  // AniList categories (AniReco's): its popular genres and tags, then "All categories…".
   const allCategories = ani.categories.length ? ani.categories : FEATURED;
-  const featuredIds = new Set(FEATURED.map(categoryId));
-  const aniCategoryItems = [
-    { value: "", label: "Any category", selected: !category },
-    "divider" as const,
-    { section: "Popular" },
-    ...allCategories.filter((c) => featuredIds.has(categoryId(c))).map((c) => ({ value: categoryId(c), label: c.name, selected: !!category && categoryId(c) === categoryId(category) })),
-    ...(allCategories.some((c) => c.kind === "genre" && !featuredIds.has(categoryId(c))) ? [{ section: "More genres" }] : []),
-    ...allCategories.filter((c) => c.kind === "genre" && !featuredIds.has(categoryId(c))).map((c) => ({ value: categoryId(c), label: c.name, selected: !!category && categoryId(c) === categoryId(category) })),
-    ...(allCategories.some((c) => c.kind === "tag" && !featuredIds.has(categoryId(c))) ? [{ section: "Tags" }] : []),
-    ...allCategories.filter((c) => c.kind === "tag" && !featuredIds.has(categoryId(c))).map((c) => ({ value: categoryId(c), label: c.name, selected: !!category && categoryId(c) === categoryId(category) })),
-  ];
+  const [showAllCategories, setShowAllCategories] = useState(false);
   const pickCategory = (id: string) => {
-    setCategory(allCategories.find((c) => categoryId(c) === id) ?? null);
+    if (id === "all") { setShowAllCategories(true); return; }
+    setCategory(id ? allCategories.find((c) => categoryId(c) === id) ?? null : null);
     setIndex(0); setHandled(0);
   };
   const kind = kindOf(source);
@@ -198,6 +190,15 @@ export function ForYouPage({ refreshKey }: { refreshKey: number }) {
     ...genres.map((g) => ({ value: g, label: g, selected: g === genre })),
   ];
 
+  // The list that goes with this library: Anime lists, Movie list or TV Show list (All: pick one).
+  const listRoutes: { kind: "animeLists" | "movieList" | "showList"; label: string; icon: string }[] = [
+    { kind: "animeLists", label: "Anime lists", icon: "list" }, { kind: "movieList", label: "Movie list", icon: "film" }, { kind: "showList", label: "TV Show list", icon: "tv" },
+  ];
+  const listFor = anime ? "animeLists" : source?.collectionType === "movies" ? "movieList" : source?.collectionType === "tvshows" ? "showList" : null;
+  const listsButton = listFor
+    ? <button className="round-button" title={listRoutes.find((r) => r.kind === listFor)!.label} aria-label={listRoutes.find((r) => r.kind === listFor)!.label} onClick={() => navigate({ kind: listFor })}><Icon name="bookmark" size={16} /></button>
+    : <Dropdown compact icon="bookmark" title="Lists" label={null} items={listRoutes.map((r): DropItem<typeof r.kind> => ({ value: r.kind, label: r.label, icon: r.icon }))} onPick={(k) => navigate({ kind: k })} />;
+
   let content;
   if (anime && !ani.loggedIn) content = <AniListConnect library={anime} />;
   else if (anime && !picks.length && building) content = <Building text={category ? `Finding ${category.name} picks: comparing your AniList favourites with what fans recommend.` : `Comparing your AniList favourites with what fans recommend${model.settings.useOnDeviceAI ? ", with on-device AI" : ""}. This only runs when your list changes.`} />;
@@ -207,6 +208,36 @@ export function ForYouPage({ refreshKey }: { refreshKey: number }) {
   else if (!picks.length && building) content = <Building text={status ?? `Comparing what you finished on your server with what's out there${model.settings.useOnDeviceAI ? ", with on-device AI" : ""}.`} />;
   else if (!picks.length && error) content = <Empty icon="info" title="No picks right now" text={error}><button className="glass-button" onClick={() => rebuild()}><Icon name="refresh" size={15} /> Try again</button></Empty>;
   else if (!picks.length) content = <Empty icon="wand" title="No picks right now" text={genre ? `Nothing new in ${genre} right now.` : "Press Try again to look for picks."}><button className="glass-button" onClick={() => rebuild(genre)}><Icon name="refresh" size={15} /> Try again</button></Empty>;
+  else if (anime) {
+    // AniReco's pick card and "More picks" row, on the AniList feed.
+    const recs = ani.picks(anime, category);
+    const key = feedKey(anime, category);
+    const feed = ani.feeds.get(key);
+    const safe = Math.min(index, recs.length - 1);
+    const rec = recs[safe];
+    const loadingMore = ani.loadingMore.has(key);
+    // "Another pick": waits for a round that's about to arrive, wraps only at the true end.
+    const next = () => {
+      const last = safe >= recs.length - 1;
+      if (last && loadingMore) return;
+      const to = last && (feed?.exhausted ?? true) ? 0 : Math.min(safe + 1, recs.length - 1);
+      if (to === 0) setHandled(0);
+      setIndex(to); nearEnd(to);
+    };
+    content = (
+      <>
+        <AniPickCard key={rec.media.id} rec={rec} position={safe + 1 + handled} total={recs.length + handled} moreComing={!(feed?.exhausted ?? true)}
+          onNext={next} onHandled={() => { setHandled((h) => h + 1); nearEnd(safe); }} />
+        {recs.length > 1 && (
+          <Shelf title="More picks">
+            {recs.map((r, i) => <AniMediaCard key={r.media.id} media={r.media} highlighted={i === safe} onClick={() => { setIndex(i); nearEnd(i); }} />)}
+            {(building || loadingMore) && <div className="shelf-spinner"><span className="spinner" /></div>}
+          </Shelf>
+        )}
+        <p className="footnote center-text">{aniFooter(model, anime, category)}</p>
+      </>
+    );
+  }
   else {
     const safe = Math.min(index, picks.length - 1);
     const pick = picks[safe];
@@ -230,20 +261,23 @@ export function ForYouPage({ refreshKey }: { refreshKey: number }) {
       <PageHeader title="For You" subtitle={`New ${what} you don't have yet, picked from what you watch`}>
         <Dropdown label={source?.name ?? "All"} icon={sourceIcon(source)} items={libraryItems} onPick={(v) => model.updateSettings({ forYouLibrary: v })} />
         {anime
-          ? <Dropdown label={category?.name ?? "Any category"} icon="filter" items={aniCategoryItems} onPick={(v: string) => pickCategory(v)} />
+          ? <Dropdown label={category?.name ?? "Any category"} icon="filter" items={aniCategoryItems(model, category)} onPick={(v: string) => pickCategory(v)} />
           : <Dropdown label={genre ?? "Any category"} icon="filter" items={categoryItems} onPick={(v) => pickGenre(v || null)} />}
         <button className="round-button" title="Fresh picks (F5)" aria-label="Fresh picks" disabled={building} onClick={() => { setIndex(0); setHandled(0); rebuild(); }}><Icon name="refresh" size={16} /></button>
-        <button className="round-button" title="My List" aria-label="My List" onClick={() => navigate({ kind: "myList" })}><Icon name="bookmark" size={16} /></button>
+        {listsButton}
       </PageHeader>
       {content}
+      {showAllCategories && <AniCategoriesModal onPick={(c) => { setCategory(c); setIndex(0); setHandled(0); }} close={() => setShowAllCategories(false)} />}
     </div>
   );
 }
 
+/** AniReco's footer. */
 function aniFooter(model: AppModel, library: AniListLibrary, category: AnimeCategory | null) {
   const feed = model.anilist.feeds.get(feedKey(library, category));
-  const viewer = model.anilist.viewer;
-  return `Built ${feed ? relativeTime(feed.generatedAt) : "just now"} from your AniList list${viewer ? ` (${viewer.name})` : ""} and what fans recommend${feed?.usedAI ? ", with on-device AI" : ""}. Nothing here is on your server or your AniList list yet.`;
+  if (!feed) return "";
+  const engine = feed.usedAI ? "fan recommendations, your tags and on-device AI" : "fan recommendations and your tags";
+  return `Built ${relativeTime(feed.generatedAt)} from ${engine}.${feed.exhausted ? " You've seen everything for now. Rate more shows for new picks." : " More picks load automatically as you go."}`;
 }
 
 /** Shown on For You (Anime / Anime Movies) until an AniList account is connected. */
@@ -252,7 +286,7 @@ function AniListConnect({ library }: { library: AniListLibrary }) {
     <div className="panel setup-card">
       <Icon name="sparkles" size={34} />
       <h3>Connect AniList</h3>
-      <p className="muted">{library === "movies" ? "Anime Movies" : "Anime"} picks come from your AniList list, the same way as in AniReco and on the iPhone, and never include anything already on your server. Add to My List puts a show on your AniList Planning list, Not for me goes to a private "Not for me" list on AniList, Already seen marks it Completed.</p>
+      <p className="muted">{library === "movies" ? "Anime Movies" : "Anime"} picks come from your AniList list, the same way as in AniReco and on the iPhone, and never include anything already on your server. Plan to watch puts a show on your AniList Planning list, Not for me goes to a private "Not for me" list on AniList, Already watched marks it Completed. Your AniList lists are on Anime lists.</p>
       <AniListLogin />
     </div>
   );
@@ -356,7 +390,7 @@ export function ExternalAgeBubble({ t }: { t: ExternalTitle }) {
 }
 
 /** Kitsu's age rating on an AniList cover (as in AniReco), looked up in batches as covers appear. */
-function AniListAgeBubble({ id }: { id: number }) {
+export function AniListAgeBubble({ id }: { id: number }) {
   const model = useModel();
   useEffect(() => { model.anilist.requestAge(id); }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
   const label = ageLabel(model.anilist.ages.get(id));
@@ -429,6 +463,89 @@ function PickCard({ pick, position, total, noun, onNext, onHandled }: { pick: Ex
           <button className="glass-button" onClick={details}><Icon name="info" size={16} /> Details</button>
           <button className="glass-button danger" onClick={() => { onHandled(); void titleAction(model, t, "notForMe"); }}><Icon name="thumbsDown" size={16} /> Not for me</button>
           <button className="glass-button" onClick={() => { onHandled(); void titleAction(model, t, "seen"); }}><Icon name="eye" size={16} /> Already seen</button>
+          <button className="glass-button" onClick={details}><Icon name="layers" size={16} /> More like this</button>
+          <button className="glass-button" onClick={onNext}><Icon name="shuffle" size={16} /> Another pick</button>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+/** AniReco's cover card: match bottom left, age top left, your list's status top right, then the
+ *  title and the score. */
+function AniMediaCard({ media, highlighted, onClick, width = 140 }: { media: Media; highlighted?: boolean; onClick: () => void; width?: number }) {
+  const model = useModel();
+  const ani = model.anilist;
+  const match = ani.match(media);
+  const entry = ani.entry(media.id);
+  const status = entry && LIST_STATUSES.find((s) => s.status === entry.status);
+  return (
+    <div className={`card ${highlighted ? "highlighted" : ""}`} style={{ width, ["--ar" as string]: "2 / 3" }}>
+      <button className="card-cover" onClick={onClick} title={ani.titleOf(media)}>
+        <Cover url={coverURL(media) ?? undefined} width={width} height={Math.round(width * 1.45)} radius={12} icon="tv" style={media.coverImage?.color ? { background: `${media.coverImage.color}40` } : undefined} />
+        <div className="card-badges"><AniListAgeBubble id={media.id} /></div>
+        {match != null && <div className="card-match"><MatchBubble value={match} /></div>}
+        {status && <div className="card-badge-tr glass-icon" title={status.label}><Icon name={status.icon} size={15} /></div>}
+      </button>
+      <div className="card-title">{ani.titleOf(media)}</div>
+      <ScoreBadge score={media.averageScore} />
+    </div>
+  );
+}
+
+/** AniReco's pick card, word for word: "Pick N", match %, facts, score, "Because you liked", chips,
+ *  synopsis, "Why would I like this?", then Plan to watch / Details, Not for me / Already watched,
+ *  More like this / Another pick. */
+function AniPickCard({ rec, position, total, moreComing, onNext, onHandled }: { rec: Recommendation; position: number; total: number; moreComing: boolean; onNext: () => void; onHandled: () => void }) {
+  const model = useModel();
+  const ani = model.anilist;
+  const m = rec.media;
+  const t = ani.title(m);
+  const [adding, setAdding] = useState(false);
+  const [added, setAdded] = useState(false);
+  const details = () => ui.openSheet({ kind: "tmdb", item: t });
+  const meta = [formatLabel(m), m.episodes ? `${m.episodes} eps` : null, seasonLabel(m)].filter(Boolean).join(" · ");
+  const back = m.bannerImage;
+  const tint = m.coverImage?.color;
+  // Tinted by the show's own cover colour (AniReco), with AniList's banner behind when it has one.
+  const style = {
+    ...(tint ? { ["--show-tint" as string]: tint } : {}),
+    ...(back ? { backgroundImage: `linear-gradient(90deg, var(--pick-fade) 35%, transparent), url("${back}")`, backgroundSize: "cover", backgroundPosition: "center" } : {}),
+  };
+  const plan = async () => {
+    setAdding(true);
+    try { if (await ani.planToWatch(m)) { setAdded(true); model.toast("Added to your AniList Planning list", "success"); onHandled(); } }
+    finally { setAdding(false); }
+  };
+  const watched = async () => {
+    // Only counts as handled if AniList saved it (else it stays put).
+    if (await ani.markCompleted(m)) { onHandled(); if (ani.ratePrompt) ui.openSheet({ kind: "anilistRate", media: ani.ratePrompt }); }
+  };
+  const canPlan = ani.loggedIn && !ani.entry(m.id);
+  return (
+    <article className="pick panel" style={style}>
+      <div className="pick-cover" onClick={details}>
+        <Cover url={coverURL(m) ?? undefined} width={230} height={345} radius={18} icon="tv" />
+        <div className="card-badges"><AniListAgeBubble id={m.id} /></div>
+      </div>
+      <div className="pick-body">
+        <div className="muted small">{moreComing ? `Pick ${position}` : `Pick ${position} of ${total}`}</div>
+        <h2>{ani.titleOf(m)}</h2>
+        {/* The same match % as everywhere else (the pick's own rank only while your list loads). */}
+        <div className="pick-match">{ani.match(m) ?? rec.match}% match</div>
+        <div className="muted small">{meta}</div>
+        <ScoreBadge score={m.averageScore} />
+        {rec.because.length > 0 && <div className="because"><Icon name="heart" size={16} /> <span>Because you liked <strong>{rec.because.join(", ")}</strong></span></div>}
+        {rec.highlights.length > 0 && <div className="chips-wrap">{rec.highlights.map((h) => <Chip key={h} text={h} />)}</div>}
+        <p className="pick-synopsis clamp-6">{plainDescription(m)}</p>
+        <button className="glass-button" onClick={() => ui.openSheet({ kind: "why", item: { Id: titleId(t), Name: t.title, Type: "Series" }, because: rec.because, highlights: rec.highlights })}><Icon name="sparkles" size={16} /> Why would I like this?</button>
+        <div className="pick-actions two">
+          {canPlan || added
+            ? <button className="glass-button prominent" disabled={adding || added} onClick={() => void plan()}><Icon name={added ? "check" : "bookmark"} size={16} /> {added ? "Added" : "Plan to watch"}</button>
+            : null}
+          <button className={`glass-button ${canPlan || added ? "" : "span-2"}`} onClick={details}><Icon name="info" size={16} /> Details</button>
+          <button className="glass-button danger" onClick={() => { onHandled(); ani.dismiss(m); model.toast("Won't be suggested again (saved on AniList)", "success"); }}><Icon name="thumbsDown" size={16} /> Not for me</button>
+          {ani.loggedIn && <button className="glass-button" onClick={() => void watched()}><Icon name="eye" size={16} /> Already watched</button>}
           <button className="glass-button" onClick={details}><Icon name="layers" size={16} /> More like this</button>
           <button className="glass-button" onClick={onNext}><Icon name="shuffle" size={16} /> Another pick</button>
         </div>

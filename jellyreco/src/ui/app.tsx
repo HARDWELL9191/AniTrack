@@ -20,7 +20,7 @@ import { SettingsPage } from "./settings";
 import { Sheets } from "./sheets";
 import { type Route, ui, useModel, useUI } from "./state";
 import { WelcomePage } from "./welcome";
-import { listCounts, MyListPage, NotForMePage } from "./lists";
+import { AnimeListsPage, listCounts, NotForMePage, TitleListPage } from "./lists";
 import { Cover, Modal, Spinner } from "./components";
 
 const MAIN_TABS: { id: Tab; label: string; icon: string }[] = [
@@ -95,7 +95,7 @@ export function App() {
   const counts = listCounts(model);
   const user = model.user!;
   const library = model.views.find((v) => v.Id === model.libraryId);
-  const tabs: Tab[] = ["home", "forYou", "search", "favorites", "library", "myList", "notForMe", "settings", ...(model.isAdmin ? ["dashboard" as Tab] : [])];
+  const tabs: Tab[] = ["home", "forYou", "search", "favorites", "library", "animeLists", "movieList", "showList", "notForMe", "settings", ...(model.isAdmin ? ["dashboard" as Tab] : [])];
 
   return (
     <>
@@ -116,8 +116,14 @@ export function App() {
               </button>
             ))}
             {/* Your For You lists, as on the iPhone's Library tab (saved on the server). */}
-            <button className={`nav-item ${model.tab === "myList" ? "on" : ""}`} onClick={() => select("myList")}>
-              <Icon name="bookmark" size={20} /> <span className="nav-label">My List</span>{counts.myList > 0 && <span className="nav-count">{counts.myList}</span>}
+            <button className={`nav-item ${model.tab === "animeLists" ? "on" : ""}`} onClick={() => select("animeLists")}>
+              <Icon name="list" size={20} /> <span className="nav-label">Anime lists</span>{counts.anime > 0 && <span className="nav-count">{counts.anime}</span>}
+            </button>
+            <button className={`nav-item ${model.tab === "movieList" ? "on" : ""}`} onClick={() => select("movieList")}>
+              <Icon name="film" size={20} /> <span className="nav-label">Movie list</span>{counts.movies > 0 && <span className="nav-count">{counts.movies}</span>}
+            </button>
+            <button className={`nav-item ${model.tab === "showList" ? "on" : ""}`} onClick={() => select("showList")}>
+              <Icon name="tv" size={20} /> <span className="nav-label">TV Show list</span>{counts.shows > 0 && <span className="nav-count">{counts.shows}</span>}
             </button>
             <button className={`nav-item ${model.tab === "notForMe" ? "on" : ""}`} onClick={() => select("notForMe")}>
               <Icon name="thumbsDown" size={20} /> <span className="nav-label">Not for me</span>{counts.notForMe > 0 && <span className="nav-count">{counts.notForMe}</span>}
@@ -146,7 +152,9 @@ export function App() {
                   {t === "search" && <SearchPage />}
                   {t === "favorites" && <FavoritesPage refreshKey={refresh} />}
                   {t === "library" && library && <LibraryPage key={library.Id} view={library} refreshKey={refresh} />}
-                  {t === "myList" && <MyListPage />}
+                  {t === "animeLists" && <AnimeListsPage />}
+                  {t === "movieList" && <TitleListPage kind="movies" />}
+                  {t === "showList" && <TitleListPage kind="shows" />}
                   {t === "notForMe" && <NotForMePage />}
                   {t === "settings" && <SettingsPage />}
                   {t === "dashboard" && model.isAdmin && <DashboardRoot />}
@@ -195,7 +203,9 @@ function RoutePage({ route, back, refreshKey }: { route: Route; back: () => void
     case "studio": return <StudioPage name={route.name} id={route.id} back={back} />;
     case "dashboard": return <DashboardPage page={route.page} arg={route.arg} back={back} />;
     case "liveGuide": return <LiveGuidePage back={back} />;
-    case "myList": return <MyListPage back={back} />;
+    case "animeLists": return <AnimeListsPage back={back} />;
+    case "movieList": return <TitleListPage kind="movies" back={back} />;
+    case "showList": return <TitleListPage kind="shows" back={back} />;
     case "notForMe": return <NotForMePage back={back} />;
   }
 }

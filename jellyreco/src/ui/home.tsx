@@ -119,7 +119,7 @@ function MyListShelf({ refreshKey }: { refreshKey: number }) {
   const c = model.discoveryContext();
   if (!data?.length) return null;
   return (
-    <Shelf title="My List" icon="bookmark" action={{ label: "See all", run: () => { model.tab = "myList"; model.notify(); } }}>
+    <Shelf title="My List" icon="bookmark">
       {data.map((x) => {
         if (x.item) return <ItemCard key={entryId(x.e)} item={x.item} />;
         if (!x.e.external) return null;
