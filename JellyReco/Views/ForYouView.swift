@@ -15,12 +15,35 @@ struct ForYouView: View {
     @State private var detail: ExternalTitle?
     /// AniList category (Anime / Anime Movies libraries).
     @State private var aniCategory: AnimeCategory?
+    @State private var showAllCategories = false
 
     private var discovery: DiscoveryEngine { model.discovery }
     private var anilist: AniListService { model.anilist }
     private var sourceId: String { model.reco.currentSourceId }
     /// Set when the chosen library is Anime or Anime Movies: For You runs on AniList.
     private var aniLibrary: AniListLibrary? { AniListLibrary(libraryName: model.reco.source(sourceId)?.name) }
+
+    /// The bookmark opens the list for this library: Anime lists, Movie list or TV Show list
+    /// (a mixed library or All asks which).
+    @ViewBuilder
+    private var listsButton: some View {
+        let filled = !(model.myList.isEmpty && model.anilist.planning.isEmpty)
+        let image = Image(systemName: filled ? "bookmark.fill" : "bookmark")
+        if aniLibrary != nil {
+            NavigationLink(value: ScreenLink.animeLists) { image }.accessibilityLabel("Anime lists")
+        } else if model.reco.source(sourceId)?.collectionType == "movies" {
+            NavigationLink(value: ScreenLink.movieList) { image }.accessibilityLabel("Movie list")
+        } else if model.reco.source(sourceId)?.collectionType == "tvshows" {
+            NavigationLink(value: ScreenLink.showList) { image }.accessibilityLabel("TV Show list")
+        } else {
+            Menu {
+                Button("Anime lists", systemImage: "list.bullet.rectangle") { path.append(ScreenLink.animeLists) }
+                Button("Movie list", systemImage: "film.stack") { path.append(ScreenLink.movieList) }
+                Button("TV Show list", systemImage: "tv") { path.append(ScreenLink.showList) }
+            } label: { image }
+            .accessibilityLabel("My lists")
+        }
+    }
     private var list: [ExternalPick] {
         if let aniLibrary { return anilist.externalPicks(aniLibrary, aniCategory) }
         return discovery.visiblePicks(for: sourceId, genre: genre)
@@ -39,12 +62,7 @@ struct ForYouView: View {
             .navigationTitle("For You")
             .toolbarTitleDisplayMode(.inlineLarge)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    NavigationLink(value: ScreenLink.myList) {
-                        Image(systemName: model.myList.isEmpty && model.anilist.planning.isEmpty ? "bookmark" : "bookmark.fill")
-                    }
-                    .accessibilityLabel("My List")
-                }
+                ToolbarItem(placement: .topBarTrailing) { listsButton }
             }
             .refreshable {
                 index = 0
@@ -124,30 +142,22 @@ struct ForYouView: View {
         .padding(.vertical, 4)
     }
 
-    /// AniReco's categories: the popular ones first, then every AniList genre and tag.
+    /// AniReco's category dropdown: popular genres and tags, then "All categories…".
     private var aniCategoryMenu: some View {
-        let all = anilist.categories.isEmpty ? AnimeCategory.featured : anilist.categories
-        let featured = all.filter { AnimeCategory.featured.contains($0) }
-        let genres = all.filter { $0.kind == .genre && !featured.contains($0) }
-        let tags = all.filter { $0.kind == .tag && !featured.contains($0) }
-        func row(_ c: AnimeCategory) -> some View {
-            Button { aniCategory = c } label: {
-                if aniCategory == c { Label(c.name, systemImage: "checkmark") } else { Text(c.name) }
-            }
-        }
-        return Menu {
-            Button { aniCategory = nil } label: {
-                if aniCategory == nil { Label("Any category", systemImage: "checkmark") } else { Text("Any category") }
-            }
-            Divider()
-            Section("Popular") { ForEach(featured) { row($0) } }
-            if !genres.isEmpty { Menu("More genres") { ForEach(genres) { row($0) } } }
-            if !tags.isEmpty { Menu("Tags") { ForEach(tags) { row($0) } } }
+        Menu {
+            AniCategoryMenuItems(selected: $aniCategory, showAll: $showAllCategories)
         } label: {
             DropdownLabel(text: aniCategory?.name ?? "Any category", symbol: "line.3.horizontal.decrease")
         }
         .menuStyle(.button)
         .buttonStyle(.glass)
+        .sheet(isPresented: $showAllCategories) {
+            AniAllCategoriesSheet { picked in
+                aniCategory = picked
+                showAllCategories = false
+            }
+            .presentationDetents([.medium, .large])
+        }
     }
 
     private func genreMenu(_ genres: [String]) -> some View {
@@ -215,12 +225,18 @@ struct ForYouView: View {
         if !anilist.isLoggedIn {
             AniListConnectCard(library: library)
                 .padding(.horizontal)
-        } else if picks.isEmpty && (anilist.isBuilding(library, aniCategory) || anilist.isLoggingIn || !anilist.listLoadedOnce) {
+        } else if picks.isEmpty && (anilist.isLoggingIn || !anilist.listLoadedOnce) {
             VStack(spacing: 14) {
                 ProgressView()
-                Text(aniCategory.map { "Finding \($0.name) picks for you…" } ?? "Reading your AniList…").font(.headline)
+                Text("Loading your list…").font(.headline)
+            }
+            .padding(40)
+        } else if picks.isEmpty && anilist.isBuilding(library, aniCategory) {
+            VStack(spacing: 14) {
+                ProgressView()
+                Text(aniCategory.map { "Finding \($0.name) picks for you…" } ?? "Hoshi is reading your list…").font(.headline)
                 Text(model.settings.useOnDeviceAI
-                     ? "Comparing your favorites with what fans recommend, with on-device AI. This only runs when your list changes."
+                     ? "Comparing your favorites with on-device AI. This only runs when your list changes."
                      : "Comparing your favorites with what fans recommend.")
                     .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
             }
@@ -237,13 +253,13 @@ struct ForYouView: View {
             ContentUnavailableView {
                 Label("No picks yet", systemImage: "wand.and.stars")
             } description: {
-                Text(aniCategory == nil ? "Rate a few shows on your AniList, then try again."
+                Text(aniCategory == nil ? "Rate a few shows on your list, then refresh."
                                         : "Nothing new in \(aniCategory!.name) right now. Try another category.")
             } actions: {
                 aniTryAgain(library)
             }
         } else {
-            pickList(picks, loadingMore: anilist.isLoadingMore(library, aniCategory))
+            aniPickList(library)
             Text(aniFooter(library))
                 .font(.caption2)
                 .foregroundStyle(.secondary)
@@ -262,11 +278,80 @@ struct ForYouView: View {
         .buttonStyle(.glass)
     }
 
+    /// AniReco's footer.
     private func aniFooter(_ library: AniListLibrary) -> String {
+        guard let feed = anilist.feed(library, aniCategory) else { return "" }
+        let when = feed.generatedAt.formatted(.relative(presentation: .named))
+        let engine = feed.usedOnDeviceAI ? "fan recommendations, your tags and on-device AI" : "fan recommendations and your tags"
+        var text = "Built \(when) from \(engine)."
+        text += feed.exhausted ? " You've seen everything for now. Rate more shows for new picks."
+                               : " More picks load automatically as you go."
+        return text
+    }
+
+    /// AniReco's pick card and "More picks" row, on the AniList feed.
+    @ViewBuilder
+    private func aniPickList(_ library: AniListLibrary) -> some View {
+        let picks = anilist.picks(library, aniCategory)
         let feed = anilist.feed(library, aniCategory)
-        let when = feed.map { $0.generatedAt.formatted(.relative(presentation: .named)) } ?? "just now"
-        let ai = feed?.usedOnDeviceAI == true ? " and on-device AI" : ""
-        return "Built \(when) from your AniList list\(anilist.viewer.map { " (\($0.name))" } ?? ""), what fans recommend\(ai). Nothing here is on your server or your AniList list yet."
+        let safe = min(index, picks.count - 1)
+        let shown = picks[safe]
+        AniListPickCard(rec: shown,
+                        position: safe + 1 + handled,
+                        total: picks.count + handled,
+                        moreComing: !(feed?.exhausted ?? true),
+                        noun: library.noun,
+                        onNext: { aniNext(from: safe, library) },
+                        onDismiss: {
+                            handled += 1
+                            withAnimation(.snappy) { anilist.dismiss(shown.media) }
+                            preloadAniList(at: safe)
+                        },
+                        onWatched: {
+                            handled += 1
+                            preloadAniList(at: safe)
+                        },
+                        onDetails: { detail = anilist.title(for: shown.media) })
+            .id(shown.id)
+            .transition(.asymmetric(insertion: .move(edge: .trailing).combined(with: .opacity),
+                                    removal: .move(edge: .leading).combined(with: .opacity)))
+            .padding(.horizontal)
+
+        if picks.count > 1 {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("More picks").font(.title3.bold()).padding(.horizontal)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(alignment: .top, spacing: 12) {
+                        ForEach(Array(picks.enumerated()), id: \.element.id) { offset, rec in
+                            Button { withAnimation(.snappy) { index = offset } } label: {
+                                AniListMediaCard(media: rec.media, width: 96)
+                            }
+                            .buttonStyle(PressStyle())
+                            .onAppear { if offset >= picks.count - 3 { preloadAniList(at: offset) } }
+                        }
+                        if anilist.isLoadingMore(library, aniCategory) { ProgressView().frame(width: 96, height: 140) }
+                    }
+                    .padding(.horizontal)
+                }
+                .scrollClipDisabled()
+            }
+        }
+    }
+
+    /// AniReco's "Another pick": waits for a round that's about to arrive, wraps only at the true end.
+    private func aniNext(from current: Int, _ library: AniListLibrary) {
+        let count = anilist.picks(library, aniCategory).count
+        let isLast = current >= count - 1
+        if isLast && anilist.isLoadingMore(library, aniCategory) { return }
+        withAnimation(.snappy) {
+            if isLast && (anilist.feed(library, aniCategory)?.exhausted ?? true) {
+                index = 0
+                handled = 0
+            } else {
+                index = min(current + 1, count - 1)
+            }
+        }
+        preloadAniList(at: index)
     }
 
     /// The pick card and the "More picks" row (TMDB and AniList picks alike).

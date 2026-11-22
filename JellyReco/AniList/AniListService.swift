@@ -23,8 +23,12 @@ final class AniListService {
         didSet {
             entryIndex = Dictionary(entries.indices.map { (entries[$0].mediaId, $0) }, uniquingKeysWith: { a, _ in a })
             franchises = ListFranchises(entries.map(\.media))
+            grouping = nil
+            matcher.update(entries: entries)
         }
     }
+    /// Match % for any anime (AniReco's MatchEngine), for the Anime lists.
+    let matcher = AniListMatchEngine()
     @ObservationIgnored private var entryIndex: [Int: Int] = [:]
     @ObservationIgnored private(set) var franchises = ListFranchises()
     private(set) var isLoadingList = false
@@ -59,7 +63,10 @@ final class AniListService {
 
     private let defaults = UserDefaults.standard
 
-    func attach(model: AppModel) { self.model = model }
+    func attach(model: AppModel) {
+        self.model = model
+        matcher.aiEnabled = { [weak model] in (model?.settings.useOnDeviceAI ?? true) && SemanticEngine.shouldRunNow }
+    }
 
     // MARK: Account
 
@@ -139,6 +146,15 @@ final class AniListService {
 
     /// Forgets everything of the current AniList account in memory (saved picks stay on disk,
     /// per AniList account, so logging back in is instant).
+    #if DEBUG
+    /// UI tests only: a made-up AniList list, as if signed in (no account, no writes).
+    func injectForTesting(entries list: [ListEntry]) {
+        isLoggedIn = true
+        listLoadedOnce = true
+        entries = list
+    }
+    #endif
+
     private func clearState(keepAccount: Bool = false) {
         if !keepAccount { accountKey = nil }
         useToken(nil)
@@ -266,6 +282,61 @@ final class AniListService {
     }
 
     func isPlanned(_ mediaId: Int) -> Bool { entry(for: mediaId)?.status == .PLANNING }
+
+    // MARK: Shows (AniReco's Lists)
+
+    struct ShowRow: Identifiable {
+        let entry: ListEntry
+        /// The show's other seasons on your list, folded under this row.
+        let extraSeasons: Int
+        /// Their titles (so the filter finds the show by any season's name).
+        let foldedTitles: [MediaTitle]
+        var id: Int { entry.id }
+    }
+
+    private struct Grouping {
+        var folded: Set<Int> = []
+        var extra: [Int: Int] = [:]
+        var titles: [Int: [MediaTitle]] = [:]
+    }
+    @ObservationIgnored private var grouping: Grouping?
+
+    /// Your list as shows, not seasons (as in AniReco): every later season is folded into the
+    /// show's earliest season on your list, whichever list each one is in.
+    func shows(in statuses: [ListStatus]) -> [ShowRow] {
+        let wanted = Set(statuses)
+        let g = grouping ?? makeGrouping()
+        return entries
+            .filter { wanted.contains($0.status) && !g.folded.contains($0.mediaId) }
+            .map { ShowRow(entry: $0, extraSeasons: g.extra[$0.mediaId] ?? 0, foldedTitles: g.titles[$0.mediaId] ?? []) }
+    }
+
+    func showCount(of status: ListStatus) -> Int { shows(in: [status]).count }
+
+    private func makeGrouping() -> Grouping {
+        var extra: [Int: Int] = [:]
+        var titles: [Int: [MediaTitle]] = [:]
+        var folded: Set<Int> = []
+        for e in entries where e.media.isLaterSeason {
+            var current = e.media
+            var visited: Set<Int> = [e.mediaId]
+            var anchor: Int?
+            while let previous = current.prequelId, visited.count < 15, !visited.contains(previous),
+                  let earlier = entry(for: previous) {
+                visited.insert(previous)
+                if earlier.media.isSeason { anchor = earlier.mediaId }   // the earliest wins
+                current = earlier.media
+            }
+            if let anchor {
+                folded.insert(e.mediaId)
+                extra[anchor, default: 0] += 1
+                titles[anchor, default: []].append(e.media.title)
+            }
+        }
+        let result = Grouping(folded: folded, extra: extra, titles: titles)
+        grouping = result
+        return result
+    }
 
     /// Your AniList Planning list, newest first (My List shows it).
     var planning: [ListEntry] {

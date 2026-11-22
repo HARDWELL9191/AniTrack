@@ -37,6 +37,8 @@ struct UITestHost: View {
             Color.clear
             if mode == "anilist-reco" {
                 AniListRecoTestHost()
+            } else if mode.hasPrefix("lists-") {
+                ListsScreensHost(mode: mode)
             } else if mode == "subrender" {
                 SubtitleRenderHost(settings: model.settings)
             } else if mode == "fonttest" {
@@ -276,5 +278,72 @@ private struct FontFallbackHost: View {
         }
         status = "READY " + ct.joined(separator: " || ") + " || fonts=\(SubtitleFonts.prepare().map { "\($0.family) @ \((try? FileManager.default.contentsOfDirectory(atPath: $0.directory))?.joined(separator: ",") ?? "")" } ?? "none") || "
             + log.lines.joined(separator: " || ")
+    }
+}
+
+
+/// UI test only: the Anime lists, Movie list and the AniReco pick card on a made-up list of real
+/// AniList shows (no account, nothing saved), for screenshots.
+private struct ListsScreensHost: View {
+    @Environment(AppModel.self) private var model
+    let mode: String
+    @State private var pick: Recommendation?
+    @State private var status = "loading"
+
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            if status == "ready" {
+                switch mode {
+                case "lists-anime": NavigationStack { AnimeListsView() }
+                case "lists-movies": NavigationStack { TitleListView(kind: .movies) }
+                default:
+                    if let pick {
+                        ScrollView {
+                            AniListPickCard(rec: pick, position: 3, total: 40, moreComing: true, noun: "anime",
+                                            onNext: {}, onDismiss: {}, onWatched: {}, onDetails: {})
+                                .padding(.horizontal)
+                            AniListMediaCard(media: pick.media).padding()
+                        }
+                    }
+                }
+            }
+            Text("LISTS \(status)").font(.system(size: 6)).foregroundStyle(.gray).accessibilityIdentifier("lists-state")
+        }
+        .task { await setUp() }
+    }
+
+    private func setUp() async {
+        let client = AniListClient()
+        let vars: [String: Any] = ["page": 1, "perPage": 30, "sort": ["POPULARITY_DESC"], "isAdult": false]
+        guard let page = try? await client.run(Queries.browse, variables: vars, as: PageData.self), page.page.media.count >= 12 else {
+            status = "FAIL: AniList didn't answer"
+            return
+        }
+        let media = page.page.media
+        let statuses: [ListStatus] = [.PLANNING, .PLANNING, .COMPLETED, .CURRENT, .PLANNING, .COMPLETED, .PAUSED, .DROPPED]
+        let now = Int(Date().timeIntervalSince1970)
+        let entries = media.enumerated().map { i, m in
+            ListEntry(id: -(i + 1), mediaId: m.id, status: statuses[i % statuses.count],
+                      score: statuses[i % statuses.count] == .COMPLETED ? Double(70 + i) : nil,
+                      progress: nil, updatedAt: now - i * 3600, media: m, createdAt: now - i * 7200)
+        }
+        #if DEBUG
+        model.anilist.injectForTesting(entries: entries)
+        let movies: [(String, Int, [String])] = [("Smile", 2022, ["Horror", "Mystery"]), ("Arrival", 2016, ["Drama", "Science Fiction"]),
+                                                  ("The Grand Budapest Hotel", 2014, ["Comedy", "Drama"]), ("Hereditary", 2018, ["Horror"])]
+        model.injectMyListForTesting(movies.enumerated().map { i, m in
+            MyListEntry(external: ExternalTitle(source: .tmdbMovie, sourceId: 1000 + i, title: m.0, originalTitle: nil,
+                                                originalLanguage: "en", year: m.1, overview: "", genres: m.2,
+                                                posterURL: nil, backdropURL: nil, score: 6.5 + Double(i) * 0.5,
+                                                voteCount: 1000, popularity: 50, episodes: nil, seasons: nil, runtime: 110,
+                                                imdbId: nil, tvdbId: nil, status: nil, ageRating: i % 2 == 0 ? "R" : "PG-13",
+                                                ageRatingCountry: "US", format: nil))
+        })
+        #endif
+        if let m = media.dropFirst(10).first {
+            pick = Recommendation(media: m, score: 1, match: 87, because: [media[2].displayTitle(.english), media[5].displayTitle(.english)],
+                                  sharedHighlights: Array((m.genres ?? []).prefix(3)))
+        }
+        status = "ready"
     }
 }

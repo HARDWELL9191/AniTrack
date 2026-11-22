@@ -18,8 +18,17 @@ struct LibrariesView: View {
                         }
                         .buttonStyle(PressStyle())
                     }
-                    NavigationLink(value: ScreenLink.myList) {
-                        SymbolTile(title: "My List", symbol: "bookmark.fill", tint: Theme.accent)
+                    // My List, split three ways: anime (your AniList lists), movies and TV shows.
+                    NavigationLink(value: ScreenLink.animeLists) {
+                        SymbolTile(title: "Anime lists", symbol: "list.bullet.rectangle.fill", tint: Theme.accent)
+                    }
+                    .buttonStyle(PressStyle())
+                    NavigationLink(value: ScreenLink.movieList) {
+                        SymbolTile(title: "Movie list", symbol: "film.stack.fill", tint: Theme.accent)
+                    }
+                    .buttonStyle(PressStyle())
+                    NavigationLink(value: ScreenLink.showList) {
+                        SymbolTile(title: "TV Show list", symbol: "tv.fill", tint: Theme.accent)
                     }
                     .buttonStyle(PressStyle())
                     NavigationLink(value: ScreenLink.notForMe) {

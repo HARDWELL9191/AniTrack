@@ -254,6 +254,16 @@ actor SemanticEngine {
         acc = vDSP.add(multiplication: (a: v, b: scale), acc)
     }
 
+    /// Vectors already analysed (from the cache on disk): never loads the model.
+    func cachedVectors(for inputs: [Input]) -> [String: [Float]] {
+        loadCacheIfPresent()
+        var result: [String: [Float]] = [:]
+        for item in inputs {
+            if let cached = cache[Self.stableKey(item.key)] { result[item.key] = cached }
+        }
+        return result
+    }
+
     /// Unit vectors for the inputs; the model loads only if something is new.
     func vectors(for inputs: [Input]) async -> [String: [Float]] {
         loadCacheIfPresent()

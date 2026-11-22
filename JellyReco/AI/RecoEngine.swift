@@ -686,6 +686,9 @@ final class RecoEngine {
 
     func libraryId(of itemId: String) -> String? { itemLibrary[itemId] }
 
+    /// A movie or show on the server by id (nil while the library isn't read yet).
+    func libraryItem(_ id: String) -> BaseItem? { byId[id] }
+
     func source(_ id: String) -> Source? { sources.first { $0.id == id } }
 
     /// Titles you loved most (for explanations).

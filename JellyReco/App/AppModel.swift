@@ -585,6 +585,11 @@ final class AppModel {
         (item.kind == .episode || item.kind == .season) ? (item.seriesId ?? item.id) : item.id
     }
 
+    #if DEBUG
+    /// UI tests only: a made-up My List (never saved).
+    func injectMyListForTesting(_ list: [MyListEntry]) { myList = list }
+    #endif
+
     func isOnMyList(_ item: BaseItem) -> Bool { myList.contains { $0.serverId == listId(item) } }
     func isOnMyList(_ t: ExternalTitle) -> Bool {
         if let id = t.anilistId { return anilist.isPlanned(id) }   // My List for anime = AniList Planning

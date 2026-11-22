@@ -30,7 +30,7 @@ struct LibraryLink: Hashable {
 /// Screens reached from the Library tab (all navigation uses values: mixing push styles in one
 /// stack makes iOS pop new pages straight back).
 enum ScreenLink: Hashable {
-    case favorites, collections, myList, notForMe, liveTV
+    case favorites, collections, animeLists, movieList, showList, notForMe, liveTV
 }
 
 struct PersonLink: Hashable {
@@ -83,7 +83,9 @@ extension View {
                     switch screen {
                     case .favorites: FavoritesView()
                     case .collections: CollectionsBrowser()
-                    case .myList: MyListView()
+                    case .animeLists: AnimeListsView()
+                    case .movieList: TitleListView(kind: .movies)
+                    case .showList: TitleListView(kind: .shows)
                     case .notForMe: NotForMeView()
                     case .liveTV: LiveTVView()
                     }
