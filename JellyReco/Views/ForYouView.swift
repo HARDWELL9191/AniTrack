@@ -707,8 +707,12 @@ struct ExternalDetailSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     ZStack(alignment: .bottomLeading) {
-                        RemoteImage(url: title.backdropURL ?? title.posterURL)
-                            .frame(height: 210).frame(maxWidth: .infinity).clipped()
+                        // The image fills a screen-wide, 210 pt box drawn over it: sized by its own
+                        // aspect, an AniList banner (about 5:1) made the box, and so the whole
+                        // sheet, ~1000 pt wide (cut off on both sides).
+                        Color.clear.frame(height: 210).frame(maxWidth: .infinity)
+                            .overlay { RemoteImage(url: title.backdropURL ?? title.posterURL) }
+                            .clipped()
                             .overlay(LinearGradient(colors: [.clear, Color(.systemBackground)], startPoint: .center, endPoint: .bottom))
                         HStack(alignment: .bottom, spacing: 14) {
                             RemoteImage(url: title.posterURL)

@@ -58,6 +58,20 @@ final class ListsUITests: XCTestCase {
         shot(app, "movie-list-sort")
     }
 
+    func testLongTitleDetails() {
+        let app = launch("lists-detail")
+        app.buttons["Open details"].firstMatch.tap()
+        sleep(4)
+        shot(app, "detail-long-title")
+        // The sheet must fit the screen: every text in it starts and ends inside the window.
+        let window = app.windows.firstMatch.frame
+        for view in app.textViews.allElementsBoundByIndex where view.exists {
+            print("RESULT detail text \(view.frame) window \(window)")
+            XCTAssertGreaterThanOrEqual(view.frame.minX, window.minX - 1, "Details sheet is wider than the screen")
+            XCTAssertLessThanOrEqual(view.frame.maxX, window.maxX + 1, "Details sheet is wider than the screen")
+        }
+    }
+
     func testPickCard() {
         let app = launch("lists-pick")
         shot(app, "anime-pick-card")

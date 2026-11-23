@@ -288,6 +288,8 @@ private struct ListsScreensHost: View {
     @Environment(AppModel.self) private var model
     let mode: String
     @State private var pick: Recommendation?
+    @State private var longTitle: ExternalTitle?
+    @State private var shownDetail: ExternalTitle?
     @State private var status = "loading"
 
     var body: some View {
@@ -296,6 +298,12 @@ private struct ListsScreensHost: View {
                 switch mode {
                 case "lists-anime": NavigationStack { AnimeListsView() }
                 case "lists-movies": NavigationStack { TitleListView(kind: .movies) }
+                case "lists-detail":
+                    // The details sheet for an anime from your lists (its wide AniList banner must not widen the sheet).
+                    Button("Open details") { shownDetail = longTitle }
+                        .buttonStyle(.glassProminent)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .sheet(item: $shownDetail) { ExternalDetailSheet(title: $0) }
                 default:
                     if let pick {
                         ScrollView {
@@ -340,6 +348,11 @@ private struct ListsScreensHost: View {
                                                 ageRatingCountry: "US", format: nil))
         })
         #endif
+        if mode == "lists-detail" {
+            let found = try? await client.run(Queries.browse, variables: ["page": 1, "perPage": 5, "search": "S Rank ni Natteta"], as: PageData.self)
+            guard let m = found?.page.media.first else { status = "FAIL: long title not found"; return }
+            longTitle = model.anilist.title(for: m)
+        }
         if let m = media.dropFirst(10).first {
             pick = Recommendation(media: m, score: 1, match: 87, because: [media[2].displayTitle(.english), media[5].displayTitle(.english)],
                                   sharedHighlights: Array((m.genres ?? []).prefix(3)))
