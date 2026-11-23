@@ -16,6 +16,8 @@ struct ForYouView: View {
     /// AniList category (Anime / Anime Movies libraries).
     @State private var aniCategory: AnimeCategory?
     @State private var showAllCategories = false
+    /// Pull to refresh started a rebuild that's still running (shown on the page, not by the spinner).
+    @State private var refreshing = false
 
     private var discovery: DiscoveryEngine { model.discovery }
     private var anilist: AniListService { model.anilist }
@@ -54,8 +56,10 @@ struct ForYouView: View {
             ScrollView {
                 VStack(spacing: 14) {
                     filterBar
+                    refreshingNote
                     content
                 }
+                .animation(.easeInOut, value: refreshing)
                 .padding(.top, 4)
                 .padding(.bottom)
             }
@@ -67,16 +71,25 @@ struct ForYouView: View {
             .refreshable {
                 index = 0
                 handled = 0
-                if let aniLibrary {
+                // The rebuild runs on its own and the spinner goes away at once: while iOS's pull-to-
+                // refresh spinner is up, taps miss what you aim at (Apple bug FB20997826), and a
+                // rebuild can take minutes when AniList rate-limits (each 429 waits up to 65 s).
+                // "Refreshing your picks…" shows on the page instead.
+                guard !refreshing else { return }
+                refreshing = true
+                let library = aniLibrary, category = aniCategory, source = sourceId
+                Task {
+                    defer { refreshing = false }
+                    // No libraries yet (the server wasn't reachable when the app opened, e.g. VPN
+                    // off): fetch them now, so the library menu fills in without restarting the app.
                     if model.libraries.isEmpty { await model.refreshSession() }
-                    await anilist.refreshList()
-                    await anilist.generate(aniLibrary, aniCategory, force: true)
-                    return
+                    if let library {
+                        await anilist.refreshList()
+                        await anilist.generate(library, category, force: true)
+                    } else {
+                        await discovery.build(source, genre: nil)
+                    }
                 }
-                // No libraries yet (the server wasn't reachable when the app opened, e.g. VPN off):
-                // fetch them now, so the library menu fills in without restarting the app.
-                if model.libraries.isEmpty { await model.refreshSession() }
-                await discovery.build(sourceId, genre: nil)
             }
             // Per account too: after switching accounts the library id (or "All") can stay the same.
             .task(id: "\(model.store.currentServerId ?? "")|\(model.client?.userId ?? "")|\(sourceId)|\(aniCategory?.id ?? "")|\(anilist.viewer?.id ?? 0)") {
@@ -217,6 +230,21 @@ struct ForYouView: View {
         guard let aniLibrary, let feed = anilist.feed(aniLibrary, aniCategory), !feed.exhausted,
               position >= list.count - 5 else { return }
         Task { await anilist.loadMore(aniLibrary, aniCategory) }
+    }
+
+    /// Under the dropdowns while a pull-to-refresh rebuild runs (the old picks stay usable).
+    @ViewBuilder
+    private var refreshingNote: some View {
+        if refreshing && !list.isEmpty {
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text("Refreshing your picks…")
+            }
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .accessibilityIdentifier("refreshing-picks")
+            .transition(.opacity)
+        }
     }
 
     @ViewBuilder
