@@ -5,6 +5,13 @@ export type Ticks = number; // 1 tick = 100 ns; 10,000,000 per second
 export const TICKS_PER_SECOND = 10_000_000;
 export const ticksToSeconds = (t?: number | null) => (t ?? 0) / TICKS_PER_SECOND;
 export const secondsToTicks = (s: number) => Math.round(s * TICKS_PER_SECOND);
+/** Jellyfin's "Specials" season (season 0, the Season 00 folder), which it lists first. */
+export const isSpecialsSeason = (s: { Type?: string | null; IndexNumber?: number | null }) => s.Type === "Season" && s.IndexNumber === 0;
+/** An episode in season 0 (a special, OP/ED, recap…). */
+export const isSpecialEpisode = (e: { Type?: string | null; ParentIndexNumber?: number | null }) => e.Type === "Episode" && e.ParentIndexNumber === 0;
+/** Seasons with Specials moved to the end. */
+export const specialsLast = <T extends { Type?: string | null; IndexNumber?: number | null }>(seasons: T[]) =>
+  [...seasons.filter((s) => !isSpecialsSeason(s)), ...seasons.filter(isSpecialsSeason)];
 
 export type ItemKind =
   | "AggregateFolder" | "Audio" | "AudioBook" | "BasePluginFolder" | "Book" | "BoxSet" | "Channel" | "ChannelFolderItem"

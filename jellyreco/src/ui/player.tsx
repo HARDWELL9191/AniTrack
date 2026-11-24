@@ -7,7 +7,7 @@ import { Select } from "./select";
 import type { PlayerController, PlayerState, TrackOption } from "../core/player";
 import { BITRATES, SPEEDS } from "../core/settings";
 import type { Item, MediaSegment } from "../core/types";
-import { ticksToSeconds } from "../core/types";
+import { specialsLast, ticksToSeconds } from "../core/types";
 import { cardImage, Cover, logoUrl, Range, Segmented } from "./components";
 import { audioBadge, bitrate, bytes, clock, episodeCode, languageName, runtime, videoBadges } from "./fmt";
 import { Icon } from "./icons";
@@ -651,7 +651,7 @@ function EpisodesPanel({ st, p, close }: { st: PlayerState; p: PlayerController;
   const current = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (!item.SeriesId) return;
-    void model.api!.seasons(item.SeriesId).then((r) => setSeasons(r.Items)).catch(() => {});
+    void model.api!.seasons(item.SeriesId).then((r) => setSeasons(specialsLast(r.Items))).catch(() => {});
   }, [item.SeriesId, model]);
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);

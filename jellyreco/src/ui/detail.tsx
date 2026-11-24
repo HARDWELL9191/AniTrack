@@ -7,7 +7,7 @@ import { LIST_FIELDS } from "../core/api";
 import { toggleMyList } from "./foryou";
 import { AccountStorage } from "../core/storage";
 import type { Item, MediaStream } from "../core/types";
-import { ticksToSeconds } from "../core/types";
+import { isSpecialsSeason, specialsLast, ticksToSeconds } from "../core/types";
 import {
   backdropUrl, cardImage, Chip, Cover, Dropdown, Empty, ErrorNote, isPlayable, ItemCard, ItemRow, logoUrl, Rating, Shelf, Spinner, useLoad,
 } from "./components";
@@ -244,9 +244,14 @@ function SeriesBody({ series }: { series: Item }) {
   const { data: seasons } = useLoad(() => model.api!.seasons(series.Id), [series.Id, model.dataVersion]);
   const { data: next } = useLoad(() => model.api!.nextUp({ seriesId: series.Id, limit: 1, enableResumable: true }), [series.Id, model.dataVersion]);
   const [seasonId, setSeasonId] = useState<string | null>(null);
-  const list = seasons?.Items ?? [];
+  const list = specialsLast(seasons?.Items ?? []);
   const nextEp = next?.Items[0];
-  const chosen = seasonId ?? nextEp?.SeasonId ?? list.find((s) => !s.UserData?.Played)?.Id ?? list[0]?.Id;
+  // The season you're watching, else the first one you haven't finished; Specials only once every
+  // season is watched.
+  const upSeason = list.find((s) => s.Id === nextEp?.SeasonId);
+  const regular = list.filter((s) => !isSpecialsSeason(s));
+  const chosen = seasonId ?? (upSeason && !isSpecialsSeason(upSeason) ? upSeason.Id : undefined)
+    ?? regular.find((s) => !s.UserData?.Played)?.Id ?? list.find((s) => !s.UserData?.Played)?.Id ?? list[0]?.Id;
   return (
     <>
       {nextEp && (

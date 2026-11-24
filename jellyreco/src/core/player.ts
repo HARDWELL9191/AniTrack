@@ -7,7 +7,7 @@ import { ApiError, type Jellyfin } from "./api";
 import { type Engine, type EngineEvent, getEngine } from "./engine";
 import type { Settings } from "./settings";
 import type { Chapter, Item, MediaSegment, MediaSource, MediaStream, TrickplayInfo } from "./types";
-import { secondsToTicks, ticksToSeconds } from "./types";
+import { isSpecialEpisode, secondsToTicks, ticksToSeconds } from "./types";
 import { mergeSegments, SKIP_DB_TYPES, skipDbSegments, skipLookup } from "./skipdb";
 import { aniListLibrary } from "./anilist";
 
@@ -209,7 +209,11 @@ export class PlayerController {
         const next = await api.nextUp({ seriesId: item.Id, limit: 1, enableResumable: true, disableFirstEpisode: false }).catch(() => null);
         const target = next?.Items[0]?.Id;
         let index = target ? eps.findIndex((e) => e.Id === target) : -1;
-        if (index < 0) index = Math.max(0, eps.findIndex((e) => !e.UserData?.Played));
+        // Nothing to continue: the first unwatched episode of the seasons, not a special (Jellyfin
+        // lists season 0 first).
+        if (index < 0) index = eps.findIndex((e) => !e.UserData?.Played && !isSpecialEpisode(e));
+        if (index < 0) index = eps.findIndex((e) => !e.UserData?.Played);
+        if (index < 0) index = Math.max(0, eps.findIndex((e) => !isSpecialEpisode(e)));
         return { queue: eps, index };
       }
       case "Season": {
