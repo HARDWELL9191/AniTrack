@@ -115,7 +115,7 @@ struct EpisodesStrip: View {
         .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
         .task {
             guard let client = model.client, let sid = controller.item.seriesId else { loading = false; return }
-            seasons = ((try? await client.seasons(seriesId: sid)) ?? []).filter { $0.locationType != "Virtual" }
+            seasons = ((try? await client.seasons(seriesId: sid)) ?? []).filter { $0.locationType != "Virtual" }.specialsLast()
         }
         .task(id: seasonId) {
             guard let client = model.client, let sid = controller.item.seriesId else { return }

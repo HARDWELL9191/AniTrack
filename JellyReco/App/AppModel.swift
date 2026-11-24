@@ -860,7 +860,9 @@ final class AppModel {
             return up
         }
         let eps = (try? await client.episodes(seriesId: seriesId, seasonId: item.kind == .season ? item.id : nil)) ?? []
-        return eps.first { !($0.userData?.played ?? false) } ?? eps.first
+        // A whole show starts with its seasons, not its specials (Jellyfin lists season 0 first).
+        let main = eps.filter { !$0.isSpecialEpisode }
+        return main.first { !$0.isPlayed } ?? eps.first { !$0.isPlayed } ?? main.first ?? eps.first
     }
 
     /// The next episodes (up to 50), fetched from this episode on instead of the whole series.

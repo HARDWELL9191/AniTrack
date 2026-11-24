@@ -516,11 +516,20 @@ struct ItemDetailView: View {
                 async let s = client.seasons(seriesId: full.id)
                 async let n = client.nextUp(seriesId: full.id, limit: 1, enableRewatching: true)
                 seasons = ((try? await s) ?? []).filter { (model.user?.configuration?.displayMissingEpisodes ?? false) || $0.locationType != "Virtual" }
+                    .specialsLast()
                 nextUp = (try? await n)?.first
+                // Opens on the season you're watching, else the first one you haven't finished;
+                // Specials only once every season is watched.
+                let regular = seasons.filter { !$0.isSpecialsSeason }
                 if selectedSeason == nil {
-                    selectedSeason = nextUp?.seasonId ?? seasons.first(where: { !model.isPlayed($0) })?.id ?? seasons.first?.id
+                    let upSeason = seasons.first { $0.id == nextUp?.seasonId }
+                    selectedSeason = (upSeason?.isSpecialsSeason == false ? upSeason?.id : nil)
+                        ?? regular.first(where: { !model.isPlayed($0) })?.id
+                        ?? seasons.first(where: { !model.isPlayed($0) })?.id
+                        ?? seasons.first?.id
                 }
-                if nextUp == nil { nextUp = try? await client.episodes(seriesId: full.id, limit: 1).first }
+                // Nothing started yet: Play starts the first season, not a special.
+                if nextUp == nil { nextUp = try? await client.episodes(seriesId: full.id, seasonId: regular.first?.id, limit: 1).first }
                 await loadEpisodes(force: true)
             case .season:
                 selectedSeason = full.id

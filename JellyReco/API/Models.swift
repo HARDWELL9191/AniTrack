@@ -375,6 +375,10 @@ struct BaseItem: Codable, Hashable, Identifiable {
     // MARK: Convenience
 
     var kind: ItemKind { type ?? .unknown }
+    /// Jellyfin's "Specials" season (season 0), which it lists first.
+    var isSpecialsSeason: Bool { kind == .season && indexNumber == 0 }
+    /// An episode in season 0 (a special, OP/ED, recap…).
+    var isSpecialEpisode: Bool { kind == .episode && parentIndexNumber == 0 }
     var displayName: String { name ?? "Untitled" }
     var isPlayed: Bool { userData?.played ?? false }
     var isFavorite: Bool { userData?.isFavorite ?? false }
@@ -750,4 +754,9 @@ enum Fmt {
         guard let value, value > 0 else { return nil }
         return String(format: "%.1f", value)
     }
+}
+
+extension Array where Element == BaseItem {
+    /// Seasons with Specials moved to the end (Jellyfin sorts it first, as season 0).
+    func specialsLast() -> [BaseItem] { filter { !$0.isSpecialsSeason } + filter(\.isSpecialsSeason) }
 }
