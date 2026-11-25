@@ -21,6 +21,7 @@ struct ItemDetailView: View {
     @State private var subtitleIndex: Int?
     @State private var expanded = false
     @State private var showMediaInfo = false
+    @State private var showIdentify = false
     /// The item and content version the page last loaded completely.
     @State private var loadedKey: String?
 
@@ -76,6 +77,9 @@ struct ItemDetailView: View {
                         Button(link.name, systemImage: "safari") { openURL(link.url) }
                     }
                     if model.isAdmin {
+                        if IdentifySheet.canIdentify(current) {
+                            Button("Identify", systemImage: "magnifyingglass") { showIdentify = true }
+                        }
                         Button("Refresh metadata", systemImage: "arrow.clockwise") { Task { await refreshMetadata() } }
                     }
                 } label: {
@@ -93,6 +97,7 @@ struct ItemDetailView: View {
         }
         // Track numbers belong to one version: another version starts from its defaults.
         .onChange(of: sourceIndex) { _, _ in audioIndex = nil; subtitleIndex = nil }
+        .sheet(isPresented: $showIdentify) { IdentifySheet(item: current) }
         .sheet(isPresented: $showMediaInfo) {
             MediaInfoSheet(item: current, sourceIndex: sourceIndex).presentationDetents([.medium, .large])
         }

@@ -39,6 +39,10 @@ struct UITestHost: View {
                 AniListRecoTestHost()
             } else if mode.hasPrefix("lists-") {
                 ListsScreensHost(mode: mode)
+            } else if mode == "identify" {
+                #if DEBUG
+                IdentifyTestHost()
+                #endif
             } else if mode == "subrender" {
                 SubtitleRenderHost(settings: model.settings)
             } else if mode == "fonttest" {
@@ -360,3 +364,30 @@ private struct ListsScreensHost: View {
         status = "ready"
     }
 }
+
+
+#if DEBUG
+/// The Identify sheet over a details page, with sample results (no server needed).
+private struct IdentifyTestHost: View {
+    @State private var shown = true
+    var body: some View {
+        Color.black.ignoresSafeArea()
+            .sheet(isPresented: $shown) {
+                IdentifySheet(testing: Self.item, fields: [
+                    .init(key: "Tmdb", label: "TheMovieDb Id"), .init(key: "Tvdb", label: "TheTVDB Id"), .init(key: "Imdb", label: "IMDb Id"),
+                ], matches: [
+                    Self.match(0, "WorldEnd: What Do You Do at the End of the World? Are You Busy? Will You Save Us?", 2017, "TheMovieDb", "Tmdb 70881"),
+                    Self.match(1, "Dalam Suka Dan Dusta", 2026, "TheMovieDb", "Tmdb 300123"),
+                ])
+            }
+    }
+    static let item: BaseItem = {
+        let json = #"{"Id":"s1","Name":"Dalam Suka Dan Dusta","Type":"Series","Path":"/media/anime/SukaSuka"}"#
+        return try! JSONCoding.decoder.decode(BaseItem.self, from: Data(json.utf8))
+    }()
+    static func match(_ i: Int, _ name: String, _ year: Int, _ provider: String, _ ids: String) -> IdentifySheet.Match {
+        .init(id: i, raw: Data("{}".utf8), name: name, year: year, provider: provider,
+              overview: "A sample overview for the identify results list, long enough to wrap onto a few lines.", imageURL: nil, ids: ids)
+    }
+}
+#endif
