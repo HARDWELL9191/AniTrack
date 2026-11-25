@@ -1,0 +1,219 @@
+Test Case '-[JellyRecoUITests.AniListRecoUITests testAniListPicks]' started.
+RESULT anilist: ANILIST PASS
+Test Case '-[JellyRecoUITests.AniListRecoUITests testAniListPicks]' passed (25.714 seconds).
+Test Case '-[JellyRecoUITests.FontFallbackUITests testSubtitleFontFallbacks]' started.
+RESULT fonttest: READY CT ～ -> PingFang SC / PingFangSC-Regular / /private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.1.434.0.08BZva/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc readable=true size=61473880
+RESULT fonttest: CT 〜 -> PingFang SC / PingFangSC-Regular / /private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.1.434.0.08BZva/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc readable=true size=61473880
+RESULT fonttest: CT ♪ -> Helvetica Neue / HelveticaNeue / /private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.1.434.0.08BZva/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/HelveticaNeue.ttc readable=true size=2207552
+RESULT fonttest: CT ♥ -> Apple Color Emoji / AppleColorEmoji / /private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.1.434.0.08BZva/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreAddition/AppleColorEmoji-160px.ttc readable=true size=139281528
+RESULT fonttest: CT ★ -> Hiragino Sans / HiraginoSans-W3 / /private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.1.434.0.08BZva/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/HiraginoKakuGothic.ttc readable=true size=41124384
+RESULT fonttest: CT → -> Hiragino Sans / HiraginoSans-W3 / /private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.1.434.0.08BZva/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/HiraginoKakuGothic.ttc readable=true size=41124384
+RESULT fonttest: CT ※ -> Helvetica Neue / HelveticaNeue / /private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.1.434.0.08BZva/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/HelveticaNeue.ttc readable=true size=2207552
+RESULT fonttest: CT ① -> Hiragino Sans / HiraginoSans-W3 / /private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.1.434.0.08BZva/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/HiraginoKakuGothic.ttc readable=true size=41124384
+RESULT fonttest: CT 「 -> PingFang SC / PingFangSC-Regular / /private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.1.434.0.08BZva/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc readable=true size=61473880
+RESULT fonttest: CT あ -> Hiragino Sans / HiraginoSans-W3 / /private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.1.434.0.08BZva/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/HiraginoKakuGothic.ttc readable=true size=41124384
+RESULT fonttest: CT 漢 -> PingFang SC / PingFangSC-Regular / /private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.1.434.0.08BZva/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc readable=true size=61473880
+RESULT fonttest: CT 们 -> PingFang SC / PingFangSC-Regular / /private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.1.434.0.08BZva/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc readable=true size=61473880
+RESULT fonttest: CT 한 -> Apple SD Gothic Neo / AppleSDGothicNeo-Regular / /private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.1.434.0.08BZva/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/AppleSDGothicNeo.ttc readable=true size=43118616
+RESULT fonttest: CT Ж -> Helvetica Neue / HelveticaNeue / /private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.1.434.0.08BZva/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/HelveticaNeue.ttc readable=true size=2207552
+RESULT fonttest: CT ạ -> Helvetica Neue / HelveticaNeue / /private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.1.434.0.08BZva/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/HelveticaNeue.ttc readable=true size=2207552
+RESULT fonttest: CT ש -> Arial Hebrew / ArialHebrew / /private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.1.434.0.08BZva/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/ArialHB.ttc readable=true size=116056
+RESULT fonttest: CT م -> Geeza Pro / GeezaPro / /private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.1.434.0.08BZva/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/GeezaPro.ttc readable=true size=967408
+RESULT fonttest: CT ส -> Thonburi / Thonburi / /private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.1.434.0.08BZva/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/Thonburi.ttc readable=true size=1503124
+RESULT fonttest: CT न -> Kohinoor Devanagari / KohinoorDevanagari-Regular / /private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.1.434.0.08BZva/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/LanguageSupport/Kohinoor.ttc readable=true size=824564
+RESULT fonttest: CT 😊 -> Apple Color Emoji / AppleColorEmoji / /private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.1.434.0.08BZva/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreAddition/AppleColorEmoji-160px.ttc readable=true size=139281528
+RESULT fonttest: CT ‼ -> Helvetica Neue / HelveticaNeue / /private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.1.434.0.08BZva/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/HelveticaNeue.ttc readable=true size=2207552
+RESULT fonttest: CT ❤ -> Apple Color Emoji / AppleColorEmoji / /private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.1.434.0.08BZva/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/CoreAddition/AppleColorEmoji-160px.ttc readable=true size=139281528
+RESULT fonttest: fonts=Helvetica Neue @ HelveticaNeue.ttc,HiraginoKakuGothic.ttc
+RESULT fonttest: [cplayer] List of enabled features: audiounit avfoundation bsd-fstatfs darwin ffmpeg gl glob glob-posix gpl iconv ios-gl libass libavdevice libbluray libdl libplacebo mac-thread-name moltenvk posix posix-shm uchardet videotoolbox-pl vo-avfoundation vulkan
+RESULT fonttest: [bdmv/bluray] Opening /Users/runner/Library/Developer/CoreSimulator/Devices/0A1B5EC5-2485-4F8E-B06B-1185D8E186C0/data/Containers/Data/Application/16D616DD-D388-4B7D-B4C6-CA1FB2EBD5ED/tmp/fonttest.srt
+RESULT fonttest: [file] Opening /Users/runner/Library/Developer/CoreSimulator/Devices/0A1B5EC5-2485-4F8E-B06B-1185D8E186C0/data/Containers/Data/Application/16D616DD-D388-4B7D-B4C6-CA1FB2EBD5ED/tmp/fonttest.srt
+RESULT fonttest: [cplayer] ○ Subs   --sid=2  'fonttest.srt' (subrip) [external]
+RESULT fonttest: [sub/ass] Using subtitle decoder srt
+RESULT fonttest: [sub/ass] libass API version: 0x1705000
+RESULT fonttest: [sub/ass] libass source: meson, commit: 0.17.5-0-g4a05d8127f525943ebf45fdc6497c9e665947f0d
+RESULT fonttest: [sub/ass] Shaper: FriBidi 1.0.16 (SIMPLE) HarfBuzz-ng 14.2.0 (COMPLEX)
+RESULT fonttest: [sub/ass] Setting up fonts...
+RESULT fonttest: [sub/ass] Loading font file '/Users/runner/Library/Developer/CoreSimulator/Devices/0A1B5EC5-2485-4F8E-B06B-1185D8E186C0/data/Containers/Data/Application/16D616DD-D388-4B7D-B4C6-CA1FB2EBD5ED/Library/Application Support/SubtitleFonts/HelveticaNeue.ttc'
+RESULT fonttest: [sub/ass] Loading font file '/Users/runner/Library/Developer/CoreSimulator/Devices/0A1B5EC5-2485-4F8E-B06B-1185D8E186C0/data/Containers/Data/Application/16D616DD-D388-4B7D-B4C6-CA1FB2EBD5ED/Library/Application Support/SubtitleFonts/HiraginoKakuGothic.ttc'
+RESULT fonttest: [sub/ass] Using font provider coretext
+RESULT fonttest: [sub/ass] Done.
+RESULT fonttest: [cplayer] ● Subs   --sid=2  'fonttest.srt' (subrip [Advanced Sub Station Alpha]) [external]
+RESULT fonttest: [sub/ass] fontselect: (Helvetica Neue, 700, 0) -> HelveticaNeue-Bold, 4, HelveticaNeue-Bold
+RESULT fonttest: [sub/ass] Glyph 0xFF5E not found, selecting one more font for (Helvetica Neue, 700, 0)
+RESULT fonttest: [sub/ass] Error opening font: '/private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.1.434.0.08BZva/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc', 0
+RESULT fonttest: [sub/ass] Error opening font: '/private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.1.434.0.08BZva/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc', 0
+RESULT fonttest: [sub/ass] Error opening font: '/private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.1.434.0.08BZva/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc', 0
+RESULT fonttest: [sub/ass] Error opening font: '/private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.1.434.0.08BZva/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc', 0
+RESULT fonttest: [sub/ass] Error opening font: '/private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.1.434.0.08BZva/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc', 0
+RESULT fonttest: [sub/ass] Error opening font: '/private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.1.434.0.08BZva/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc', 0
+RESULT fonttest: [sub/ass] fontselect: Using default font: (Helvetica Neue, 700, 0) -> /Users/runner/Library/Developer/CoreSimulator/Devices/0A1B5EC5-2485-4F8E-B06B-1185D8E186C0/data/Containers/Data/Application/16D616DD-D388-4B7D-B4C6-CA1FB2EBD5ED/Library/Application Support/SubtitleFallback/subfont.ttf, 0, (none)
+RESULT fonttest: [sub/ass] fontselect: (Helvetica Neue, 700, 0) -> /Users/runner/Library/Developer/CoreSimulator/Devices/0A1B5EC5-2485-4F8E-B06B-1185D8E186C0/data/Containers/Data/Application/16D616DD-D388-4B7D-B4C6-CA1FB2EBD5ED/Library/Application Support/SubtitleFallback/subfont.ttf, 0, (none)
+RESULT fonttest: [sub/ass] Glyph 0x266B not found, selecting one more font for (Helvetica Neue, 700, 0)
+RESULT fonttest: [sub/ass] fontselect: (Helvetica Neue, 700, 0) -> /private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.1.434.0.08BZva/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/HiraginoKakuGothic.ttc, -1, HiraginoSans-W6
+RESULT fonttest: [sub/ass] Glyph 0x2764 not found, selecting one more font for (Helvetica Neue, 700, 0)
+RESULT fonttest: [sub/ass] fontselect: Using default font: (Helvetica Neue, 700, 0) -> /Users/runner/Library/Developer/CoreSimulator/Devices/0A1B5EC5-2485-4F8E-B06B-1185D8E186C0/data/Containers/Data/Application/16D616DD-D388-4B7D-B4C6-CA1FB2EBD5ED/Library/Application Support/SubtitleFallback/subfont.ttf, 0, (none)
+RESULT fonttest: [sub/ass] fontselect: (Helvetica Neue, 700, 0) -> /Users/runner/Library/Developer/CoreSimulator/Devices/0A1B5EC5-2485-4F8E-B06B-1185D8E186C0/data/Containers/Data/Application/16D616DD-D388-4B7D-B4C6-CA1FB2EBD5ED/Library/Application Support/SubtitleFallback/subfont.ttf, 0, (none)
+RESULT fonttest: [sub/ass] Got a font face that already is available! Skipping.
+RESULT fonttest: [sub/ass] Glyph 0x2764 not found, broken font? Trying all charmaps
+RESULT fonttest: [sub/ass] Glyph 0x2764 not found in font for (Helvetica Neue, 700, 0)
+RESULT fonttest: [sub/ass] Glyph 0x4EEC not found, selecting one more font for (Helvetica Neue, 700, 0)
+RESULT fonttest: [sub/ass] Error opening font: '/private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.1.434.0.08BZva/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc', 0
+RESULT fonttest: [sub/ass] Error opening font: '/private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.1.434.0.08BZva/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc', 0
+RESULT fonttest: [sub/ass] Error opening font: '/private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.1.434.0.08BZva/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc', 0
+RESULT fonttest: [sub/ass] Error opening font: '/private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.1.434.0.08BZva/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc', 0
+RESULT fonttest: [sub/ass] Error opening font: '/private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.1.434.0.08BZva/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc', 0
+RESULT fonttest: [sub/ass] Error opening font: '/private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.1.434.0.08BZva/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc', 0
+RESULT fonttest: [sub/ass] fontselect: Using default font: (Helvetica Neue, 700, 0) -> /Users/runner/Library/Developer/CoreSimulator/Devices/0A1B5EC5-2485-4F8E-B06B-1185D8E186C0/data/Containers/Data/Application/16D616DD-D388-4B7D-B4C6-CA1FB2EBD5ED/Library/Application Support/SubtitleFallback/subfont.ttf, 0, (none)
+RESULT fonttest: [sub/ass] fontselect: (Helvetica Neue, 700, 0) -> /Users/runner/Library/Developer/CoreSimulator/Devices/0A1B5EC5-2485-4F8E-B06B-1185D8E186C0/data/Containers/Data/Application/16D616DD-D388-4B7D-B4C6-CA1FB2EBD5ED/Library/Application Support/SubtitleFallback/subfont.ttf, 0, (none)
+RESULT fonttest: [sub/ass] Got a font face that already is available! Skipping.
+RESULT fonttest: [sub/ass] Glyph 0x4EEC not found, broken font? Trying all charmaps
+RESULT fonttest: [sub/ass] Glyph 0x4EEC not found in font for (Helvetica Neue, 700, 0)
+RESULT fonttest: [sub/ass] Glyph 0x8FD9 not found, selecting one more font for (Helvetica Neue, 700, 0)
+RESULT fonttest: [sub/ass] Error opening font: '/private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.1.434.0.08BZva/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc', 0
+RESULT fonttest: [sub/ass] Error opening font: '/private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.1.434.0.08BZva/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc', 0
+RESULT fonttest: [sub/ass] Error opening font: '/private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.1.434.0.08BZva/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc', 0
+RESULT fonttest: [sub/ass] Error opening font: '/private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.1.434.0.08BZva/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc', 0
+RESULT fonttest: [sub/ass] Error opening font: '/private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.1.434.0.08BZva/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc', 0
+RESULT fonttest: [sub/ass] Error opening font: '/private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.1.434.0.08BZva/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/PrivateFrameworks/FontServices.framework/CorePrivate/PingFangUI.ttc', 0
+RESULT fonttest: [sub/ass] fontselect: Using default font: (Helvetica Neue, 700, 0) -> /Users/runner/Library/Developer/CoreSimulator/Devices/0A1B5EC5-2485-4F8E-B06B-1185D8E186C0/data/Containers/Data/Application/16D616DD-D388-4B7D-B4C6-CA1FB2EBD5ED/Library/Application Support/SubtitleFallback/subfont.ttf, 0, (none)
+RESULT fonttest: [sub/ass] fontselect: (Helvetica Neue, 700, 0) -> /Users/runner/Library/Developer/CoreSimulator/Devices/0A1B5EC5-2485-4F8E-B06B-1185D8E186C0/data/Containers/Data/Application/16D616DD-D388-4B7D-B4C6-CA1FB2EBD5ED/Library/Application Support/SubtitleFallback/subfont.ttf, 0, (none)
+RESULT fonttest: [sub/ass] Got a font face that already is available! Skipping.
+RESULT fonttest: [sub/ass] Glyph 0x8FD9 not found, broken font? Trying all charmaps
+RESULT fonttest: [sub/ass] Glyph 0xD55C not found, selecting one more font for (Helvetica Neue, 700, 0)
+RESULT fonttest: [sub/ass] fontselect: (Helvetica Neue, 700, 0) -> /private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.1.434.0.08BZva/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/AppleSDGothicNeo.ttc, -1, AppleSDGothicNeo-Bold
+RESULT fonttest: [sub/ass] Glyph 0x5E9 not found, selecting one more font for (Helvetica Neue, 700, 0)
+RESULT fonttest: [sub/ass] fontselect: (Helvetica Neue, 700, 0) -> /private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.1.434.0.08BZva/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/ArialHB.ttc, -1, ArialHebrew-Bold
+RESULT fonttest: [sub/ass] Glyph 0x645 not found, selecting one more font for (Helvetica Neue, 700, 0)
+RESULT fonttest: [sub/ass] fontselect: (Helvetica Neue, 700, 0) -> /private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.1.434.0.08BZva/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/GeezaPro.ttc, -1, GeezaPro-Bold
+RESULT fonttest: [sub/ass] Glyph 0xE2A not found, selecting one more font for (Helvetica Neue, 700, 0)
+RESULT fonttest: [sub/ass] fontselect: (Helvetica Neue, 700, 0) -> /private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.1.434.0.08BZva/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/Thonburi.ttc, -1, Thonburi-Bold
+RESULT fonttest: [sub/ass] Glyph 0x928 not found, selecting one more font for (Helvetica Neue, 700, 0)
+RESULT fonttest: [sub/ass] fontselect: (Helvetica Neue, 700, 0) -> /private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.1.434.0.08BZva/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/LanguageSupport/Kohinoor.ttc, -1, KohinoorDevanagari-Semibold
+RESULT fonttest: [sub/ass] Glyph 0x1F60A not found, selecting one more font for (Helvetica Neue, 700, 0)
+RESULT fonttest: [sub/ass] fontselect: (Helvetica Neue, 700, 0) -> /private/var/run/com.apple.security.cryptexd/mnt/com.apple.iPhoneOS.SimulatorRuntime-v24.1.434.0.08BZva/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot/System/Library/Fonts/Core/LastResort.otf, -1, LastResort
+RESULT fonttest: [sub/ass] Event height has changed
+Test Case '-[JellyRecoUITests.FontFallbackUITests testSubtitleFontFallbacks]' passed (28.180 seconds).
+Test Case '-[JellyRecoUITests.IdentifyUITests testIdentifySheet]' started.
+Test Case '-[JellyRecoUITests.IdentifyUITests testIdentifySheet]' passed (24.878 seconds).
+Test Case '-[JellyRecoUITests.ListsUITests testAnimeLists]' started.
+RESULT lists lists-anime: LISTS ready
+Test Case '-[JellyRecoUITests.ListsUITests testAnimeLists]' passed (51.461 seconds).
+Test Case '-[JellyRecoUITests.ListsUITests testLongTitleDetails]' started.
+RESULT lists lists-detail: LISTS ready
+RESULT detail text (126.0, 148.0, 260.0, 72.0) window (0.0, 0.0, 402.0, 874.0)
+RESULT detail text (126.0, 224.0, 260.0, 32.0) window (0.0, 0.0, 402.0, 874.0)
+RESULT detail text (16.0, 430.0, 370.0, 200.0) window (0.0, 0.0, 402.0, 874.0)
+RESULT detail text (126.0, 148.0, 258.36779594421387, 71.6015625) window (0.0, 0.0, 402.0, 874.0)
+RESULT detail text (126.0, 224.0, 249.52734375, 32.0) window (0.0, 0.0, 402.0, 874.0)
+RESULT detail text (16.0, 430.0, 360.97412109375, 160.0) window (0.0, 0.0, 402.0, 874.0)
+RESULT detail text (16.0, 610.0, 145.80322265625, 20.0) window (0.0, 0.0, 402.0, 874.0)
+Test Case '-[JellyRecoUITests.ListsUITests testLongTitleDetails]' passed (24.099 seconds).
+Test Case '-[JellyRecoUITests.ListsUITests testMovieList]' started.
+RESULT lists lists-movies: LISTS ready
+Test Case '-[JellyRecoUITests.ListsUITests testMovieList]' passed (27.786 seconds).
+Test Case '-[JellyRecoUITests.ListsUITests testPickCard]' started.
+RESULT lists lists-pick: LISTS ready
+Test Case '-[JellyRecoUITests.ListsUITests testPickCard]' passed (16.727 seconds).
+Test Case '-[JellyRecoUITests.SettingsPagesUITests testDashboardMenuLikeDesktop]' started.
+RESULT dashboard missing items: []
+Test Case '-[JellyRecoUITests.SettingsPagesUITests testDashboardMenuLikeDesktop]' passed (40.514 seconds).
+Test Case '-[JellyRecoUITests.SettingsPagesUITests testLongPressPreviewKeepsText]' started.
+RESULT server age bubble: 13+
+RESULT long press menu shown: true
+Test Case '-[JellyRecoUITests.SettingsPagesUITests testLongPressPreviewKeepsText]' passed (17.951 seconds).
+Test Case '-[JellyRecoUITests.SettingsPagesUITests testSettingsSectionsLikeDesktop]' started.
+RESULT settings missing: []
+Test Case '-[JellyRecoUITests.SettingsPagesUITests testSettingsSectionsLikeDesktop]' passed (104.470 seconds).
+Test Case '-[JellyRecoUITests.SettingsPagesUITests testStartScreenBranding]' started.
+Test Case '-[JellyRecoUITests.SettingsPagesUITests testStartScreenBranding]' passed (14.110 seconds).
+Test Case '-[JellyRecoUITests.SettingsPagesUITests testTranscodingQuickSyncLikeJellyfin]' started.
+RESULT transcoding qsv switch H264: 1 (expected 1)
+RESULT transcoding qsv switch HEVC: 1 (expected 1)
+RESULT transcoding qsv switch MPEG2: 1 (expected 1)
+RESULT transcoding qsv switch VC1: 1 (expected 1)
+RESULT transcoding qsv switch VP8: 0 (expected 0)
+RESULT transcoding qsv switch VP9: 1 (expected 1)
+RESULT transcoding qsv switch AV1: 1 (expected 1)
+RESULT transcoding qsv switch HEVC 10bit: 1 (expected 1)
+RESULT transcoding qsv switch VP9 10bit: 1 (expected 1)
+RESULT VP8 after tap: 1; H264 still 1
+RESULT dropdown label: Hardware acceleration, Intel Quicksync (QSV) value:  frame (175.33333333333334, 345.0, 194.66666666666666, 34.333333333333314) title frame (32.0, 341.0, 93.33333333333333, 42.333333333333314)
+RESULT after NVENC: MPEG4 true, NVDEC true, Save enabled true
+Test Case '-[JellyRecoUITests.SettingsPagesUITests testTranscodingQuickSyncLikeJellyfin]' passed (82.918 seconds).
+Test Case '-[JellyRecoUITests.SubtitleRenderUITests testPictureSubtitlesOnNativeLayer]' started.
+RESULT subrender render_pgs.mkv native: 0 caption pixels | READY output=native codec=hdmv_pgs_subtitle nativeSubtitles=unknown at=4.5 seconds frame=noframe,brightpx:0(BGRA 736x1600) best=brightpx:0 all=-1/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0 log=[ffmpeg/video] h264: no frame! || [ffmpeg] Vulkan: Unable to open the libvulkan library! || [ffmpeg/video] h264: Failed setup for format videotoolbox_vld: hwaccel initialisation returned error. || [ffmpeg/video] h264: no frame! || [cplayer] VO: [avfoundation] 1280x720 yuv420p || [vo/avfoundation] MPVUI_NATIVE_DOLBY_VISION_CLEARED: non-Dolby-Vision frame || [cplayer] Track switched: || [cplayer] ● Video  --vid=1  (h264 [Constrained Baseline] 1280x720 24 fps) || [cplayer] ● Subs   --sid=1  (hdmv_pgs_subtitle) || [vo/avfoundation] MPVUI_NATIVE_DOLBY_VISION_CLEARED: non-Dolby-Vision frame || [vo/avfoundation] Failed to get upload buffer: -6689 || [vo/avfoundation] Failed to upload software frame
+RESULT subrender render_dvb.ts native: 0 caption pixels | READY output=native codec=dvb_subtitle nativeSubtitles=available at=5.916666333333334 seconds frame=brightpx:0(420v 1280x720),brightpx:0(BGRA 736x1600) best=brightpx:0 all=0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0 log=[cplayer] ● Video  --vid=1  (mpeg2video 1280x720 24 fps) || [cplayer] ○ Subs   --sid=1  (dvb_subtitle) || [vo/avfoundation] Subtitles drawn on the subtitle layer (736x1600) || [cplayer] VO: [avfoundation] 1280x720 yuv420p || [vo/avfoundation] MPVUI_NATIVE_DOLBY_VISION_CLEARED: non-Dolby-Vision frame || [cplayer] Track switched: || [cplayer] ● Video  --vid=1  (mpeg2video [Main] 1280x720 24 fps) || [cplayer] ● Subs   --sid=1  (dvb_subtitle) || [vo/avfoundation] MPVUI_NATIVE_DOLBY_VISION_CLEARED: non-Dolby-Vision frame
+RESULT subrender render_vobsub.mkv native: 8704 caption pixels | READY output=native codec=dvd_subtitle nativeSubtitles=available at=4294967.295 seconds frame=brightpx:0(420v 1280x720),brightpx:8704(BGRA 736x1600) best=brightpx:8704 all=8704/8704/8704/8704/8704/8704/8704/8704/8704/8704/8704/8704/8704/8704/8704/8704/8704/8704/8704/8704/8704/8704/8704/8704/8704/8704/8704/8704/8704/8704/8704/8704/8704/8704/8704/8704/8704/8704/8704/8704 log=[vo/avfoundation] Subtitles drawn on the subtitle layer (736x1600) || [ffmpeg/video] h264: Failed setup for format videotoolbox_vld: hwaccel initialisation returned error. || [ffmpeg/video] h264: no frame! || [ffmpeg] Vulkan: Unable to open the libvulkan library! || [ffmpeg/video] h264: Failed setup for format videotoolbox_vld: hwaccel initialisation returned error. || [ffmpeg/video] h264: no frame! || [cplayer] Track switched: || [cplayer] ● Video  --vid=1  (h264 1280x720 24 fps) || [cplayer] ● Subs   --sid=1  (dvd_subtitle) || [cplayer] VO: [avfoundation] 1280x720 yuv420p || [vo/avfoundation] MPVUI_NATIVE_DOLBY_VISION_CLEARED: non-Dolby-Vision frame || [vo/avfoundation] MPVUI_NATIVE_DOLBY_VISION_CLEARED: non-Dolby-Vision frame
+RESULT subrender render_ass_colored.mkv native: 0 caption pixels | READY output=native codec=ass nativeSubtitles=unknown at=5.0 seconds frame=brightpx:0(420v 1280x720),brightpx:0(BGRA 736x1600) best=brightpx:0 all=-1/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0 log=[vo/avfoundation] Subtitles drawn on the subtitle layer (736x1600) || [ffmpeg/video] h264: Failed setup for format videotoolbox_vld: hwaccel initialisation returned error. || [ffmpeg/video] h264: no frame! || [ffmpeg] Vulkan: Unable to open the libvulkan library! || [ffmpeg/video] h264: Failed setup for format videotoolbox_vld: hwaccel initialisation returned error. || [ffmpeg/video] h264: no frame! || [cplayer] Track switched: || [cplayer] ● Video  --vid=1  (h264 [Constrained Baseline] 1280x720 24 fps) || [cplayer] ● Subs   --sid=1  (ass) || [cplayer] VO: [avfoundation] 1280x720 yuv420p || [vo/avfoundation] MPVUI_NATIVE_DOLBY_VISION_CLEARED: non-Dolby-Vision frame || [vo/avfoundation] MPVUI_NATIVE_DOLBY_VISION_CLEARED: non-Dolby-Vision frame
+Test Case '-[JellyRecoUITests.SubtitleRenderUITests testPictureSubtitlesOnNativeLayer]' passed (115.492 seconds).
+Test Case '-[JellyRecoUITests.TMDBKeyCardUITests testFakeKeyShowsTMDBError]' started.
+RESULT fake key: error shown -> TMDB didn't accept the key: Invalid API key: You must be granted a valid key.. Paste the API Read Access Token (the long one) or the API key.
+Test Case '-[JellyRecoUITests.TMDBKeyCardUITests testFakeKeyShowsTMDBError]' passed (29.205 seconds).
+Test Case '-[JellyRecoUITests.TMDBKeyCardUITests testOldBugReproduces]' started.
+RESULT old bug: card STILL SHOWN, no error (= reported symptom); STATE: For You sees no key
+Test Case '-[JellyRecoUITests.TMDBKeyCardUITests testOldBugReproduces]' passed (32.395 seconds).
+Test Case '-[JellyRecoUITests.TMDBKeyCardUITests testValidKeyStartsForYou]' started.
+RESULT valid key: card replaced by For You; STATE: For You sees the key
+Test Case '-[JellyRecoUITests.TMDBKeyCardUITests testValidKeyStartsForYou]' passed (21.057 seconds).
+** TEST SUCCEEDED **
+    t =    11.88s     Checking `Expect predicate `existsNoRetry == 1` for object SecureTextField (First Match)`
+    t =    11.88s         Checking existence of `SecureTextField (First Match)`
+    t =    12.35s Tap SecureTextField (First Match)
+    t =    12.35s     Wait for com.tim.jellyreco to idle
+    t =    12.35s     Find the SecureTextField (First Match)
+    t =    12.75s     Check for interrupting elements affecting "TMDB API key or read access token" SecureTextField
+    t =    12.86s     Synthesize event
+    t =    13.24s     Wait for com.tim.jellyreco to idle
+<unknown>:0: warning: -[JellyRecoUITests.TMDBKeyCardUITests testValidKeyStartsForYou] : Invalid frame dimension (negative or non-finite).
+    t =    14.19s Type 'uitestvalidkey0000...' into "TMDB API key or read access token" SecureTextField
+    t =    14.20s     Wait for com.tim.jellyreco to idle
+    t =    14.94s     Find the "TMDB API key or read access token" SecureTextField
+    t =    15.74s     Check for interrupting elements affecting "TMDB API key or read access token" SecureTextField
+    t =    15.91s     Synthesize event
+    t =    16.71s     Wait for com.tim.jellyreco to idle
+    t =    16.72s Find the Target Application 'com.tim.jellyreco'
+    t =    17.03s Added attachment named 'foryou-1-typed'
+    t =    17.03s Waiting 5.0s for "Save and find picks" Button to exist
+    t =    18.06s     Checking `Expect predicate `existsNoRetry == 1` for object "Save and find picks" Button`
+    t =    18.06s         Checking existence of `"Save and find picks" Button`
+    t =    18.16s Tap "Save and find picks" Button
+    t =    18.16s     Wait for com.tim.jellyreco to idle
+    t =    18.17s     Find the "Save and find picks" Button
+    t =    18.27s     Check for interrupting elements affecting "Save and find picks" Button
+    t =    18.34s     Synthesize event
+    t =    18.36s         Scroll element to visible
+    t =    18.37s         Find the "Save and find picks" Button
+    t =    18.55s         Computed hit point {65.800000503659248, 382.166666738689} after scrolling to visible
+    t =    18.85s     Wait for com.tim.jellyreco to idle
+    t =    19.32s Waiting 10.0s for SecureTextField (First Match) to not exist
+    t =    20.37s     Checking `Expect predicate `existsNoRetry == 0` for object SecureTextField (First Match)`
+    t =    20.37s         Checking existence of `SecureTextField (First Match)`
+    t =    20.53s Find the Target Application 'com.tim.jellyreco'
+    t =    20.76s Added attachment named 'valid-key-after'
+    t =    20.76s Find the "tmdb-state" StaticText
+RESULT valid key: card replaced by For You; STATE: For You sees the key
+    t =    20.81s Tear Down
+Test Case '-[JellyRecoUITests.TMDBKeyCardUITests testValidKeyStartsForYou]' passed (21.057 seconds).
+Test Suite 'TMDBKeyCardUITests' passed at 2026-11-25 08:09:38.027.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 82.657 (82.660) seconds
+Test Suite 'JellyRecoUITests.xctest' passed at 2026-11-25 08:09:38.028.
+	 Executed 16 tests, with 0 failures (0 unexpected) in 656.958 (657.002) seconds
+Test Suite 'All tests' passed at 2026-11-25 08:09:38.028.
+	 Executed 16 tests, with 0 failures (0 unexpected) in 656.958 (657.013) seconds
+2026-11-25 08:09:38.134 xcodebuild[9063:28603] [MT] IDESchemeActionSDKRecord: operatingSystemBuild = <DVTBuildVersion 24A94232>, error = invalidDigitCount(94232).
+2026-11-25 08:09:38.135 xcodebuild[9063:28603] [MT] IDESchemeActionSDKRecord: operatingSystemBuild = <DVTBuildVersion 24A94232>, error = invalidDigitCount(94232).
+2026-11-25 08:09:38.137 xcodebuild[9063:28603] [MT] IDESchemeActionSDKRecord: operatingSystemBuild = <DVTBuildVersion 24A94232>, error = invalidDigitCount(94232).
+2026-11-25 08:09:38.364 xcodebuild[9063:28603] [MT] IDESchemeActionSDKRecord: operatingSystemBuild = <DVTBuildVersion 24A94232>, error = invalidDigitCount(94232).
+2026-11-25 08:09:38.365 xcodebuild[9063:28603] [MT] IDESchemeActionSDKRecord: operatingSystemBuild = <DVTBuildVersion 24A94232>, error = invalidDigitCount(94232).
+2026-11-25 08:09:38.382 xcodebuild[9063:28603] [MT] IDESchemeActionSDKRecord: operatingSystemBuild = <DVTBuildVersion 24A94232>, error = invalidDigitCount(94232).
+2026-11-25 08:10:22.648 xcodebuild[9063:28603] [MT] IDETestOperationsObserverDebug: 739.529 elapsed -- Testing started completed.
+2026-11-25 08:10:22.650 xcodebuild[9063:28603] [MT] IDETestOperationsObserverDebug: 0.000 sec, +0.000 sec -- start
+2026-11-25 08:10:22.650 xcodebuild[9063:28603] [MT] IDETestOperationsObserverDebug: 739.529 sec, +739.529 sec -- end
+
+Test session results, code coverage, and logs:
+	/Users/runner/work/AniTrack/AniTrack/uitest.xcresult
+
+** TEST SUCCEEDED **
+
+Testing started
