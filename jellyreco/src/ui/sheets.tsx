@@ -332,8 +332,12 @@ function EditImages({ item, close }: { item: Item; close: () => void }) {
 function Identify({ item, close }: { item: Item; close: () => void }) {
   const model = useModel();
   const [name, setName] = useState(item.Name ?? "");
-  const [year, setYear] = useState(item.ProductionYear ? String(item.ProductionYear) : "");
-  const [ids, setIds] = useState<Record<string, string>>(() => Object.fromEntries(Object.entries(item.ProviderIds ?? {}).map(([k, v]) => [k, v ?? ""])));
+  // Empty, as on the web: the wrong match's year would filter out the right one.
+  const [year, setYear] = useState("");
+  // As on Jellyfin's web app: an empty field per provider the server has (a wrong id left in would
+  // just find the same wrong match again).
+  const [ids, setIds] = useState<Record<string, string>>({});
+  const { data: idFields } = useLoad(() => model.api!.get<{ Name: string; Key: string; Type?: string | null }[]>(`/Items/${item.Id}/ExternalIdInfos`), [item.Id]);
   const [results, setResults] = useState<RemoteSearchResult[] | null>(null);
   const [replaceImages, setReplaceImages] = useState(true);
   const { busy, run } = useAction();
@@ -355,7 +359,7 @@ function Identify({ item, close }: { item: Item; close: () => void }) {
       <form className="form grid-2" onSubmit={(e) => { e.preventDefault(); void search(); }}>
         <Field label="Name"><input value={name} onChange={(e) => setName(e.target.value)} /></Field>
         <Field label="Year"><input value={year} onChange={(e) => setYear(e.target.value)} /></Field>
-        {Object.keys(ids).length > 0 && Object.keys(ids).map((k) => <Field key={k} label={`${k} id`}><input value={ids[k]} onChange={(e) => setIds({ ...ids, [k]: e.target.value })} /></Field>)}
+        {(idFields ?? []).map((f) => <Field key={`${f.Key}${f.Type ?? ""}`} label={`${f.Name}${f.Type ? ` ${f.Type}` : ""} Id`}><input value={ids[f.Key] ?? ""} onChange={(e) => setIds({ ...ids, [f.Key]: e.target.value })} /></Field>)}
         <Toggle label="Replace existing images" checked={replaceImages} onChange={setReplaceImages} />
         <button className="glass-button prominent" disabled={busy}>{busy ? <span className="spinner small" /> : "Search"}</button>
       </form>
